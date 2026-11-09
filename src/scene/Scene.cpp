@@ -55,6 +55,8 @@ const SceneObject& Scene::GetObject(ObjectId id) const {
 
 bool Scene::Contains(ObjectId id) const noexcept { return objects_.contains(id); }
 
+void Scene::SetName(ObjectId id, std::string name) { (void)GetObject(id); objects_.at(id).Name = std::move(name); }
+
 void Scene::SetParent(ObjectId id, ObjectId parent) {
     (void)GetObject(id);
     for (auto ancestor = parent; ancestor; ancestor = GetObject(ancestor).Parent) {

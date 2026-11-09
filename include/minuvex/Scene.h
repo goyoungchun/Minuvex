@@ -56,6 +56,8 @@ public:
     const SceneObject& GetObject(ObjectId id) const;
     bool Contains(ObjectId id) const noexcept;
     std::size_t Size() const noexcept { return objects_.size(); }
+    std::vector<ObjectId> ObjectIds() const { return order_; } // Creation order, including empty/hidden objects.
+    void SetName(ObjectId id, std::string name);
     void SetParent(ObjectId id, ObjectId parent); // Keeps local TRS; rejects cycles.
     void SetTransform(ObjectId id, const Transform& transform);
     void SetVisible(ObjectId id, bool visible);

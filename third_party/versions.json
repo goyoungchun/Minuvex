@@ -1,4 +1,20 @@
 {
+  "nlohmann_json": {
+    "source": "https://github.com/nlohmann/json",
+    "revision": "v3.12.0",
+    "license": "MIT (json/LICENSE.MIT)",
+    "file": "json/json.hpp",
+    "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63"
+  },
+  "imgui": {
+    "source": "https://github.com/ocornut/imgui",
+    "version": "v1.92.5-docking",
+    "revision": "af84778eeaab75bee0b54420f3157cf3ee00618f",
+    "revisionType": "immutable annotated-tag object",
+    "license": "MIT (fetched source LICENSE.txt)",
+    "archiveSha256": "60f709af3e53ef89874eba3162f4426f87beb5fd0682a681cc3189f0d7d246ad",
+    "build": "cmake/Editor.cmake (Editor only)"
+  },
   "cgltf": {
     "source": "https://github.com/jkuhlmann/cgltf",
     "revision": "85cd62382dfea638278962690cf515023f33ed00",
