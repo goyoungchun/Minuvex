@@ -31,6 +31,7 @@ Result<void> Ready(const detail::ViewerState& state) {
     }
     try { detail::ValidateViewerOptions(state.Options); }
     catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument, "Correct ViewerOptions before constructing the Viewer.")); }
+    const auto quality=ExpandQuality(state.Options.Quality);if (!quality) {return Result<void>::Failure(quality.Error());}
     return Result<void>::Success();
 }
 Result<void> ObjectReady(const detail::ViewerState& state, ObjectId id) {
@@ -43,6 +44,19 @@ Result<void> ObjectReady(const detail::ViewerState& state, ObjectId id) {
 
 Viewer::Viewer(ViewerOptions options) : state_(std::make_unique<detail::ViewerState>(std::move(options))) {}
 Viewer::~Viewer() = default;
+Result<void> Viewer::SetQuality(const QualityProfile& profile) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}const auto expanded=ExpandQuality(profile);if (!expanded) {return Result<void>::Failure(expanded.Error());}
+    if (state_->ApplyQuality) {return state_->ApplyQuality(profile);}
+    QualityState next;next.Requested=profile;next.RequestedSettings=expanded.Value();state_->Quality=std::move(next);state_->Options.Quality=profile;return Result<void>::Success();
+}
+Result<QualityState> Viewer::GetQuality() const {auto ready=Ready(*state_);if (!ready) {return Result<QualityState>::Failure(ready.Error());}return Result<QualityState>::Success(state_->Quality);}
+Result<QualityCapabilities> Viewer::GetQualityCapabilities() const {
+    auto ready=Ready(*state_);if (!ready) {return Result<QualityCapabilities>::Failure(ready.Error());}
+    if (!detail::GraphicsRuntimeAvailable()) {return Result<QualityCapabilities>::Failure({ErrorCode::UnsupportedFeature,"This build has no graphics runtime.","Use the renderer build to query device quality capabilities.",{}});}
+    if (!state_->Running.load() || !state_->Quality.Capabilities.GraphicsAvailable) {return Result<QualityCapabilities>::Failure({ErrorCode::InvalidState,"Quality capabilities require an active graphics context.","Query inside OnFrame or inspect the staged requested profile before Run.",{}});}
+    return Result<QualityCapabilities>::Success(state_->Quality.Capabilities);
+}
+Result<void> Viewer::RequestRedraw() {auto ready=Ready(*state_);if (!ready) {return ready;}if (state_->Invalidate) {state_->Invalidate();}return Result<void>::Success();}
 Scene& Viewer::GetScene() noexcept { return state_->World; }
 const Scene& Viewer::GetScene() const noexcept { return state_->World; }
 

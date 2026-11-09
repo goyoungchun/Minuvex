@@ -18,7 +18,7 @@ MeshRenderer::~MeshRenderer() {
     Shutdown();
 }
 
-void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinned) {
+void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinned, int samples) {
     if (vertices_.id || indices_.id || shader_.id || pipelines_[0].id) {
         throw std::logic_error("MeshRenderer is already initialized.");
     }
@@ -49,6 +49,7 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
 
     sg_pipeline_desc pipelineDesc{};
     pipelineDesc.shader = shader_;
+    pipelineDesc.sample_count=samples;
     pipelineDesc.layout.buffers[0].stride = sizeof(Vertex);
     pipelineDesc.layout.attrs[ATTR_mesh_position].format = SG_VERTEXFORMAT_FLOAT3;
     pipelineDesc.layout.attrs[ATTR_mesh_position].offset = offsetof(Vertex, Position);
@@ -103,7 +104,7 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
 }
 
 void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const DirectionalLight& light,
-                        const MaterialAsset& material, sg_view texture, sg_sampler sampler, std::span<const Mat4> palette) const {
+                        const MaterialAsset& material, sg_view texture, sg_sampler sampler, std::span<const Mat4> palette, bool forceUnlit) const {
     if (!pipelines_[0].id) {
         throw std::logic_error("Initialize MeshRenderer before drawing.");
     }
@@ -116,7 +117,7 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     fragment.base_color = {material.BaseColor[0], material.BaseColor[1], material.BaseColor[2], material.BaseColor[3]};
     fragment.light_direction = {static_cast<float>(-light.Direction.X/length), static_cast<float>(-light.Direction.Y/length), static_cast<float>(-light.Direction.Z/length), light.Intensity};
     fragment.light_color = {light.Color.X, light.Color.Y, light.Color.Z, light.Ambient};
-    fragment.options = {material.AlphaCutoff, material.Unlit ? 1.0f : 0.0f, 0, 0};
+    fragment.options = {material.AlphaCutoff, material.Unlit || forceUnlit ? 1.0f : 0.0f, 0, 0};
     sg_bindings bindings{};
     bindings.vertex_buffers[0] = vertices_;
     bindings.index_buffer = indices_;

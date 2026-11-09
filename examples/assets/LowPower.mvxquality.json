@@ -1,0 +1,13 @@
+{
+  "format": "MinuvexQuality",
+  "version": 1,
+  "name": "LowPower",
+  "baseProfile": "low",
+  "allowFallback": false,
+  "overrides": {
+    "resolutionScale": 0.75,
+    "msaaSamples": 1,
+    "targetFps": 30,
+    "onDemandRendering": "auto"
+  }
+}

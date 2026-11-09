@@ -1,6 +1,7 @@
 #include "renderer/SceneRenderer.h"
 
 #include "renderer/MeshRenderer.h"
+#include "renderer/TextureData.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,53 +18,15 @@ sg_wrap Wrap(TextureWrap mode) {
     }
 }
 
-float ToLinear(float value) { return value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f); }
-float ToSrgb(float value) { return value <= 0.0031308f ? value * 12.92f : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f; }
-
-std::vector<std::uint8_t> PackMipmaps(const ImageAsset& image, int& levels) {
-    auto pixels = image.Rgba;
-    auto previous = image.Rgba;
-    int width = image.Width, height = image.Height;
-    levels = 1;
-    while (width > 1 || height > 1) {
-        const int nextWidth = std::max(1, width / 2), nextHeight = std::max(1, height / 2);
-        std::vector<std::uint8_t> next(static_cast<std::size_t>(nextWidth) * nextHeight * 4);
-        for (int y = 0; y < nextHeight; ++y) {
-            for (int x = 0; x < nextWidth; ++x) {
-                float sum[4]{};
-                int samples = 0;
-                for (int sy = y * height / nextHeight; sy < (y + 1) * height / nextHeight; ++sy) {
-                    for (int sx = x * width / nextWidth; sx < (x + 1) * width / nextWidth; ++sx) {
-                        const auto offset = (static_cast<std::size_t>(sy) * width + sx) * 4;
-                        for (int c = 0; c < 4; ++c) {
-                            const float value = previous[offset + c] / 255.0f;
-                            sum[c] += c < 3 ? ToLinear(value) : value;
-                        }
-                        ++samples;
-                    }
-                }
-                for (int c = 0; c < 4; ++c) {
-                    float value = sum[c] / static_cast<float>(samples);
-                    if (c < 3) { value = ToSrgb(value); }
-                    next[(static_cast<std::size_t>(y) * nextWidth + x) * 4 + c] = static_cast<std::uint8_t>(std::clamp(std::lround(value * 255), 0L, 255L));
-                }
-            }
-        }
-        pixels.insert(pixels.end(), next.begin(), next.end());
-        previous = std::move(next);
-        width = nextWidth; height = nextHeight; ++levels;
-    }
-    return pixels;
-}
-
 } // namespace
 
 struct SceneRenderer::GpuModel {
     ModelHandle Asset;
     std::vector<std::vector<std::unique_ptr<MeshRenderer>>> Meshes;
-    struct GpuImage { sg_image Image{}; sg_view View{}; };
+    struct GpuImage { sg_image Image{}; sg_view View{}; int Size=0; };
     std::vector<GpuImage> Images;
     std::vector<sg_sampler> Samplers;
+    std::vector<Bounds> MeshBounds;
 
     ~GpuModel() {
         Meshes.clear();
@@ -76,18 +39,24 @@ struct SceneRenderer::GpuModel {
         }
     }
 
-    void Upload(ModelHandle asset) {
+    void Upload(ModelHandle asset,const RenderSettings& settings) {
         Asset = std::move(asset);
         Meshes.resize(Asset->Meshes.size());
+        MeshBounds.resize(Asset->Meshes.size());
         Images.resize(Asset->Images.size());
         Samplers.resize(Asset->Textures.size());
         for (const auto& part : Asset->Parts) {
             auto& primitives = Meshes.at(part.MeshIndex);
             if (!primitives.empty()) { continue; }
+            bool first=true;
+            for (const auto& primitive:Asset->Meshes.at(part.MeshIndex).Primitives) {for (const auto& v:primitive.Geometry.Vertices) {
+                const Vec3 p{v.Position[0],v.Position[1],v.Position[2]};auto& b=MeshBounds[part.MeshIndex];
+                if (first) {b={p,p};first=false;}b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};
+            }}
             for (const auto& primitive : Asset->Meshes.at(part.MeshIndex).Primitives) {
                 const auto& material = Asset->Materials.at(primitive.MaterialIndex);
                 auto renderer = std::make_unique<MeshRenderer>();
-                renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning);
+                renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples);
                 primitives.push_back(std::move(renderer));
                 if (!material.BaseColorTexture) { continue; }
                 const auto textureIndex = *material.BaseColorTexture;
@@ -96,16 +65,13 @@ struct SceneRenderer::GpuModel {
                 auto& gpuImage = Images.at(texture.ImageIndex);
                 if (!gpuImage.Image.id) {
                     const auto& image = Asset->Images.at(texture.ImageIndex);
-                    if (image.Width > sg_query_limits().max_image_size_2d || image.Height > sg_query_limits().max_image_size_2d) {
-                        throw std::runtime_error("Texture dimensions exceed this GPU's capabilities.");
-                    }
-                    int levels = 0;
-                    const auto pixels = PackMipmaps(image, levels);
+                    const auto packed=PackTexture(image,std::min(settings.MaxTextureSize,sg_query_limits().max_image_size_2d));
                     sg_image_desc desc{};
-                    desc.width = image.Width; desc.height = image.Height;
-                    desc.num_mipmaps = levels;
+                    desc.width = packed.Width; desc.height = packed.Height;
+                    desc.num_mipmaps = packed.Levels;
                     desc.pixel_format = SG_PIXELFORMAT_SRGB8A8;
-                    desc.data = {pixels.data(), pixels.size()};
+                    desc.data = {packed.Pixels.data(), packed.Pixels.size()};
+                    gpuImage.Size=std::max(packed.Width,packed.Height);
                     desc.label = "minuvex-base-color";
                     gpuImage.Image = sg_make_image(desc);
                     if (sg_query_image_state(gpuImage.Image) != SG_RESOURCESTATE_VALID) { throw std::runtime_error("Failed to upload the base-color image."); }
@@ -119,7 +85,9 @@ struct SceneRenderer::GpuModel {
                 sampler.min_filter = texture.MinFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
                 sampler.mag_filter = texture.MagFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
                 sampler.mipmap_filter = texture.UseMipmaps && texture.MipFilter == TextureFilter::Linear ? SG_FILTER_LINEAR : SG_FILTER_NEAREST;
-                if (!texture.UseMipmaps) { sampler.max_lod = 0.25f; }
+                sampler.max_anisotropy=static_cast<std::uint32_t>(settings.Anisotropy);
+                if (settings.Anisotropy > 1) {sampler.min_filter=sampler.mag_filter=sampler.mipmap_filter=SG_FILTER_LINEAR;}
+                if (!texture.UseMipmaps) { sampler.max_lod = 0.00001f; }
                 Samplers[textureIndex] = sg_make_sampler(sampler);
                 if (sg_query_sampler_state(Samplers[textureIndex]) != SG_RESOURCESTATE_VALID) { throw std::runtime_error("Failed to create the texture sampler."); }
             }
@@ -127,7 +95,7 @@ struct SceneRenderer::GpuModel {
     }
 };
 
-SceneRenderer::SceneRenderer() = default;
+SceneRenderer::SceneRenderer(RenderSettings settings) : settings_(settings) {}
 SceneRenderer::~SceneRenderer() = default;
 
 void SceneRenderer::Prepare(const Scene& scene) {
@@ -137,17 +105,18 @@ void SceneRenderer::Prepare(const Scene& scene) {
         needed.insert(item.Model.get());
         if (!models_.contains(item.Model.get())) {
             auto model = std::make_unique<GpuModel>();
-            model->Upload(item.Model);
+            model->Upload(item.Model,settings_);
             models_.emplace(item.Model.get(), std::move(model));
         }
     }
     std::erase_if(models_, [&needed](const auto& entry) { return !needed.contains(entry.first); });
     stats_.ResidentModels = models_.size();
     stats_.ResidentPrimitives = stats_.ResidentImages = 0;
+    stats_.MaxResidentTextureSize=0;
     for (const auto& [key, model] : models_) {
         (void)key;
         for (const auto& mesh : model->Meshes) { stats_.ResidentPrimitives += mesh.size(); }
-        for (const auto& image : model->Images) { if (image.Image.id) { ++stats_.ResidentImages; } }
+        for (const auto& image : model->Images) { if (image.Image.id) { ++stats_.ResidentImages;stats_.MaxResidentTextureSize=std::max(stats_.MaxResidentTextureSize,image.Size); } }
     }
 }
 
@@ -155,6 +124,7 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
     const auto viewProjection = scene.MainCamera.ViewProjection(aspect);
     scene.Sun.Validate();
     stats_.LastDrawCalls = 0;
+    stats_.LastCulledParts=0;
     for (const auto& item : scene.CollectRenderItems()) {
         const auto found = models_.find(item.Model.get());
         if (found == models_.end()) { throw std::logic_error("Call SceneRenderer::Prepare after changing visible model instances."); }
@@ -175,6 +145,20 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
                 // joint palette. Apply the Scene instance transform exactly once.
                 transform = item.WorldTransform;
             }
+            if (settings_.FrustumCulling) {
+                bool visible=IntersectsFrustum(model.MeshBounds.at(part.MeshIndex),transform,viewProjection);
+                if (part.SkinIndex) {
+                    Bounds combined;bool first=true;const auto& b=model.MeshBounds.at(part.MeshIndex);
+                    // Union first, then test: two off-screen joints can blend a
+                    // vertex into the visible region between them.
+                    for (const auto& joint:palette) {for (unsigned mask=0;mask<8;++mask) {
+                        const auto p=joint.TransformPoint({mask&1?b.Max.X:b.Min.X,mask&2?b.Max.Y:b.Min.Y,mask&4?b.Max.Z:b.Min.Z});
+                        if (first) {combined={p,p};first=false;}combined.Min={std::min(combined.Min.X,p.X),std::min(combined.Min.Y,p.Y),std::min(combined.Min.Z,p.Z)};combined.Max={std::max(combined.Max.X,p.X),std::max(combined.Max.Y,p.Y),std::max(combined.Max.Z,p.Z)};
+                    }}
+                    visible=IntersectsFrustum(combined,item.WorldTransform,viewProjection);
+                }
+                if (!visible) {++stats_.LastCulledParts;continue;}
+            }
             const auto& mesh = item.Model->Meshes.at(part.MeshIndex);
             for (std::size_t i = 0; i < mesh.Primitives.size(); ++i) {
                 const auto& material = item.Model->Materials.at(mesh.Primitives[i].MaterialIndex);
@@ -185,7 +169,7 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
                     texture = model.Images.at(item.Model->Textures.at(index).ImageIndex).View;
                     sampler = model.Samplers.at(index);
                 }
-                model.Meshes.at(part.MeshIndex).at(i)->Draw(transform, viewProjection, scene.Sun, material, texture, sampler,palette);
+                model.Meshes.at(part.MeshIndex).at(i)->Draw(transform, viewProjection, scene.Sun, material, texture, sampler,palette,settings_.Lighting == LightingMode::Unlit);
                 ++stats_.LastDrawCalls;
             }
         }

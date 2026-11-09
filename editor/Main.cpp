@@ -25,7 +25,9 @@ struct Application {
     std::unique_ptr<lv::editor::EditorUI> UI;
     std::filesystem::path Initial, Directory = std::filesystem::current_path();
     std::uint64_t Frames = 0, Limit = 0;
-    bool Smoke = false, AnimationSmoke = false, Gui = false, Failed = false;
+    bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, Gui = false, Failed = false;
+    std::optional<lv::QualityProfile> InitialQuality;
+    std::uint64_t CachedFrames=0;
     double PreviousTime = 0;
     char Message[2048]{};
     std::uint32_t FirstTarget = 0;
@@ -58,7 +60,8 @@ void CheckViewportPixels(const lv::editor::SceneViewport& viewport) {
 }
 #endif
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message, std::uint32_t line, const char* file, void* user) noexcept {
-    if (level <= 1) { static_cast<Application*>(user)->Fail(message ? message : "Editor graphics backend failure."); }
+    auto& app=*static_cast<Application*>(user);
+    if (level <= 1 && !(app.UI && app.UI->Viewport.ApplyingQuality())) { app.Fail(message ? message : "Editor graphics backend failure."); }
     slog_func(tag,level,item,message,line,file,nullptr);
 }
 void Init(void* user) noexcept {
@@ -96,12 +99,15 @@ void Init(void* user) noexcept {
             }
             Require(doc.SetCamera(lv::detail::FitSceneCamera(doc.GetScene(),1.5f)));
         }
+        if (app.InitialQuality) {Require(app.UI->ApplyQualityProfile(*app.InitialQuality));}
+        if (app.QualitySmoke) {auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);low.Overrides.TargetFps=0;Require(app.UI->ApplyQualityProfile(low));}
     } catch (const std::exception& e) { app.Fail(e.what()); }
     catch (...) { app.Fail("Editor initialization threw an unknown exception."); }
 }
 void SmokeAfterDraw(Application& app) {
     auto& ui = *app.UI; auto& doc = ui.Document;
     if (app.Frames == 1) {
+        if (app.QualitySmoke) {const auto* panel=ImGui::FindWindowByName("Quality Settings");Require(panel && panel->DockId,"Quality Settings panel was not docked.");Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::Low && ui.Viewport.Quality().Applied,"Initial Low quality was not applied.");}
         for (const auto* name : {"Viewport","Hierarchy","Inspector","Asset Browser"}) {
             const auto* window = ImGui::FindWindowByName(name);
             Require(window && window->Active && window->DockId,"Editor panel is missing from the docking layout.");
@@ -121,7 +127,7 @@ void SmokeAfterDraw(Application& app) {
         CheckViewportPixels(ui.Viewport);
 #endif
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
-        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
+        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.QualitySmoke ? "quality-smoke.mvxscene.json":app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
         std::filesystem::create_directories(output.parent_path()); Require(doc.Save(output));
         ui.RequestNew(); Require(doc.GetScene().Size() == 0,"New Scene did not reset the document.");
         ui.RequestOpen(output); Require(doc.GetScene().Size() == 3 && doc.Assets().size() == 1 && !doc.IsDirty(),"Editor saved Scene did not reopen.");
@@ -131,6 +137,10 @@ void SmokeAfterDraw(Application& app) {
         }
     }
     if (app.AnimationSmoke && app.Frames == 0) { app.PreviousTime = doc.GetScene().GetObject(doc.Selection()).Animation.Time(); }
+    if (app.QualitySmoke && app.Frames == 2) {Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::High && ui.Viewport.Quality().Applied,"Editor High quality did not commit.");Require(!doc.IsDirty(),"Quality application dirtied Scene data.");}
+    if (app.QualitySmoke && app.Frames == 4) {app.CachedFrames=ui.Viewport.RenderedFrames();}
+    if (app.QualitySmoke && app.Frames == 5) {Require(ui.Viewport.RenderedFrames() == app.CachedFrames,"Static Editor viewport did not reuse its on-demand image.");}
+    if (app.QualitySmoke && app.Frames == 6) {Require(ui.Viewport.RenderedFrames() > app.CachedFrames,"Scene edit failed to wake Editor viewport.");}
     if (app.Frames == 7) {
         Require(ui.Viewport.Texture().id != 0,"Viewport did not resume after suspension.");
         // New/Open/Quit guard is also exercised in the real ImGui frame.
@@ -152,6 +162,18 @@ void Frame(void* user) noexcept {
         simgui_new_frame(frame);
         const auto advanced = app.UI->Document.UpdateAnimations(frame.delta_time);
         if (!advanced) { throw std::runtime_error(advanced.Error().Message); }
+        if (app.QualitySmoke && app.Frames == 2) {
+            auto high=lv::MakeQualityProfile(lv::QualityPreset::High);high.AllowFallback=true;high.Overrides.TargetFps=0;Require(app.UI->ApplyQualityProfile(high));
+            const auto file=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/"profile.mvxquality.json";Require(lv::SaveQuality(high,file));app.UI->LoadQualityProfile(file);
+        }
+        if (app.QualitySmoke && app.Frames == 4) {
+            Require(app.UI->Document.PauseAnimation(app.UI->Document.Selection()));auto p=app.UI->Viewport.Quality().Requested;p.Overrides.OnDemand=lv::OnDemandMode::On;Require(app.UI->ApplyQualityProfile(p));
+        }
+        if (app.QualitySmoke && app.Frames == 6) {
+            const auto prior=app.UI->Viewport.ColorImage().id;auto p=app.UI->Viewport.Quality().Requested;p.AllowFallback=false;p.Overrides.Shadow=lv::ShadowMode::Pcf;
+            Require(!app.UI->ApplyQualityProfile(p) && prior == app.UI->Viewport.ColorImage().id,"Editor quality rejection did not retain GPU resources.");
+            lv::Transform moved;moved.Position.X=-1.2f;Require(app.UI->Document.SetTransform(app.UI->Document.Selection(),moved));
+        }
         if (app.Smoke && app.Frames == 3) {
             // Resize/suspend before building Image commands that reference views.
             app.UI->Viewport.Resize(128,64);
@@ -180,6 +202,7 @@ void Event(const sapp_event* event, void* user) noexcept {
         if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
             for (int i = 0; i < sapp_get_num_dropped_files(); ++i) {
                 const auto path = lv::detail::PathFromUtf8(sapp_get_dropped_file_path(i));
+                if (path.filename().generic_u8string().ends_with(u8".mvxquality.json")) {app.UI->LoadQualityProfile(path);break;}
                 if (path.filename().generic_u8string().ends_with(u8".mvxpose.json")) {
                     const auto loaded = app.UI->Document.LoadPoseFile(app.UI->Document.Selection(),path);
                     if (!loaded) { app.UI->ShowError(loaded.Error()); } break;
@@ -203,6 +226,8 @@ int Run(const std::vector<std::string>& args) {
         for (std::size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--smoke-test") { app.Smoke = true; app.Limit = 10; }
             else if (args[i] == "--animation-smoke-test") { app.Smoke = app.AnimationSmoke = true; app.Limit = 10; }
+            else if (args[i] == "--quality-smoke-test") {app.Smoke=app.AnimationSmoke=app.QualitySmoke=true;app.Limit=10;}
+            else if (args[i] == "--quality" && i+1 < args.size()) {auto profile=lv::LoadQuality(lv::detail::PathFromUtf8(args[++i]));Require(profile);app.InitialQuality=std::move(profile).Value();}
             else if (args[i] == "--frames" && i+1 < args.size()) {
                 const auto& value = args[++i]; auto [end,error] = std::from_chars(value.data(),value.data()+value.size(),app.Limit);
                 Require(error == std::errc{} && end == value.data()+value.size() && app.Limit > 0,"--frames requires a positive integer.");

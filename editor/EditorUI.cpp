@@ -52,7 +52,7 @@ void EditorUI::Import(const std::filesystem::path& path, bool place) {
 }
 void EditorUI::FrameScene() {
     try {
-        const float aspect = Viewport.Height() ? static_cast<float>(Viewport.Width())/Viewport.Height() : 1.5f;
+        const float aspect = Viewport.Aspect();
         Report(Document.SetCamera(detail::FitSceneCamera(Document.GetScene(),aspect)));
     } catch (const std::exception& e) { ShowError({ErrorCode::InvalidState,e.what(),"Place a visible model in the Scene first.",{}}); }
 }
@@ -75,11 +75,19 @@ void EditorUI::FileDialog(Dialog type) {
     dialog_ = type;
     pathInput_ = type == Dialog::Save ? (Document.Path().empty() ? Text(directory_/"Scene.mvxscene.json") : Text(Document.Path())) : Text(directory_) + "/";
     if (type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad) { poseObject_ = Document.Selection(); pathInput_ = Text(directory_/"Pose.mvxpose.json"); }
+    if (type == Dialog::QualitySave || type == Dialog::QualityLoad) {pathInput_=Text(directory_/"Profile.mvxquality.json");}
 }
 bool EditorUI::SaveDialog(Dialog type, const std::filesystem::path& path) {
     if (type == Dialog::Save) { return Save(path); }
+    if (type == Dialog::QualitySave) {return Report(SaveQuality(qualityDraft_,path));}
     if (!Report(Document.SavePoseFile(poseObject_,path,type == Dialog::PosePartial))) { return false; }
     status_ = "Saved Pose " + Text(path); return true;
+}
+void EditorUI::LoadQualityProfile(const std::filesystem::path& path) {
+    auto profile=LoadQuality(path);if (Report(profile)) {qualityDraft_=std::move(profile).Value();quality_=true;status_="Loaded quality profile; Apply to use it.";}
+}
+Result<void> EditorUI::ApplyQualityProfile(const QualityProfile& profile) {
+    auto result=Viewport.SetQuality(profile,Document.GetScene());if (result) {qualityDraft_=profile;}return result;
 }
 bool EditorUI::Save(const std::filesystem::path& path) {
     if (!Report(Document.Save(path))) { return false; }
@@ -103,7 +111,8 @@ void EditorUI::Menu() {
             ImGui::MenuItem("Viewport",nullptr,&viewport_); ImGui::MenuItem("Hierarchy",nullptr,&hierarchy_);
             ImGui::MenuItem("Inspector",nullptr,&inspector_); ImGui::MenuItem("Asset Browser",nullptr,&assets_);
             ImGui::MenuItem("Bone Inspector",nullptr,&bones_); ImGui::MenuItem("Animation Controls",nullptr,&animation_);
-            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = true; }
+            ImGui::MenuItem("Quality Settings",nullptr,&quality_);
+            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = true; }
             ImGui::EndMenu();
         }
         ImGui::Separator();
@@ -136,10 +145,11 @@ void EditorUI::Dockspace() {
         ImGui::DockBuilderDockWindow("Hierarchy",left); ImGui::DockBuilderDockWindow("Inspector",right);
         ImGui::DockBuilderDockWindow("Asset Browser",bottom); ImGui::DockBuilderDockWindow("Viewport",center);
         ImGui::DockBuilderDockWindow("Bone Inspector",right); ImGui::DockBuilderDockWindow("Animation Controls",bottom);
+        ImGui::DockBuilderDockWindow("Quality Settings",right);
         ImGui::DockBuilderFinish(dock);
     }
     // Add Phase 5 panels to a saved Phase 4 layout without resetting user splits.
-    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"}}) {
+    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"}}) {
         if (!ImGui::FindWindowSettingsByID(ImHashStr(panel.first))) {
             const auto* anchor = ImGui::FindWindowSettingsByID(ImHashStr(panel.second));
             ImGui::DockBuilderDockWindow(panel.first,anchor && anchor->DockId ? anchor->DockId : dock);
@@ -301,6 +311,53 @@ void EditorUI::AnimationControls() {
         }
     } ImGui::End();
 }
+void EditorUI::QualitySettings() {
+    if (!quality_) {return;}
+    if (ImGui::Begin("Quality Settings",&quality_)) {
+        ImGui::InputText("Profile name",&qualityDraft_.Name);
+        int base=static_cast<int>(qualityDraft_.Base);
+        if (ImGui::Combo("Base preset",&base,"Low\0Medium\0High\0")) {qualityDraft_=MakeQualityProfile(static_cast<QualityPreset>(base));}
+        const auto expanded=ExpandQuality(qualityDraft_);
+        if (expanded) {
+            auto s=expanded.Value();auto& o=qualityDraft_.Overrides;
+            int resolution=static_cast<int>(s.Resolution);if (ImGui::Combo("Resolution",&resolution,"Relative\0Fixed\0")) {o.Resolution=static_cast<ResolutionMode>(resolution);}
+            if (s.Resolution == ResolutionMode::Fixed) {
+                if (ImGui::DragInt("Width",&s.FixedWidth,8,1,16384)) {o.FixedWidth=s.FixedWidth;}
+                if (ImGui::DragInt("Height",&s.FixedHeight,8,1,16384)) {o.FixedHeight=s.FixedHeight;}
+            } else {
+                if (ImGui::SliderFloat("Scale",&s.ResolutionScale,.5f,1,"%.2f")) {o.ResolutionScale=s.ResolutionScale;}
+                if (ImGui::DragInt("Height cap",&s.MaxRenderHeight,8,1,16384)) {o.MaxRenderHeight=s.MaxRenderHeight;}
+            }
+            if (ImGui::DragInt("Target FPS (0 = unlimited)",&s.TargetFps,1,0,240)) {o.TargetFps=s.TargetFps;}
+            int samples=s.MsaaSamples == 1 ? 0:s.MsaaSamples == 2 ? 1:s.MsaaSamples == 4 ? 2:3;
+            if (ImGui::Combo("MSAA",&samples,"Off\0x2\0x4\0x8\0")) {o.MsaaSamples=1<<samples;}
+            int texture=static_cast<int>(s.Textures);if (ImGui::Combo("Textures",&texture,"Low (512)\0Medium (2048)\0High (8192)\0")) {o.Textures=static_cast<TextureQuality>(texture);}
+            if (ImGui::SliderInt("Anisotropy",&s.Anisotropy,1,16)) {o.Anisotropy=s.Anisotropy;}
+            int lighting=static_cast<int>(s.Lighting);if (ImGui::Combo("Lighting",&lighting,"Unlit\0Basic\0Advanced (unavailable)\0")) {o.Lighting=static_cast<LightingMode>(lighting);}
+            if (ImGui::Checkbox("Frustum culling",&s.FrustumCulling)) {o.FrustumCulling=s.FrustumCulling;}
+            int demand=static_cast<int>(s.OnDemand);if (ImGui::Combo("On demand",&demand,"Off\0On\0Auto\0")) {o.OnDemand=static_cast<OnDemandMode>(demand);}
+            ImGui::TextWrapped("Shadow, LOD and post processing are unavailable in this renderer.");
+        } else {ImGui::TextWrapped("%s",expanded.Error().Message.c_str());}
+        ImGui::Checkbox("Allow supported fallback",&qualityDraft_.AllowFallback);
+        ImGui::TextUnformatted(qualityDraft_.IsCustom() ? "Custom overrides":"Preset defaults");
+        if (ImGui::Button("Clear overrides")) {qualityDraft_.Overrides={};}
+        ImGui::SameLine();if (ImGui::Button("Apply")) {if (Report(Viewport.SetQuality(qualityDraft_,Document.GetScene()))) {status_="Quality applied";}}
+        if (ImGui::Button("Save profile...")) {FileDialog(Dialog::QualitySave);}ImGui::SameLine();if (ImGui::Button("Load profile...")) {FileDialog(Dialog::QualityLoad);}
+        const auto& q=Viewport.Quality();ImGui::Separator();
+        ImGui::Text("Applied: %s",q.Applied ? "yes":"pending visible viewport");
+        if (q.Effective) {
+            const auto& effective=*q.Effective;
+            ImGui::Text("Render: %d x %d",q.RenderWidth,q.RenderHeight);
+            ImGui::Text("MSAA requested / effective: %d / %d",q.RequestedSettings.MsaaSamples,effective.MsaaSamples);
+            ImGui::Text("Texture limit: %d / %d",q.RequestedSettings.MaxTextureSize,effective.MaxTextureSize);
+            ImGui::Text("Anisotropy: %d / %d",q.RequestedSettings.Anisotropy,effective.Anisotropy);
+            ImGui::Text("FPS target: %d | culling: %s",effective.TargetFps,effective.FrustumCulling ? "on":"off");
+            ImGui::Text("Supported MSAA: 1%s%s%s",q.Capabilities.SampleCounts&(1u<<2)?", 2":"",q.Capabilities.SampleCounts&(1u<<4)?", 4":"",q.Capabilities.SampleCounts&(1u<<8)?", 8":"");
+            for (const auto& a:q.Adjustments) {ImGui::TextWrapped("%s: %s",a.Field.c_str(),a.Reason.c_str());}
+        }
+        if (q.LastError) {ImGui::TextWrapped("Previous quality retained: %s",q.LastError->Message.c_str());}
+    }ImGui::End();
+}
 void EditorUI::AssetBrowser() {
     if (!assets_) { return; }
     if (ImGui::Begin("Asset Browser",&assets_)) {
@@ -360,7 +417,7 @@ void EditorUI::ViewportPanel() {
         ImGui::SameLine(); ImGui::TextUnformatted("Left: Orbit  |  Right/Middle: Pan  |  Wheel: Zoom");
         const auto available = ImGui::GetContentRegionAvail(); const auto& io = ImGui::GetIO();
         if (available.x > 1 && available.y > 1) {
-            Viewport.Resize(static_cast<int>(std::min(4096.0f,available.x*sapp_dpi_scale())),static_cast<int>(std::min(4096.0f,available.y*sapp_dpi_scale())));
+            Viewport.Resize(static_cast<int>(std::min(65536.0f,available.x*sapp_dpi_scale())),static_cast<int>(std::min(65536.0f,available.y*sapp_dpi_scale())));
             ImGui::Image(simgui_imtextureid(Viewport.Texture()),available);
             const bool hovered = ImGui::IsItemHovered();
             if (ImGui::BeginDragDropTarget()) {
@@ -403,20 +460,21 @@ void EditorUI::Dialogs() {
     }
     if (dialog_ != Dialog::None) { ImGui::OpenPopup("File path"); }
     if (ImGui::BeginPopupModal("File path",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : dialog_ == Dialog::Import ? "Import model (.gltf / .glb)" : "Pose file (.mvxpose.json)");
+        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : dialog_ == Dialog::Import ? "Import model (.gltf / .glb)" : dialog_ == Dialog::QualitySave || dialog_ == Dialog::QualityLoad ? "Quality profile (.mvxquality.json)":"Pose file (.mvxpose.json)");
         ImGui::SetNextItemWidth(620);
         if (ImGui::IsWindowAppearing()) { ImGui::SetKeyboardFocusHere(); }
         const bool enter = ImGui::InputText("Path",&pathInput_,ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
         if (ImGui::Button("OK") || enter) {
             const auto path = detail::PathFromUtf8(pathInput_);
             bool close = true;
-            if (dialog_ == Dialog::Save || dialog_ == Dialog::PoseFull || dialog_ == Dialog::PosePartial) {
+            if (dialog_ == Dialog::Save || dialog_ == Dialog::PoseFull || dialog_ == Dialog::PosePartial || dialog_ == Dialog::QualitySave) {
                 std::error_code error;
                 if (std::filesystem::is_regular_file(path,error)) { overwritePath_ = path; overwriteDialog_ = dialog_; }
                 else { close = SaveDialog(dialog_,path); }
             }
             else if (dialog_ == Dialog::Open) { RequestOpen(path); }
             else if (dialog_ == Dialog::PoseLoad) { close = Report(Document.LoadPoseFile(poseObject_,path)); }
+            else if (dialog_ == Dialog::QualityLoad) {auto profile=LoadQuality(path);close=Report(profile);if (close) {qualityDraft_=std::move(profile).Value();}}
             else { Import(path,false); }
             if (close) { dialog_ = Dialog::None; ImGui::CloseCurrentPopup(); }
         }
@@ -439,7 +497,7 @@ void EditorUI::Dialogs() {
     }
 }
 void EditorUI::Draw() {
-    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); ViewportPanel(); Dialogs();
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); QualitySettings(); ViewportPanel(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());

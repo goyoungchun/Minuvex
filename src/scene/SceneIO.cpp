@@ -1,22 +1,16 @@
 #include <minuvex/SceneIO.h>
 #include <minuvex/PoseIO.h>
 #include "core/Utf8Path.h"
+#include "core/JsonFile.h"
 
 #include <json.hpp>
 
-#include <atomic>
 #include <algorithm>
-#include <chrono>
 #include <charconv>
 #include <cstdio>
 #include <cmath>
-#include <fstream>
 #include <limits>
 #include <unordered_set>
-#if defined(_WIN32)
-#include <windows.h>
-#undef GetObject
-#endif
 
 namespace lv {
 namespace {
@@ -104,39 +98,8 @@ void Animation(const Json& json, Scene& scene, ObjectId id) {
     } else { Require(time == 0 && state == static_cast<unsigned>(PlaybackState::Stopped),"A clipless player must be stopped at time zero."); }
     player.ApplyPose(Pose(json.at("overrides"),object.Model->Skeleton)); (void)player.Evaluate();
 }
-Json ReadJson(const std::filesystem::path& path) {
-    Require(!path.empty(),"Archive path is empty.");
-    std::ifstream stream(path,std::ios::binary | std::ios::ate);
-    if (!stream) { throw std::runtime_error("Cannot open archive file."); }
-    const auto size = stream.tellg(); Require(size > 0 && size <= static_cast<std::streamoff>(MaxBytes),"Archive JSON is empty or exceeds 16 MiB.");
-    std::string bytes(static_cast<std::size_t>(size),'\0'); stream.seekg(0);
-    if (!stream.read(bytes.data(),size)) { throw std::runtime_error("Cannot read complete archive file."); }
-    std::unordered_map<int,std::unordered_set<std::string>> keys;
-    return Json::parse(bytes,[&](int depth, Json::parse_event_t event, Json& value) {
-        Require(depth <= 32,"Archive JSON nesting limit exceeded.");
-        if (event == Json::parse_event_t::object_start) { keys[depth].clear(); }
-        if (event == Json::parse_event_t::key) { Require(keys[depth-1].insert(value.get<std::string>()).second,"Duplicate JSON key."); }
-        return true;
-    });
-}
-void WriteJson(const Json& json, const std::filesystem::path& path) {
-    Require(!path.empty(),"Archive path is empty.");
-    const auto destination = std::filesystem::absolute(path).lexically_normal();
-    const auto bytes = json.dump(2)+'\n'; Require(bytes.size() <= MaxBytes,"Archive JSON exceeds 16 MiB.");
-    static std::atomic_uint64_t sequence{0};
-    auto temporary = destination;
-    temporary += ".tmp-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(sequence.fetch_add(1));
-    try {
-        std::ofstream stream(temporary,std::ios::binary | std::ios::trunc);
-        if (!stream.write(bytes.data(),static_cast<std::streamsize>(bytes.size()))) { throw std::runtime_error("Cannot write temporary archive file."); }
-        stream.close(); if (!stream) { throw std::runtime_error("Cannot close temporary archive file."); }
-#if defined(_WIN32)
-        if (!MoveFileExW(temporary.c_str(),destination.c_str(),MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) { throw std::runtime_error("Cannot replace archive file (Windows error "+std::to_string(GetLastError())+")."); }
-#else
-        std::filesystem::rename(temporary,destination);
-#endif
-    } catch (...) { std::error_code error; std::filesystem::remove(temporary,error); throw; }
-}
+Json ReadJson(const std::filesystem::path& path) { return detail::ReadJsonFile(path,MaxBytes); }
+void WriteJson(const Json& json,const std::filesystem::path& path) { detail::WriteJsonFile(json,path,MaxBytes); }
 Json Vector(Vec3 value) {
     Require(std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z),"Cannot serialize a nonfinite vector.");
     return Json::array({value.X,value.Y,value.Z});

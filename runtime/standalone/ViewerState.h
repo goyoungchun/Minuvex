@@ -8,7 +8,9 @@
 namespace lv::detail {
 
 struct ViewerState {
-    explicit ViewerState(ViewerOptions options) : Options(std::move(options)), AutoFrame(Options.AutoFrame) {}
+    explicit ViewerState(ViewerOptions options) : Options(std::move(options)), AutoFrame(Options.AutoFrame) {
+        Quality.Requested=Options.Quality;const auto expanded=ExpandQuality(Options.Quality);if (expanded) {Quality.RequestedSettings=expanded.Value();}
+    }
     ViewerOptions Options;
     AssetRegistry Assets;
     Scene World;
@@ -20,6 +22,9 @@ struct ViewerState {
     bool DispatchingInput = false;
     const ViewerRunOptions* ActiveRun = nullptr;
     int Width = 0, Height = 0;
+    QualityState Quality;
+    std::function<Result<void>(const QualityProfile&)> ApplyQuality;
+    std::function<void()> Invalidate;
     float Aspect() const {
         return static_cast<float>(Width > 0 ? Width : Options.Width) / static_cast<float>(Height > 0 ? Height : Options.Height);
     }
@@ -27,5 +32,6 @@ struct ViewerState {
 
 Result<void> RunStandalone(Viewer& viewer, ViewerState& state, const ViewerRunOptions& options);
 Error CurrentException(ErrorCode fallback, const char* hint);
+bool GraphicsRuntimeAvailable() noexcept;
 
 } // namespace lv::detail

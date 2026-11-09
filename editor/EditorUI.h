@@ -17,9 +17,11 @@ public:
     bool QuitRequested() const noexcept { return quit_; }
     void SetDirectory(std::filesystem::path path) { directory_ = std::move(path); }
     void ShowError(const Error& error);
+    void LoadQualityProfile(const std::filesystem::path& path);
+    Result<void> ApplyQualityProfile(const QualityProfile& profile);
 private:
     enum class Action { None, New, Open, Quit } pending_ = Action::None;
-    enum class Dialog { None, Import, Open, Save, PoseFull, PosePartial, PoseLoad } dialog_ = Dialog::None, overwriteDialog_ = Dialog::None;
+    enum class Dialog { None, Import, Open, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad } dialog_ = Dialog::None, overwriteDialog_ = Dialog::None;
     std::filesystem::path directory_ = std::filesystem::current_path(), openPath_, overwritePath_;
     std::string pathInput_, error_, status_ = "Import a glTF/GLB to begin.";
     std::string filter_;
@@ -27,6 +29,8 @@ private:
     bool quit_ = false, resetLayout_ = false, cameraDrag_ = false;
     bool hierarchy_ = true, inspector_ = true, assets_ = true, viewport_ = true;
     bool bones_ = true, animation_ = true;
+    bool quality_ = true;
+    QualityProfile qualityDraft_;
     ObjectId boneObject_ = NoObject, poseObject_ = NoObject;
     JointId bone_ = NoJoint;
     detail::CameraController controls_;
@@ -42,6 +46,7 @@ private:
     void Inspector();
     void BoneInspector();
     void AnimationControls();
+    void QualitySettings();
     void AssetBrowser();
     void ViewportPanel();
     void Dialogs();

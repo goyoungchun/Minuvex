@@ -42,6 +42,18 @@ int main(int argc, char* argv[]) {
         Check(info.FrameNumber == callbacks && info.FramebufferWidth > 0 && info.FramebufferHeight > 0 &&
             std::isfinite(info.DeltaTimeSeconds) && info.DeltaTimeSeconds >= 0,"frame callback receives valid framebuffer/timing information");
         ++callbacks;
+        if (mode == "quality") {
+            auto caps=v.GetQualityCapabilities();Check(caps && caps.Value().GraphicsAvailable,"Viewer exposes active graphics capabilities");
+            if (info.FrameNumber == 0) {
+                auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);low.Overrides.ResolutionScale=.5f;Require(v.SetQuality(low));
+                auto state=v.GetQuality();Check(state && state.Value().Applied && state.Value().RenderWidth <= info.FramebufferWidth/2 && state.Value().Effective->TargetFps == 30,"SetQuality applies Low resolution and pacing inside OnFrame");
+                auto invalid=low;invalid.Overrides.Shadow=lv::ShadowMode::Pcf;Check(!v.SetQuality(invalid) && v.GetQuality().Value().Requested == low,"runtime quality failure retains prior requested/effective settings");
+            }
+            if (info.FrameNumber == 1) {
+                auto high=lv::MakeQualityProfile(lv::QualityPreset::High);high.AllowFallback=true;Require(v.SetQuality(high));
+                Check(v.GetQuality().Value().Requested.Base == lv::QualityPreset::High && v.GetQuality().Value().Applied,"runtime can raise quality without reopening window");Require(v.RequestRedraw());
+            }
+        }
         if (animated) {
             if (mode == "animation") { expectedTime += info.DeltaTimeSeconds; }
             Check(std::abs(v.GetScene().GetAnimation(modelId).Time()-expectedTime) < 0.000001,"runtime advances animation before OnFrame, or leaves it to manual updates");

@@ -1,6 +1,6 @@
 #include "ViewerState.h"
 #include "RuntimePlatform.h"
-#include "renderer/SceneRenderer.h"
+#include "renderer/RenderSurface.h"
 
 #include <sokol_gfx.h>
 #include <sokol_glue.h>
@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 namespace lv::detail {
 namespace {
@@ -19,7 +20,8 @@ struct Runtime {
     Viewer& Facade;
     ViewerState& State;
     const ViewerRunOptions& Options;
-    SceneRenderer Renderer;
+    RenderSurface Surface;
+    double LastUpdate = 0;
     std::uint64_t Frames = 0;
     bool Initialized = false, Failed = false, InPass = false;
     ErrorCode Code = ErrorCode::GraphicsInitialization;
@@ -46,6 +48,7 @@ struct Runtime {
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message,
          std::uint32_t line, const char* file, void* user) noexcept {
     auto& runtime = *static_cast<Runtime*>(user);
+    if (runtime.Surface.Applying() && level <= 1) {slog_func(tag,level,item,message,line,file,nullptr);return;}
     if (level <= 1) {
         char description[2048];
         std::snprintf(description,sizeof(description),"%s error %u: %s",tag,item,message ? message : "See the native graphics diagnostics.");
@@ -74,7 +77,9 @@ void Initialize(void* user) noexcept {
             const auto fit = runtime.Facade.FrameScene();
             if (!fit) { runtime.Fail(fit.Error().Code,fit.Error().Message.c_str(),fit.Error().Hint.c_str()); return; }
         }
-        runtime.Renderer.Prepare(runtime.State.World);
+        const auto quality=runtime.Surface.ApplyQuality(runtime.State.Quality.Requested,runtime.State.World,sapp_width(),sapp_height());
+        if (!quality) {runtime.Fail(quality.Error().Code,quality.Error().Message.c_str(),quality.Error().Hint.c_str());return;}
+        runtime.State.Quality=runtime.Surface.Quality();runtime.LastUpdate=RenderClockSeconds();
         runtime.Initialized = !runtime.Failed;
     } catch (...) { runtime.Capture(ErrorCode::GraphicsInitialization,"Check the Scene and GPU resource availability."); }
 }
@@ -88,7 +93,10 @@ void Frame(void* user) noexcept {
         const auto dpi = sapp_dpi_scale();
         runtime.State.Width = std::max(1,static_cast<int>(std::lround(static_cast<float>(width)/dpi)));
         runtime.State.Height = std::max(1,static_cast<int>(std::lround(static_cast<float>(height)/dpi)));
-        const auto elapsed = sapp_frame_duration();
+        (void)runtime.Surface.Resize(runtime.State.World,width,height);runtime.State.Quality=runtime.Surface.Quality();
+        const auto now=RenderClockSeconds();
+        if (!runtime.Surface.Due(now)) {std::this_thread::sleep_for(std::chrono::milliseconds(1));return;}
+        const auto elapsed=now-runtime.LastUpdate;runtime.LastUpdate=now;
         const ViewerFrameInfo info{runtime.Frames,std::isfinite(elapsed) ? std::clamp(elapsed,0.0,0.25) : 0.0,width,height};
         if (runtime.Options.AdvanceAnimations) { runtime.State.World.UpdateAnimations(info.DeltaTimeSeconds); }
         if (runtime.Options.OnFrame) {
@@ -96,7 +104,8 @@ void Frame(void* user) noexcept {
             catch (...) { runtime.Capture(ErrorCode::CallbackFailure,"Handle exceptions inside OnFrame or return control without throwing."); }
         }
         if (runtime.Stop()) { sapp_quit(); return; }
-        runtime.Renderer.Prepare(runtime.State.World);
+        const bool submitted=runtime.Surface.Render(runtime.State.World,now,runtime.Options.FrameLimit != 0 || bool(runtime.Options.OnFrame),runtime.State.Options.ClearColor);
+        if (!submitted) {std::this_thread::sleep_for(std::chrono::milliseconds(8));return;}
         sg_pass pass{};
         pass.swapchain = sglue_swapchain();
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -104,7 +113,7 @@ void Frame(void* user) noexcept {
         pass.action.colors[0].clear_value = {color[0],color[1],color[2],color[3]};
         pass.action.depth.load_action = SG_LOADACTION_CLEAR; pass.action.depth.clear_value = 1;
         sg_begin_pass(pass); runtime.InPass = true;
-        runtime.Renderer.Draw(runtime.State.World,static_cast<float>(width)/static_cast<float>(height));
+        runtime.Surface.Present();
         sg_end_pass(); runtime.InPass = false;
         sg_commit();
         ++runtime.Frames;
@@ -170,11 +179,13 @@ void Event(const sapp_event* source, void* user) noexcept {
 
 void Cleanup(void* user) noexcept {
     auto& runtime = *static_cast<Runtime*>(user);
-    runtime.Renderer.Clear();
+    runtime.Surface.Clear();runtime.State.Quality.Applied=false;runtime.State.Quality.Effective.reset();runtime.State.Quality.RenderWidth=runtime.State.Quality.RenderHeight=0;
     runtime.State.Controls.Reset();
     if (sg_isvalid()) { sg_shutdown(); }
 }
 } // namespace
+
+bool GraphicsRuntimeAvailable() noexcept {return true;}
 
 Result<void> RunStandalone(Viewer& viewer, ViewerState& state, const ViewerRunOptions& options) {
     if (!StandaloneMainThread()) {
@@ -191,11 +202,16 @@ Result<void> RunStandalone(Viewer& viewer, ViewerState& state, const ViewerRunOp
         return Result<void>::Failure({ErrorCode::InvalidState,"An existing application/graphics context already owns the standalone runtime.","Use Viewer in a standalone process; embedded integration is a later feature.",{}});
     }
     Runtime runtime{viewer,state,options};
+    state.ApplyQuality=[&](const QualityProfile& profile) {
+        if (!sg_isvalid()) {QualityState next;next.Requested=profile;next.RequestedSettings=ExpandQuality(profile).Value();state.Quality=std::move(next);return Result<void>::Success();}
+        const auto result=runtime.Surface.ApplyQuality(profile,state.World,std::max(1,sapp_width()),std::max(1,sapp_height()));state.Quality=runtime.Surface.Quality();return result;
+    };
+    state.Invalidate=[&]{runtime.Surface.Invalidate();};
     state.CloseRequested.store(false);
     state.HasRun = true;
     state.ActiveRun = &options;
     state.Running.store(true);
-    struct ResetRunning { ViewerState& State; ~ResetRunning() { State.ActiveRun = nullptr; State.Running.store(false); } } reset{state};
+    struct ResetRunning { ViewerState& State; ~ResetRunning() { State.ApplyQuality={};State.Invalidate={};State.ActiveRun = nullptr; State.Running.store(false); } } reset{state};
     sapp_desc app{};
     app.user_data = &runtime;
     app.init_userdata_cb = Initialize; app.frame_userdata_cb = Frame;

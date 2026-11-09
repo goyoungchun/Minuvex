@@ -20,9 +20,9 @@ public:
     MeshRenderer(const MeshRenderer&) = delete;
     MeshRenderer& operator=(const MeshRenderer&) = delete;
 
-    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false);
+    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false, int samples = 1);
     void Draw(const Mat4& model, const Mat4& viewProjection, const DirectionalLight& light = {},
-              const MaterialAsset& material = {}, sg_view texture = {}, sg_sampler sampler = {}, std::span<const Mat4> palette = {}) const;
+              const MaterialAsset& material = {}, sg_view texture = {}, sg_sampler sampler = {}, std::span<const Mat4> palette = {}, bool forceUnlit = false) const;
     void Shutdown() noexcept;
 
 private:

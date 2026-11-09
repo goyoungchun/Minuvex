@@ -1,6 +1,8 @@
 // Backend-specific readback belongs to this test, never to the public SDK.
 #include "TestHarness.h"
 #include "renderer/SceneRenderer.h"
+#include "renderer/RenderSurface.h"
+#include "renderer/TextureData.h"
 
 #include <sokol_gfx.h>
 #include <sokol_app.h>
@@ -22,6 +24,7 @@ using Pixel = std::array<std::uint8_t, 4>;
 bool failed = false;
 bool ran = false;
 bool animationTests = false;
+bool qualityTests = false;
 
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message,
          std::uint32_t line, const char* file, void* user) {
@@ -29,6 +32,14 @@ void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* m
     slog_func(tag, level, item, message, line, file, user);
 }
 void Require(bool condition, const char* message) { if (!condition) { throw std::runtime_error(message); } }
+std::vector<Pixel> ReadImage(sg_image image,int width,int height) {
+    auto* device=static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));auto* context=static_cast<ID3D11DeviceContext*>(const_cast<void*>(sg_d3d11_device_context()));
+    auto* texture=static_cast<ID3D11Texture2D*>(const_cast<void*>(sg_d3d11_query_image_info(image).tex2d));D3D11_TEXTURE2D_DESC desc{};texture->GetDesc(&desc);
+    Require(desc.SampleDesc.Count == 1,"Readback must use the resolved single-sample image.");desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+    ComPtr<ID3D11Texture2D> staging;Require(SUCCEEDED(device->CreateTexture2D(&desc,nullptr,staging.GetAddressOf())),"Cannot create quality readback texture.");context->CopyResource(staging.Get(),texture);
+    D3D11_MAPPED_SUBRESOURCE mapped{};Require(SUCCEEDED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped)),"Cannot map quality pixels.");
+    std::vector<Pixel> pixels(static_cast<std::size_t>(width)*height);for (int y=0;y<height;++y) {std::memcpy(pixels.data()+y*width,static_cast<const std::uint8_t*>(mapped.pData)+y*mapped.RowPitch,static_cast<std::size_t>(width)*4);}context->Unmap(staging.Get(),0);return pixels;
+}
 
 struct Target {
     sg_image Color{}, Depth{};
@@ -205,6 +216,62 @@ void RunAnimation() {
     Check(renderer.GetStats().ResidentModels == 0,"removing skinned instances releases GPU model cache");
 }
 
+void RunQuality() {
+    lv::AssetRegistry assets;const auto triangle=assets.LoadModel(Fixture("Sparse.gltf"));lv::Scene scene;
+    scene.MainCamera.Position={0,0,2};scene.MainCamera.Target={0,0,0};scene.MainCamera.VerticalFovRadians=std::numbers::pi_v<float>/2;scene.Sun.Intensity=0;scene.Sun.Ambient=0;
+    const auto object=scene.AddModel(triangle);lv::detail::RenderSurface surface;
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Medium);profile.Overrides.Resolution=lv::ResolutionMode::Fixed;profile.Overrides.FixedWidth=Size;profile.Overrides.FixedHeight=Size;profile.Overrides.TargetFps=0;profile.Overrides.FrustumCulling=false;
+    auto applied=surface.ApplyQuality(profile,scene,Size,Size);Require(bool(applied),"Cannot apply initial quality.");
+    double now=1;surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();auto dark=ReadImage(surface.ColorImage(),Size,Size);
+    Check(!Lit(dark,64,64),"Basic lighting obeys the Scene's zero illumination");
+    profile.Overrides.Lighting=lv::LightingMode::Unlit;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot apply Unlit quality.");
+    surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();auto bright=ReadImage(surface.ColorImage(),Size,Size);Check(Lit(bright,64,64),"quality Unlit changes actual material shading");
+    Target destination;sg_pass pass{};pass.attachments.colors[0]=destination.ColorView;pass.attachments.depth_stencil=destination.DepthView;
+    sg_begin_pass(pass);surface.Present();sg_end_pass();sg_commit();
+    Check(ReadImage(destination.Color,Size,Size) == bright,"fullscreen presentation preserves image orientation and pixels");
+    const auto originalImage=surface.ColorImage().id;const auto originalRequest=surface.Quality().Requested;
+    auto invalid=profile;invalid.Overrides.Shadow=lv::ShadowMode::Pcf;
+    Check(!surface.ApplyQuality(invalid,scene,Size,Size) && surface.ColorImage().id == originalImage && surface.Quality().Requested == originalRequest,"capability rejection preserves the previous GPU target and request");
+    auto bad=std::make_shared<lv::ModelAsset>(*triangle);bad->Meshes[0].Primitives[0].Geometry.Vertices[0].Normal={0,0,0};lv::Scene badScene;badScene.AddModel(bad);
+    auto changed=profile;changed.Overrides.Textures=lv::TextureQuality::Low;changed.Overrides.FixedWidth=64;
+    Check(!surface.ApplyQuality(changed,badScene,Size,Size) && surface.ColorImage().id == originalImage && surface.Quality().Requested == originalRequest,"failure after candidate target allocation rolls back GPU/settings");
+    surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(ReadImage(surface.ColorImage(),Size,Size) == bright,"previous resources still render correctly after rejected application");
+    const auto capabilities=surface.Quality().Capabilities;Check(capabilities.GraphicsAvailable && capabilities.Backend == lv::GraphicsBackend::D3D11 && (capabilities.SampleCounts&(1u<<1)),"capabilities come from the active D3D11 device/formats");
+    if (capabilities.SampleCounts&(1u<<4)) {
+        changed=profile;changed.Overrides.MsaaSamples=4;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot apply supported 4x MSAA.");surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();
+        auto antialiased=ReadImage(surface.ColorImage(),Size,Size);bool partial=false;for (const auto& p:antialiased) {partial|=p[0] > 0 && p[0] < 255;}
+        Check(partial && surface.Quality().Effective->MsaaSamples == 4 && Lit(antialiased,64,64),"MSAA resolves partial edge coverage into a sampleable image");
+    }
+    changed=profile;changed.Overrides.FixedWidth=64;changed.Overrides.FixedHeight=32;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot change render resolution.");
+    surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Width() == 64 && surface.Height() == 32 && ReadImage(surface.ColorImage(),64,32)[16*64+32][0] > 100,"fixed render extent recreates target and still displays geometry");
+    changed=profile;changed.Overrides.FrustumCulling=true;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot enable culling.");lv::Transform distant;distant.Position.X=100;scene.AddModel(triangle,distant);
+    surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Stats().LastDrawCalls == 1 && surface.Stats().LastCulledParts == 1,"Frustum culling removes offscreen draw submissions");
+    changed.Overrides.FrustumCulling=false;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot disable culling.");surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Stats().LastDrawCalls == 2,"disabling culling restores draw submissions");
+    changed=profile;changed.Overrides.OnDemand=lv::OnDemandMode::On;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot enable on-demand rendering.");
+    Check(surface.Render(scene,now+=1,false,{0,0,0,1}),"on-demand mode renders first frame");sg_commit();
+    Check(!surface.Render(scene,now+=1,false,{0,0,0,1}),"static on-demand frame reuses previous texture");
+    lv::Transform shift;shift.Position.X=.2f;scene.SetTransform(object,shift);Check(surface.Render(scene,now+=1,false,{0,0,0,1}),"Object edit wakes on-demand rendering");sg_commit();
+    scene.MainCamera.Position.X=.1f;Check(surface.Render(scene,now+=1,false,{0,0,0,1}),"direct advanced Camera edit wakes on-demand rendering");sg_commit();
+    surface.Invalidate();Check(surface.Render(scene,now+=1,false,{0,0,0,1}),"explicit redraw invalidates cached image");sg_commit();
+    lv::Scene skinned;skinned.MainCamera.Position={0,1,5};skinned.MainCamera.Target={0,1,0};auto rig=assets.LoadModel(Fixture("AnimatedRibbon.gltf"));const auto skin=skinned.AddModel(rig);
+    auto hip=rig->Skeleton.Joints[1].ReferenceLocal;hip.Position.X=10;auto tip=rig->Skeleton.Joints[2].ReferenceLocal;tip.Position.X=-20;
+    skinned.GetAnimation(skin).SetJointOverride(1,hip);skinned.GetAnimation(skin).SetJointOverride(2,tip);changed.Overrides.FrustumCulling=true;
+    Require(bool(surface.ApplyQuality(changed,skinned,Size,Size)),"Cannot configure skinned culling.");surface.Render(skinned,now+=1,false);sg_commit();
+    Check(surface.Stats().LastDrawCalls == 1 && surface.Stats().LastCulledParts == 0,"conservative skin bound keeps blends between two offscreen joints");
+    skinned.GetAnimation(skin).Play(0);Check(surface.Render(skinned,now+=1,false),"active animation keeps Low/on-demand skinning available");sg_commit();
+    auto large=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("SharedBox.glb")));large->Images[0].Width=large->Images[0].Height=1024;large->Images[0].Rgba.assign(1024*1024*4,255);lv::Scene textured;textured.AddModel(large);
+    auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);low.Overrides.FixedWidth=Size;low.Overrides.FixedHeight=Size;low.Overrides.Resolution=lv::ResolutionMode::Fixed;low.Overrides.TargetFps=0;
+    Require(bool(surface.ApplyQuality(low,textured,Size,Size)),"Cannot apply Low texture quality.");surface.Render(textured,now+=1,true);sg_commit();
+    Check(surface.Stats().MaxResidentTextureSize == 512 && large->Images[0].Width == 1024,"Low downsizes GPU texture while preserving immutable CPU asset");
+    auto high=lv::MakeQualityProfile(lv::QualityPreset::High);high.AllowFallback=true;high.Overrides.MsaaSamples=1;high.Overrides.TargetFps=0;
+    Require(bool(surface.ApplyQuality(high,textured,Size,Size)),"Cannot apply High sampling.");surface.Render(textured,now+=1,true);sg_commit();
+    Check(surface.Stats().MaxResidentTextureSize == 1024 && surface.Quality().Effective->Anisotropy > 1,"High restores texture resolution and creates anisotropic sampler");
+    lv::ImageAsset checker;checker.Width=checker.Height=2;checker.Rgba={0,0,0,255,255,255,255,255,0,0,0,255,255,255,255,255};const auto packed=lv::detail::PackTexture(checker,1);
+    Check(packed.Width == 1 && packed.Height == 1 && packed.Levels == 1 && packed.Pixels[0] >= 187 && packed.Pixels[0] <= 188,"texture reduction averages in linear space before sRGB encoding");
+    Require(bool(surface.Resize(textured,0,0)),"Cannot suspend quality surface.");Check(!surface.Texture().id && !surface.Quality().Applied,"zero-sized viewport releases targets");Require(bool(surface.Resize(textured,Size,Size)),"Cannot resume quality surface.");
+    Check(surface.Texture().id && surface.Quality().Applied,"viewport resumes with latest requested quality");
+}
+
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -215,7 +282,7 @@ void Initialize() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (animationTests) { RunAnimation(); } else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();} else if (animationTests) { RunAnimation(); } else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -224,6 +291,7 @@ void Cleanup() { if (sg_isvalid()) { sg_shutdown(); } }
 
 int main(int argc, char** argv) {
     animationTests = argc > 1 && std::strcmp(argv[1],"--animation") == 0;
+    qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
     sapp_desc app{};
     app.width = app.height = 64; app.window_title = "Minuvex D3D11 pixel tests";
     app.init_cb = Initialize; app.frame_cb = Frame; app.cleanup_cb = Cleanup; app.logger.func = Log;

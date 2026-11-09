@@ -2,6 +2,7 @@
 
 #include <minuvex/Result.h>
 #include <minuvex/Scene.h>
+#include <minuvex/Quality.h>
 
 #include <functional>
 #include <memory>
@@ -44,6 +45,7 @@ struct ViewerOptions {
     bool AutoFrame = true;
     std::array<float, 4> ClearColor{0.035f, 0.045f, 0.065f, 1.0f};
     CameraControlOptions CameraControls;
+    QualityProfile Quality;
 };
 
 struct ModelOptions {
@@ -94,6 +96,10 @@ public:
     Result<void> SetPose(ObjectId id, const PoseAsset& pose); // Manual override after animation.
     Result<void> ResetPose(ObjectId id);
     Result<void> ProcessInput(const ViewerInputEvent& event);
+    Result<void> SetQuality(const QualityProfile& profile);
+    Result<QualityState> GetQuality() const;
+    Result<QualityCapabilities> GetQualityCapabilities() const;
+    Result<void> RequestRedraw(); // Invalidate on-demand rendering on the owner thread.
 
     // Advanced API: owner thread only, retaining Phase 2's exception contracts.
     Scene& GetScene() noexcept;
