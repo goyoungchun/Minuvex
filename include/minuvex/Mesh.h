@@ -10,12 +10,13 @@ struct Vertex {
     std::array<float, 3> Position;
     std::array<float, 3> Normal;
     std::array<float, 4> Color;
+    std::array<float, 2> TexCoord{};
 };
 
-// Phase 1: an indexed triangle list with at most 65,536 vertices.
+// Indexed triangle list; 32-bit indices support imported glTF geometry.
 struct MeshData {
     std::vector<Vertex> Vertices;
-    std::vector<std::uint16_t> Indices;
+    std::vector<std::uint32_t> Indices;
 };
 
 // Throws std::invalid_argument before any GPU upload if the mesh is malformed.

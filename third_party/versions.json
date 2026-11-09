@@ -1,0 +1,16 @@
+{
+  "cgltf": {
+    "source": "https://github.com/jkuhlmann/cgltf",
+    "revision": "85cd62382dfea638278962690cf515023f33ed00",
+    "license": "MIT (cgltf/LICENSE)",
+    "file": "cgltf/cgltf.h",
+    "sha256": "efb169dee911696b5d35fc8e3f7ea0c56d679debc529eba9ca6aa6443ba9d5e9"
+  },
+  "stb_image": {
+    "source": "https://github.com/nothings/stb",
+    "revision": "4e9b368bfc071e97206ea5c6adba68dd0cbf8897",
+    "license": "MIT or public domain (license notices embedded in stb_image.h)",
+    "file": "stb/stb_image.h",
+    "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3"
+  }
+}

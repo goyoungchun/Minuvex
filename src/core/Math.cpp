@@ -51,6 +51,93 @@ Mat4 Mat4::RotationX(float radians) noexcept {
     return result;
 }
 
+Mat4 Mat4::Translation(Vec3 position) {
+    if (!std::isfinite(position.X) || !std::isfinite(position.Y) || !std::isfinite(position.Z)) {
+        throw std::invalid_argument("Translation must be finite.");
+    }
+    auto result = Identity();
+    result.Elements[12] = position.X;
+    result.Elements[13] = position.Y;
+    result.Elements[14] = position.Z;
+    return result;
+}
+
+Mat4 Mat4::Scale(Vec3 scale) {
+    if (!std::isfinite(scale.X) || !std::isfinite(scale.Y) || !std::isfinite(scale.Z) ||
+        scale.X == 0 || scale.Y == 0 || scale.Z == 0) {
+        throw std::invalid_argument("Scale must be finite and nonzero on each axis.");
+    }
+    auto result = Identity();
+    result.Elements[0] = scale.X;
+    result.Elements[5] = scale.Y;
+    result.Elements[10] = scale.Z;
+    return result;
+}
+
+Mat4 Mat4::Rotation(Quaternion q) {
+    const double length = std::sqrt(double(q.X) * q.X + double(q.Y) * q.Y + double(q.Z) * q.Z + double(q.W) * q.W);
+    if (!std::isfinite(length) || length == 0) {
+        throw std::invalid_argument("Rotation quaternion must be finite and nonzero.");
+    }
+    const float x = static_cast<float>(q.X / length);
+    const float y = static_cast<float>(q.Y / length);
+    const float z = static_cast<float>(q.Z / length);
+    const float w = static_cast<float>(q.W / length);
+    Mat4 result;
+    result.Elements = {
+        1 - 2 * (y*y + z*z), 2 * (x*y + z*w), 2 * (x*z - y*w), 0,
+        2 * (x*y - z*w), 1 - 2 * (x*x + z*z), 2 * (y*z + x*w), 0,
+        2 * (x*z + y*w), 2 * (y*z - x*w), 1 - 2 * (x*x + y*y), 0,
+        0, 0, 0, 1
+    };
+    return result;
+}
+
+double Mat4::LinearDeterminant() const noexcept {
+    const auto& m = Elements;
+    return double(m[0]) * (double(m[5])*m[10] - double(m[9])*m[6]) -
+        double(m[4]) * (double(m[1])*m[10] - double(m[9])*m[2]) +
+        double(m[8]) * (double(m[1])*m[6] - double(m[5])*m[2]);
+}
+
+Mat4 Mat4::NormalMatrix() const {
+    for (float value : Elements) {
+        if (!std::isfinite(value)) { throw std::invalid_argument("Transform matrix must be finite."); }
+    }
+    if (Elements[3] != 0 || Elements[7] != 0 || Elements[11] != 0 || Elements[15] != 1) {
+        throw std::invalid_argument("Model transform must be affine.");
+    }
+    const double det = LinearDeterminant();
+    if (!std::isfinite(det) || det == 0) { throw std::invalid_argument("Model transform is singular."); }
+    const auto& m = Elements;
+    auto result = Identity();
+    // Cofactor matrix / determinant is the inverse transpose.
+    result.Elements[0] = static_cast<float>((double(m[5])*m[10] - double(m[9])*m[6]) / det);
+    result.Elements[1] = static_cast<float>((double(m[8])*m[6] - double(m[4])*m[10]) / det);
+    result.Elements[2] = static_cast<float>((double(m[4])*m[9] - double(m[8])*m[5]) / det);
+    result.Elements[4] = static_cast<float>((double(m[9])*m[2] - double(m[1])*m[10]) / det);
+    result.Elements[5] = static_cast<float>((double(m[0])*m[10] - double(m[8])*m[2]) / det);
+    result.Elements[6] = static_cast<float>((double(m[8])*m[1] - double(m[0])*m[9]) / det);
+    result.Elements[8] = static_cast<float>((double(m[1])*m[6] - double(m[5])*m[2]) / det);
+    result.Elements[9] = static_cast<float>((double(m[4])*m[2] - double(m[0])*m[6]) / det);
+    result.Elements[10] = static_cast<float>((double(m[0])*m[5] - double(m[4])*m[1]) / det);
+    for (float value : result.Elements) {
+        if (!std::isfinite(value)) { throw std::invalid_argument("Normal transform exceeds float range."); }
+    }
+    return result;
+}
+
+Vec3 Mat4::TransformPoint(Vec3 point) const noexcept {
+    const auto& m = Elements;
+    return {m[0]*point.X + m[4]*point.Y + m[8]*point.Z + m[12],
+            m[1]*point.X + m[5]*point.Y + m[9]*point.Z + m[13],
+            m[2]*point.X + m[6]*point.Y + m[10]*point.Z + m[14]};
+}
+
+Mat4 Transform::Matrix() const {
+    return Mat4::Translation(Position) * Mat4::Rotation(Rotation) * Mat4::Scale(Scale);
+}
+
 Mat4 Mat4::Perspective(float fov, float aspect, float nearPlane, float farPlane) {
     if (!std::isfinite(fov) || !std::isfinite(aspect) || !std::isfinite(nearPlane) ||
         !std::isfinite(farPlane) || fov <= 0 || fov >= std::numbers::pi_v<float> ||

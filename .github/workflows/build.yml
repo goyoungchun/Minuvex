@@ -1,4 +1,4 @@
-name: Foundation build
+name: Minuvex build
 
 on:
   push:
@@ -21,5 +21,5 @@ jobs:
         run: cmake -S . -B out/ci -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DBUILD_TESTING=ON
       - name: Build C++ and HLSL/Metal shaders
         run: cmake --build out/ci --config ${{ matrix.configuration }} --parallel
-      - name: Core tests (no desktop or GPU required)
+      - name: Core, Asset and Scene tests (no desktop or GPU required)
         run: ctest --test-dir out/ci --build-config ${{ matrix.configuration }} --output-on-failure

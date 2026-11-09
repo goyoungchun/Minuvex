@@ -138,12 +138,12 @@ void TestMeshValidation() {
     Rejects([] { auto mesh = lv::MakeCube(); mesh.Vertices[0].Position[0] = std::numeric_limits<float>::quiet_NaN(); lv::ValidateMesh(mesh); }, "reject NaN positions");
     Rejects([] { auto mesh = lv::MakeCube(); mesh.Vertices[0].Color[0] = std::numeric_limits<float>::infinity(); lv::ValidateMesh(mesh); }, "reject infinite colors");
     Rejects([] { auto mesh = lv::MakeCube(); mesh.Vertices[0].Normal = {0, 0, 0}; lv::ValidateMesh(mesh); }, "reject zero normals");
-    Rejects([] { auto mesh = lv::MakeCube(); mesh.Vertices.resize(65537, mesh.Vertices[0]); lv::ValidateMesh(mesh); }, "reject vertices beyond 16-bit range");
     auto boundary = lv::MakeCube();
-    boundary.Vertices.resize(65536, boundary.Vertices[0]);
-    boundary.Indices = {0, 1, 65535};
+    boundary.Vertices.resize(65537, boundary.Vertices[0]);
+    boundary.Indices = {0, 1, 65536};
     lv::ValidateMesh(boundary);
-    Check(true, "accept the full 16-bit vertex range");
+    Check(true, "accept vertices and indices beyond the 16-bit range");
+    Rejects([] { auto mesh = lv::MakeCube(); mesh.Vertices[0].TexCoord[0] = std::numeric_limits<float>::quiet_NaN(); lv::ValidateMesh(mesh); }, "reject non-finite UV coordinates");
 }
 
 } // namespace

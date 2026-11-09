@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Minuvex VERSION 0.1.0 LANGUAGES CXX)
+project(Minuvex VERSION 0.2.0 LANGUAGES CXX)
 
 include(cmake/MSVCDependencies.cmake)
 
 option(MINUVEX_BUILD_RENDERER "Build the Sokol renderer (Windows/macOS)" ON)
-option(MINUVEX_BUILD_EXAMPLES "Build the foundation mesh example" ON)
+option(MINUVEX_BUILD_EXAMPLES "Build the foundation and asset/scene examples" ON)
 option(MINUVEX_ENABLE_RENDER_SMOKE_TEST "Register a test requiring a desktop and GPU" OFF)
 
 include(CTest)
@@ -25,6 +25,22 @@ add_library(minuvex::core ALIAS minuvex_core)
 target_include_directories(minuvex_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 minuvex_configure_target(minuvex_core)
 
+# Small CPU codecs are vendored with their licenses: core-only/offline builds
+# need no network or graphics dependencies for importing and testing assets.
+add_library(minuvex_asset_codecs STATIC src/assets/ThirdParty.cpp)
+target_include_directories(minuvex_asset_codecs SYSTEM PUBLIC third_party/cgltf third_party/stb)
+target_compile_features(minuvex_asset_codecs PRIVATE cxx_std_20)
+
+add_library(minuvex_assets STATIC src/assets/AssetRegistry.cpp src/assets/GltfImport.cpp)
+add_library(minuvex::assets ALIAS minuvex_assets)
+target_link_libraries(minuvex_assets PUBLIC minuvex_core PRIVATE minuvex_asset_codecs)
+minuvex_configure_target(minuvex_assets)
+
+add_library(minuvex_scene STATIC src/scene/Scene.cpp)
+add_library(minuvex::scene ALIAS minuvex_scene)
+target_link_libraries(minuvex_scene PUBLIC minuvex_assets)
+minuvex_configure_target(minuvex_scene)
+
 if(MINUVEX_BUILD_RENDERER)
     if(WIN32)
         set(MINUVEX_SOKOL_BACKEND SOKOL_D3D11)
@@ -32,7 +48,7 @@ if(MINUVEX_BUILD_RENDERER)
         enable_language(OBJCXX)
         set(MINUVEX_SOKOL_BACKEND SOKOL_METAL)
     else()
-        message(FATAL_ERROR "The Phase 1 renderer supports Windows and macOS only. For core tests, set MINUVEX_BUILD_RENDERER=OFF and MINUVEX_BUILD_EXAMPLES=OFF.")
+        message(FATAL_ERROR "The renderer supports Windows and macOS only. For CPU tests, set MINUVEX_BUILD_RENDERER=OFF and MINUVEX_BUILD_EXAMPLES=OFF.")
     endif()
 
     include(cmake/Dependencies.cmake)
@@ -50,9 +66,9 @@ if(MINUVEX_BUILD_RENDERER)
         target_link_libraries(minuvex_sokol_gfx PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation")
     endif()
 
-    add_library(minuvex_renderer STATIC src/renderer/MeshRenderer.cpp)
+    add_library(minuvex_renderer STATIC src/renderer/MeshRenderer.cpp src/renderer/SceneRenderer.cpp)
     add_library(minuvex::renderer ALIAS minuvex_renderer)
-    target_link_libraries(minuvex_renderer PUBLIC minuvex_core PRIVATE minuvex_sokol_gfx)
+    target_link_libraries(minuvex_renderer PUBLIC minuvex_scene PRIVATE minuvex_sokol_gfx)
     target_include_directories(minuvex_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     minuvex_compile_shader(minuvex_renderer "${CMAKE_CURRENT_SOURCE_DIR}/shaders/mesh.glsl")
     minuvex_configure_target(minuvex_renderer)
@@ -63,6 +79,7 @@ if(MINUVEX_BUILD_EXAMPLES)
         message(FATAL_ERROR "MINUVEX_BUILD_EXAMPLES requires MINUVEX_BUILD_RENDERER.")
     endif()
     add_subdirectory(examples/FoundationMesh)
+    add_subdirectory(examples/AssetScene)
 endif()
 
 if(BUILD_TESTING)
@@ -71,11 +88,36 @@ if(BUILD_TESTING)
     minuvex_configure_target(minuvex_core_tests)
     add_test(NAME foundation.core COMMAND minuvex_core_tests)
 
+    foreach(suite IN ITEMS Asset Scene)
+        string(TOLOWER "${suite}" suite_name)
+        add_executable(minuvex_${suite_name}_tests "tests/${suite}/${suite}Tests.cpp")
+        target_link_libraries(minuvex_${suite_name}_tests PRIVATE minuvex::scene)
+        target_include_directories(minuvex_${suite_name}_tests PRIVATE tests)
+        target_compile_definitions(minuvex_${suite_name}_tests PRIVATE
+            MINUVEX_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/Fixtures"
+            MINUVEX_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-output")
+        minuvex_configure_target(minuvex_${suite_name}_tests)
+        add_test(NAME phase2.${suite_name} COMMAND minuvex_${suite_name}_tests)
+    endforeach()
+
     if(MINUVEX_ENABLE_RENDER_SMOKE_TEST)
         if(NOT MINUVEX_BUILD_EXAMPLES)
             message(FATAL_ERROR "The render smoke test requires MINUVEX_BUILD_EXAMPLES.")
         endif()
         add_test(NAME foundation.rendering COMMAND minuvex_foundation --smoke-test)
         set_tests_properties(foundation.rendering PROPERTIES TIMEOUT 30 LABELS "rendering;desktop")
+        add_test(NAME phase2.rendering COMMAND minuvex_asset_scene --smoke-test)
+        set_tests_properties(phase2.rendering PROPERTIES TIMEOUT 30 LABELS "rendering;desktop")
+        if(WIN32)
+            add_executable(minuvex_scene_pixels tests/Rendering/ScenePixels.cpp)
+            target_link_libraries(minuvex_scene_pixels PRIVATE minuvex::renderer minuvex_sokol_app d3d11)
+            target_include_directories(minuvex_scene_pixels PRIVATE src tests)
+            target_compile_definitions(minuvex_scene_pixels PRIVATE
+                MINUVEX_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/Fixtures"
+                MINUVEX_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-output")
+            minuvex_configure_target(minuvex_scene_pixels)
+            add_test(NAME phase2.pixels.d3d11 COMMAND minuvex_scene_pixels)
+            set_tests_properties(phase2.pixels.d3d11 PROPERTIES TIMEOUT 30 LABELS "rendering;desktop")
+        endif()
     endif()
 endif()

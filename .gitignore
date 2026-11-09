@@ -4,6 +4,7 @@
 /CMakeUserPresets.json
 .DS_Store
 *.user
-docs/ProjectPlan.md
-README.md
-docs/Phase1.md
+
+# Keep Markdown documentation and local agent notes untracked until finalized.
+# Remove this rule when the documentation is ready to be published.
+*.[mM][dD]
