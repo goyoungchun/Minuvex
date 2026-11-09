@@ -17,6 +17,7 @@
 #if defined(_WIN32)
 #include <d3d11.h>
 #include <wrl/client.h>
+#undef GetObject
 #endif
 
 namespace {
@@ -24,7 +25,8 @@ struct Application {
     std::unique_ptr<lv::editor::EditorUI> UI;
     std::filesystem::path Initial, Directory = std::filesystem::current_path();
     std::uint64_t Frames = 0, Limit = 0;
-    bool Smoke = false, Gui = false, Failed = false;
+    bool Smoke = false, AnimationSmoke = false, Gui = false, Failed = false;
+    double PreviousTime = 0;
     char Message[2048]{};
     std::uint32_t FirstTarget = 0;
     int FirstWidth = 0;
@@ -83,10 +85,15 @@ void Init(void* user) noexcept {
         }
         if (app.Smoke) {
             auto& doc = app.UI->Document;
-            const auto asset = doc.ImportModel(MINUVEX_EDITOR_SAMPLE); Require(asset);
+            const auto asset = doc.ImportModel(app.AnimationSmoke ? MINUVEX_EDITOR_ANIMATION_SAMPLE : MINUVEX_EDITOR_SAMPLE); Require(asset);
             auto group = doc.CreateObject("Editor test group"); Require(group);
             lv::Transform t; t.Position = {-1.5f,0,0}; auto left = doc.PlaceModel(asset.Value(),t,group.Value()); Require(left);
             t.Position.X = 1.5f; Require(doc.PlaceModel(asset.Value(),t,group.Value()));
+            if (app.AnimationSmoke) {
+                Require(doc.Select(left.Value())); Require(doc.PlayAnimation(left.Value(),0));
+                auto local = doc.GetScene().GetObject(left.Value()).Model->Skeleton.Joints[1].ReferenceLocal; local.Position.X = .25f;
+                Require(doc.SetJointPose(left.Value(),1,local));
+            }
             Require(doc.SetCamera(lv::detail::FitSceneCamera(doc.GetScene(),1.5f)));
         }
     } catch (const std::exception& e) { app.Fail(e.what()); }
@@ -100,16 +107,30 @@ void SmokeAfterDraw(Application& app) {
             Require(window && window->Active && window->DockId,"Editor panel is missing from the docking layout.");
         }
         Require(ui.Viewport.Width() > 0 && sg_query_view_state(ui.Viewport.Texture()) == SG_RESOURCESTATE_VALID,"Editor viewport texture is unavailable.");
-        Require(ui.Viewport.Stats().ResidentModels == 1 && ui.Viewport.Stats().LastDrawCalls == 4,"Editor instances did not share the GPU model.");
+        Require(ui.Viewport.Stats().ResidentModels == 1 && ui.Viewport.Stats().LastDrawCalls == (app.AnimationSmoke ? 2u : 4u),"Editor instances did not share the GPU model.");
+        if (app.AnimationSmoke) {
+            for (const auto* name : {"Bone Inspector","Animation Controls"}) { const auto* window = ImGui::FindWindowByName(name); Require(window && window->DockId,"Animation panel was not docked."); }
+            const auto id = doc.Selection(); const auto& player = doc.GetScene().GetObject(id).Animation;
+            Require(player.Time() > app.PreviousTime && player.Overrides().Joints.size() == 1,"Editor tick did not advance animation while preserving overrides.");
+            const auto folder = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT); std::filesystem::create_directories(folder);
+            Require(doc.SavePoseFile(id,folder/"full.mvxpose.json")); Require(doc.SavePoseFile(id,folder/"partial.mvxpose.json",true));
+            Require(doc.ClearPoseOverrides(id)); Require(doc.LoadPoseFile(id,folder/"partial.mvxpose.json"));
+            Require(doc.GetScene().GetObject(id).Animation.Overrides().Joints.size() == 1,"Editor partial pose reload failed.");
+        }
 #if defined(_WIN32)
         CheckViewportPixels(ui.Viewport);
 #endif
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
-        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/"smoke.mvxscene.json";
+        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
         std::filesystem::create_directories(output.parent_path()); Require(doc.Save(output));
         ui.RequestNew(); Require(doc.GetScene().Size() == 0,"New Scene did not reset the document.");
         ui.RequestOpen(output); Require(doc.GetScene().Size() == 3 && doc.Assets().size() == 1 && !doc.IsDirty(),"Editor saved Scene did not reopen.");
+        if (app.AnimationSmoke) {
+            const auto id = doc.GetScene().ObjectIds()[1]; Require(doc.Select(id));
+            Require(doc.GetScene().GetObject(id).Animation.State() == lv::PlaybackState::Playing && doc.GetScene().GetObject(id).Animation.Overrides().Joints.size() == 1,"Editor Scene did not restore animation and pose.");
+        }
     }
+    if (app.AnimationSmoke && app.Frames == 0) { app.PreviousTime = doc.GetScene().GetObject(doc.Selection()).Animation.Time(); }
     if (app.Frames == 7) {
         Require(ui.Viewport.Texture().id != 0,"Viewport did not resume after suspension.");
         // New/Open/Quit guard is also exercised in the real ImGui frame.
@@ -117,7 +138,7 @@ void SmokeAfterDraw(Application& app) {
     }
     if (app.Frames == 8) {
         Require(!ui.QuitRequested() && ImGui::IsPopupOpen("Unsaved changes"),"Unsaved document quit was not guarded.");
-        std::printf("Editor smoke: docked panels, shared offscreen rendering, resize/suspend/resume, save/reopen and unsaved guard passed.\n");
+        std::printf("Editor %s smoke: docked panels, shared offscreen rendering, resize/suspend/resume, save/reopen and unsaved guard passed.\n",app.AnimationSmoke ? "animation/pose" : "scene");
     }
 }
 void Frame(void* user) noexcept {
@@ -129,6 +150,8 @@ void Frame(void* user) noexcept {
         simgui_frame_desc_t frame{}; frame.width = sapp_width(); frame.height = sapp_height();
         frame.delta_time = std::clamp(sapp_frame_duration(),0.00001,0.25); frame.dpi_scale = sapp_dpi_scale();
         simgui_new_frame(frame);
+        const auto advanced = app.UI->Document.UpdateAnimations(frame.delta_time);
+        if (!advanced) { throw std::runtime_error(advanced.Error().Message); }
         if (app.Smoke && app.Frames == 3) {
             // Resize/suspend before building Image commands that reference views.
             app.UI->Viewport.Resize(128,64);
@@ -157,6 +180,10 @@ void Event(const sapp_event* event, void* user) noexcept {
         if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
             for (int i = 0; i < sapp_get_num_dropped_files(); ++i) {
                 const auto path = lv::detail::PathFromUtf8(sapp_get_dropped_file_path(i));
+                if (path.filename().generic_u8string().ends_with(u8".mvxpose.json")) {
+                    const auto loaded = app.UI->Document.LoadPoseFile(app.UI->Document.Selection(),path);
+                    if (!loaded) { app.UI->ShowError(loaded.Error()); } break;
+                }
                 if (path.extension() == ".json") { app.UI->RequestOpen(path); break; }
                 app.UI->Import(path,true);
             }
@@ -175,6 +202,7 @@ int Run(const std::vector<std::string>& args) {
     try {
         for (std::size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--smoke-test") { app.Smoke = true; app.Limit = 10; }
+            else if (args[i] == "--animation-smoke-test") { app.Smoke = app.AnimationSmoke = true; app.Limit = 10; }
             else if (args[i] == "--frames" && i+1 < args.size()) {
                 const auto& value = args[++i]; auto [end,error] = std::from_chars(value.data(),value.data()+value.size(),app.Limit);
                 Require(error == std::errc{} && end == value.data()+value.size() && app.Limit > 0,"--frames requires a positive integer.");

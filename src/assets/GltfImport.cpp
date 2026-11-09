@@ -178,6 +178,17 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
     const auto* normal = Attribute(primitive, cgltf_attribute_type_normal);
     const auto* color = Attribute(primitive, cgltf_attribute_type_color);
     const auto* uv = Attribute(primitive, cgltf_attribute_type_texcoord);
+    const auto* joints = Attribute(primitive,cgltf_attribute_type_joints);
+    const auto* weights = Attribute(primitive,cgltf_attribute_type_weights);
+    for (std::size_t i=0;i<primitive.attributes_count;++i) {
+        const auto& a = primitive.attributes[i];
+        if ((a.type == cgltf_attribute_type_joints || a.type == cgltf_attribute_type_weights) && a.index != 0) { Unsupported("Only four influences (JOINTS_0/WEIGHTS_0) are supported; additional sets are rejected."); }
+    }
+    if (bool(joints) != bool(weights)) { Invalid("JOINTS_0 and WEIGHTS_0 must be provided together."); }
+    if (joints && (joints->type != cgltf_type_vec4 || joints->normalized ||
+        (joints->component_type != cgltf_component_type_r_8u && joints->component_type != cgltf_component_type_r_16u))) { Invalid("JOINTS_0 requires unsigned byte/short VEC4."); }
+    if (weights && (weights->type != cgltf_type_vec4 || !((weights->component_type == cgltf_component_type_r_32f && !weights->normalized) ||
+        ((weights->component_type == cgltf_component_type_r_8u || weights->component_type == cgltf_component_type_r_16u) && weights->normalized)))) { Invalid("WEIGHTS_0 requires floats or normalized unsigned byte/short VEC4."); }
     if (!position || position->type != cgltf_type_vec3 || position->component_type != cgltf_component_type_r_32f) {
         Invalid("Primitive requires a float VEC3 POSITION accessor.");
     }
@@ -193,13 +204,25 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
             Invalid("Color/UV accessors require floats or normalized unsigned bytes/shorts.");
         }
     }
-    for (auto* accessor : {normal, color, uv}) {
+    for (auto* accessor : {normal, color, uv, joints, weights}) {
         if (accessor && accessor->count != count) { Invalid("Primitive attribute counts differ."); }
     }
     MeshData mesh;
     mesh.Vertices.resize(count);
     for (std::size_t i = 0; i < count; ++i) {
         auto& vertex = mesh.Vertices[i];
+        if (joints) {
+            float indices[4]{};
+            if (!cgltf_accessor_read_float(joints,i,indices,4) || !cgltf_accessor_read_float(weights,i,vertex.Weights.data(),4)) { Invalid("Cannot decode joint attributes."); }
+            double sum = 0;
+            for (std::size_t k=0;k<4;++k) {
+                if (!std::isfinite(indices[k]) || indices[k] < 0 || indices[k] >= MaxSkinJoints || std::floor(indices[k]) != indices[k] ||
+                    !std::isfinite(vertex.Weights[k]) || vertex.Weights[k] < 0) { Invalid("Invalid joint index or negative/nonfinite weight."); }
+                vertex.Joints[k] = static_cast<std::uint16_t>(indices[k]); sum += vertex.Weights[k];
+            }
+            if (!std::isfinite(sum) || sum <= 0) { Invalid("Joint weights must have a finite positive sum."); }
+            for (auto& weight : vertex.Weights) { weight = static_cast<float>(weight/sum); }
+        }
         vertex.Color = {1, 1, 1, 1};
         if (!cgltf_accessor_read_float(position, i, vertex.Position.data(), 3) ||
             (normal && !cgltf_accessor_read_float(normal, i, vertex.Normal.data(), 3)) ||
@@ -344,24 +367,35 @@ void ImportNodes(Context& context, const cgltf_data& data) {
     auto& model = context.Model;
     if (data.nodes_count > model.Settings.MaxNodes) { Limit("Model exceeds MaxNodes."); }
     model.Nodes.resize(data.nodes_count);
+    model.Skeleton.Joints.resize(data.nodes_count);
     for (std::size_t i = 0; i < data.nodes_count; ++i) {
         const auto& source = data.nodes[i];
         auto& node = model.Nodes[i];
-        if (source.skin || source.has_mesh_gpu_instancing) { Unsupported("Skins and EXT_mesh_gpu_instancing are not supported in Phase 2."); }
+        if (source.has_mesh_gpu_instancing) { Unsupported("EXT_mesh_gpu_instancing is not supported."); }
         if (source.has_matrix && (source.has_translation || source.has_rotation || source.has_scale)) { Invalid("Node cannot specify both matrix and TRS."); }
         if (source.name) { node.Name = source.name; }
         if (source.parent) { node.Parent = cgltf_node_index(&data, source.parent); }
         if (source.mesh) { node.MeshIndex = cgltf_mesh_index(&data, source.mesh); }
+        if (source.skin) { node.SkinIndex = cgltf_skin_index(&data,source.skin); if (!source.mesh) { Invalid("A skinned node must reference a mesh."); } }
+        auto& joint = model.Skeleton.Joints[i]; joint.Name = node.Name;
+        joint.MatrixAuthored = source.has_matrix != 0;
+        joint.Parent = node.Parent ? static_cast<JointId>(*node.Parent) : NoJoint;
         try {
-            if (source.has_matrix) { std::copy_n(source.matrix, 16, node.LocalTransform.Elements.begin()); }
+            if (source.has_matrix) {
+                std::copy_n(source.matrix, 16, node.LocalTransform.Elements.begin());
+                try { joint.ReferenceLocal = DecomposeTRS(node.LocalTransform); }
+                catch (const std::invalid_argument&) { joint.Editable = false; }
+            }
             else {
                 Transform transform;
                 if (source.has_translation) { transform.Position = {source.translation[0], source.translation[1], source.translation[2]}; }
                 if (source.has_rotation) { transform.Rotation = {source.rotation[0], source.rotation[1], source.rotation[2], source.rotation[3]}; }
                 if (source.has_scale) { transform.Scale = {source.scale[0], source.scale[1], source.scale[2]}; }
                 node.LocalTransform = transform.Matrix();
+                joint.ReferenceLocal = transform;
             }
             (void)node.LocalTransform.NormalMatrix();
+            joint.ReferenceMatrix = node.LocalTransform;
         } catch (const std::invalid_argument& error) { Invalid(std::string("Invalid node transform: ") + error.what()); }
     }
     std::vector<std::size_t> roots;
@@ -385,7 +419,7 @@ void ImportNodes(Context& context, const cgltf_data& data) {
         const auto world = parent * node.LocalTransform;
         try { (void)world.NormalMatrix(); } catch (const std::invalid_argument& error) { Invalid(error.what()); }
         if (node.MeshIndex) {
-            model.Parts.push_back({*node.MeshIndex, world});
+            model.Parts.push_back({*node.MeshIndex, world,static_cast<JointId>(index),node.SkinIndex});
             for (const auto& primitive : model.Meshes[*node.MeshIndex].Primitives) {
                 for (const auto& vertex : primitive.Geometry.Vertices) {
                     const auto point = world.TransformPoint({vertex.Position[0], vertex.Position[1], vertex.Position[2]});
@@ -402,6 +436,77 @@ void ImportNodes(Context& context, const cgltf_data& data) {
         for (std::size_t k = source.children_count; k > 0; --k) { stack.push_back({cgltf_node_index(&data, source.children[k - 1]), world}); }
     }
     if (!hasBounds) { Invalid("Selected glTF scene contains no renderable geometry."); }
+}
+
+void ImportRig(Context& context, const cgltf_data& data) {
+    auto& model = context.Model;
+    if (data.skins_count > 256 || data.animations_count > 256) { Limit("At most 256 skins/clips per model are supported."); }
+    for (std::size_t i=0;i<data.skins_count;++i) {
+        const auto& source = data.skins[i]; SkinAsset skin;
+        if (source.name) { skin.Name = source.name; }
+        if (!source.joints_count) { Invalid("Skin has no joints."); }
+        if (source.joints_count > MaxSkinJoints) { Limit("Skin exceeds the 128-joint GPU palette limit."); }
+        const auto* inverse = source.inverse_bind_matrices;
+        if (inverse && (inverse->count < source.joints_count || inverse->type != cgltf_type_mat4 || inverse->component_type != cgltf_component_type_r_32f || inverse->normalized)) { Invalid("Inverse bind matrices require at least one float MAT4 per joint."); }
+        context.Reserve(source.joints_count*(sizeof(JointId)+sizeof(Mat4)));
+        for (std::size_t k=0;k<source.joints_count;++k) {
+            if (!source.joints[k]) { Invalid("Missing skin joint."); }
+            const auto joint = static_cast<JointId>(cgltf_node_index(&data,source.joints[k]));
+            if (std::find(skin.Joints.begin(),skin.Joints.end(),joint) != skin.Joints.end()) { Invalid("Skin has duplicate joints."); }
+            skin.Joints.push_back(joint); model.Skeleton.Joints.at(joint).IsJoint = true;
+            auto matrix = Mat4::Identity();
+            if (inverse && !cgltf_accessor_read_float(inverse,k,matrix.Elements.data(),16)) { Invalid("Cannot read inverse bind matrix."); }
+            try { (void)matrix.NormalMatrix(); } catch (const std::invalid_argument& e) { Invalid(e.what()); }
+            skin.InverseBindMatrices.push_back(matrix);
+        }
+        model.Skins.push_back(std::move(skin));
+    }
+    for (const auto& node : model.Nodes) {
+        if (!node.SkinIndex) { continue; }
+        const auto& skin = model.Skins.at(*node.SkinIndex);
+        for (const auto& primitive : model.Meshes.at(*node.MeshIndex).Primitives) {
+            if (!primitive.HasSkinning) { Invalid("Every primitive of a skinned mesh needs JOINTS_0 and WEIGHTS_0."); }
+            for (const auto& vertex : primitive.Geometry.Vertices) {
+                for (auto joint : vertex.Joints) { if (joint >= skin.Joints.size()) { Invalid("Vertex joint index exceeds the node's skin palette."); } }
+            }
+        }
+    }
+    try { ValidateSkeleton(model.Skeleton); } catch (const std::invalid_argument& e) { Invalid(e.what()); }
+    model.Skeleton.Signature = SkeletonSignature(model.Skeleton);
+    for (std::size_t i=0;i<data.animations_count;++i) {
+        const auto& source = data.animations[i]; AnimationClip clip;
+        clip.Name = source.name ? source.name : "Animation " + std::to_string(i);
+        if (source.channels_count > model.Nodes.size()*3) { Limit("Animation exceeds the per-node track limit."); }
+        for (std::size_t k=0;k<source.channels_count;++k) {
+            const auto& channel = source.channels[k]; const auto* sampler = channel.sampler;
+            if (!channel.target_node) { Invalid("Animation channel has no target node."); }
+            if (!sampler || !sampler->input || !sampler->output) { Invalid("Animation channel has an incomplete sampler."); }
+            if (sampler->interpolation != cgltf_interpolation_type_linear && sampler->interpolation != cgltf_interpolation_type_step) { Unsupported("CUBICSPLINE animation interpolation is deferred; use STEP or LINEAR."); }
+            if (channel.target_path == cgltf_animation_path_type_weights) { Unsupported("Morph-weight animation is not supported."); }
+            if (channel.target_node->has_matrix) { Invalid("glTF animated nodes must use TRS, not matrix."); }
+            AnimationTrack track;
+            track.Joint = static_cast<JointId>(cgltf_node_index(&data,channel.target_node));
+            switch (channel.target_path) {
+            case cgltf_animation_path_type_translation: track.Path = AnimationPath::Translation; break;
+            case cgltf_animation_path_type_rotation: track.Path = AnimationPath::Rotation; break;
+            case cgltf_animation_path_type_scale: track.Path = AnimationPath::Scale; break;
+            default: Unsupported("Unknown animation channel path.");
+            }
+            track.Interpolation = sampler->interpolation == cgltf_interpolation_type_step ? AnimationInterpolation::Step : AnimationInterpolation::Linear;
+            const auto& input = *sampler->input; const auto& output = *sampler->output;
+            if (input.type != cgltf_type_scalar || input.component_type != cgltf_component_type_r_32f || input.normalized || !input.count ||
+                output.count != input.count || output.type != (track.Path == AnimationPath::Rotation ? cgltf_type_vec4 : cgltf_type_vec3) || output.component_type != cgltf_component_type_r_32f || output.normalized) { Invalid("Animation requires float scalar times and matching float VEC3/VEC4 values."); }
+            context.Reserve(input.count*(sizeof(float)+sizeof(std::array<float,4>)));
+            track.Times.resize(input.count); track.Values.resize(input.count);
+            for (std::size_t key=0;key<input.count;++key) {
+                if (!cgltf_accessor_read_float(&input,key,&track.Times[key],1) || !cgltf_accessor_read_float(&output,key,track.Values[key].data(),cgltf_num_components(output.type))) { Invalid("Cannot read animation samples."); }
+            }
+            clip.Duration = std::max(clip.Duration,double(track.Times.back()));
+            clip.Tracks.push_back(std::move(track));
+        }
+        try { ValidateAnimation(model.Skeleton,clip); } catch (const std::invalid_argument& e) { Invalid(e.what()); }
+        model.Animations.push_back(std::move(clip));
+    }
 }
 
 } // namespace
@@ -449,14 +554,18 @@ std::shared_ptr<ModelAsset> ImportGltf(const std::filesystem::path& path, const 
         if (sourceMesh.name) { mesh.Name = sourceMesh.name; }
         for (std::size_t k = 0; k < sourceMesh.primitives_count; ++k) {
             const auto& primitive = sourceMesh.primitives[k];
-            mesh.Primitives.push_back({ImportGeometry(context, primitive), primitive.material ? cgltf_material_index(data.get(), primitive.material) : data->materials_count});
+            mesh.Primitives.push_back({ImportGeometry(context, primitive), primitive.material ? cgltf_material_index(data.get(), primitive.material) : data->materials_count,Attribute(primitive,cgltf_attribute_type_joints) != nullptr});
         }
         if (mesh.Primitives.empty()) { Invalid("Mesh has no primitives."); }
         model->Meshes.push_back(std::move(mesh));
     }
     ImportNodes(context, *data);
-    if (data->animations_count) { model->Warnings.push_back("Animation clips are not evaluated in Phase 2; the default node transforms are displayed."); }
-    model->Warnings.push_back("Phase 2 uses base-color diffuse/unlit shading; advanced PBR, normal and emissive maps are not evaluated.");
+    ImportRig(context,*data);
+    if (!model->Skins.empty()) {
+        try { AnimationPlayer reference; reference.Bind(model); model->ModelBounds = reference.GetBounds(); }
+        catch (const std::invalid_argument& e) { Invalid(e.what()); }
+    }
+    model->Warnings.push_back("Base-color diffuse/unlit shading; advanced PBR, normal and emissive maps are not evaluated.");
     return model;
 }
 

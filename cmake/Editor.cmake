@@ -25,5 +25,6 @@ if(WIN32)
 endif()
 target_compile_definitions(minuvex_editor PRIVATE
     MINUVEX_EDITOR_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/SharedBox.glb"
+    MINUVEX_EDITOR_ANIMATION_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/AnimatedRibbon.gltf"
     MINUVEX_EDITOR_TEST_OUTPUT="${PROJECT_BINARY_DIR}/test-output/editor")
 minuvex_configure_target(minuvex_editor)

@@ -21,9 +21,9 @@ jobs:
         run: cmake -S . -B out/ci -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DBUILD_TESTING=ON
       - name: Build C++ and HLSL/Metal shaders
         run: cmake --build out/ci --config ${{ matrix.configuration }} --parallel
-      - name: Core, Asset, Scene, Viewer and Editor document CPU tests
+      - name: Core, Asset, Scene, Viewer, Editor document and Animation CPU tests
         run: ctest --test-dir out/ci --build-config ${{ matrix.configuration }} --output-on-failure
       - name: Configure an external SDK consumer
         run: cmake -S tests/Consumer -B out/consumer -DMINUVEX_SOURCE_DIR="${{ github.workspace }}" -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DFETCHCONTENT_SOURCE_DIR_SOKOL="${{ github.workspace }}/out/ci/_deps/sokol-src"
-      - name: Build public Viewer and Editor document consumers (no desktop required)
+      - name: Build public Viewer, Editor document and Animation consumers (no desktop required)
         run: cmake --build out/consumer --config ${{ matrix.configuration }} --parallel

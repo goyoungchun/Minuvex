@@ -14,7 +14,7 @@ void TestImports() {
     Check(gltf->Id != 0 && gltf->Id != glb->Id, "assets have unique nonzero IDs");
     Check(registry.Find(gltf->Id) == gltf && !registry.Find(0), "registry lookup and invalid asset ID");
     Check(registry.LoadModel(Fixture("../Fixtures/SharedBox.gltf")) == gltf, "canonical path load reuses the same CPU asset");
-    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 1, "registry retains import metadata");
+    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 2, "registry retains import metadata");
     Check(gltf->ContentHash && gltf->SourcePath.is_absolute(), "asset has a content hash and canonical source");
     Check(gltf->Dependencies.size() == 1 && external->Dependencies.size() == 3, "embedded and external dependency lists");
     for (const auto& model : {gltf, glb, external}) {
@@ -82,7 +82,7 @@ void TestFailuresAndLimits() {
     failure(Replace(json, "\"normalized\": true", "\"normalized\": false"), lv::ImportErrorCode::InvalidData, "integer color attributes require normalization");
     failure(Replace(Read(Fixture("Sparse.gltf")), "base64,AAEC", "base64,AAAA"), lv::ImportErrorCode::InvalidData, "duplicate sparse indices are rejected");
     failure(Replace(json, "\"children\": [\n        1,", "\"children\": [\n        0,"), lv::ImportErrorCode::InvalidData, "cyclic node hierarchy is rejected");
-    failure(Replace(Replace(Read(Fixture("Sparse.gltf")), "\"asset\":", "\"skins\":[{\"joints\":[0]}],\"asset\":"), "\"mesh\": 0", "\"mesh\":0,\"skin\":0"), lv::ImportErrorCode::UnsupportedFeature, "skinning is explicitly deferred to Phase 5");
+    failure(Replace(Replace(Read(Fixture("Sparse.gltf")), "\"asset\":", "\"skins\":[{\"joints\":[0]}],\"asset\":"), "\"mesh\": 0", "\"mesh\":0,\"skin\":0"), lv::ImportErrorCode::InvalidData, "skinned mesh requires joint attributes");
     failure(Replace(json, "\"asset\":", "\"extensionsRequired\":[\"KHR_draco_mesh_compression\"],\"asset\":"), lv::ImportErrorCode::UnsupportedFeature, "unsupported required extension is explicit");
     failure(Replace(json, "\"attributes\":", "\"mode\":1,\"attributes\":"), lv::ImportErrorCode::UnsupportedFeature, "line primitives are explicitly unsupported");
     failure(Replace(json, "\"name\": \"Checker\",", "\"name\":\"Checker\",\"alphaMode\":\"BLEND\","), lv::ImportErrorCode::UnsupportedFeature, "alpha blending is explicitly unsupported");

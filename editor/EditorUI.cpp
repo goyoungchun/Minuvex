@@ -74,6 +74,12 @@ void EditorUI::ApplyPending() {
 void EditorUI::FileDialog(Dialog type) {
     dialog_ = type;
     pathInput_ = type == Dialog::Save ? (Document.Path().empty() ? Text(directory_/"Scene.mvxscene.json") : Text(Document.Path())) : Text(directory_) + "/";
+    if (type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad) { poseObject_ = Document.Selection(); pathInput_ = Text(directory_/"Pose.mvxpose.json"); }
+}
+bool EditorUI::SaveDialog(Dialog type, const std::filesystem::path& path) {
+    if (type == Dialog::Save) { return Save(path); }
+    if (!Report(Document.SavePoseFile(poseObject_,path,type == Dialog::PosePartial))) { return false; }
+    status_ = "Saved Pose " + Text(path); return true;
 }
 bool EditorUI::Save(const std::filesystem::path& path) {
     if (!Report(Document.Save(path))) { return false; }
@@ -96,7 +102,8 @@ void EditorUI::Menu() {
         if (ImGui::BeginMenu("Window")) {
             ImGui::MenuItem("Viewport",nullptr,&viewport_); ImGui::MenuItem("Hierarchy",nullptr,&hierarchy_);
             ImGui::MenuItem("Inspector",nullptr,&inspector_); ImGui::MenuItem("Asset Browser",nullptr,&assets_);
-            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = true; }
+            ImGui::MenuItem("Bone Inspector",nullptr,&bones_); ImGui::MenuItem("Animation Controls",nullptr,&animation_);
+            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = true; }
             ImGui::EndMenu();
         }
         ImGui::Separator();
@@ -128,7 +135,15 @@ void EditorUI::Dockspace() {
         const auto bottom = ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,0.30f,nullptr,&center);
         ImGui::DockBuilderDockWindow("Hierarchy",left); ImGui::DockBuilderDockWindow("Inspector",right);
         ImGui::DockBuilderDockWindow("Asset Browser",bottom); ImGui::DockBuilderDockWindow("Viewport",center);
+        ImGui::DockBuilderDockWindow("Bone Inspector",right); ImGui::DockBuilderDockWindow("Animation Controls",bottom);
         ImGui::DockBuilderFinish(dock);
+    }
+    // Add Phase 5 panels to a saved Phase 4 layout without resetting user splits.
+    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"}}) {
+        if (!ImGui::FindWindowSettingsByID(ImHashStr(panel.first))) {
+            const auto* anchor = ImGui::FindWindowSettingsByID(ImHashStr(panel.second));
+            ImGui::DockBuilderDockWindow(panel.first,anchor && anchor->DockId ? anchor->DockId : dock);
+        }
     }
 }
 void EditorUI::Hierarchy() {
@@ -210,6 +225,81 @@ void EditorUI::Inspector() {
         }
     }
     ImGui::End();
+}
+void EditorUI::BoneInspector() {
+    if (!bones_) { return; }
+    if (ImGui::Begin("Bone Inspector",&bones_)) {
+        const auto object = Document.Selection();
+        if (!object || !Document.GetScene().GetObject(object).Model) { ImGui::TextUnformatted("Select a model instance in Hierarchy."); }
+        else {
+            const auto& instance = Document.GetScene().GetObject(object); const auto& skeleton = instance.Model->Skeleton;
+            if (boneObject_ != object) { boneObject_ = object; bone_ = NoJoint; }
+            if (bone_ >= skeleton.Joints.size()) {
+                for (std::size_t i=0;i<skeleton.Joints.size();++i) { if (skeleton.Joints[i].IsJoint) { bone_ = static_cast<JointId>(i); break; } }
+                if (bone_ == NoJoint && !skeleton.Joints.empty()) { bone_ = 0; }
+            }
+            ImGui::Text("%zu skins | %zu transform nodes",instance.Model->Skins.size(),skeleton.Joints.size());
+            if (bone_ != NoJoint && ImGui::BeginCombo("Joint / Node",skeleton.Joints[bone_].Name.c_str())) {
+                for (std::size_t i=0;i<skeleton.Joints.size();++i) { ImGui::PushID(static_cast<int>(i));
+                    const auto& joint = skeleton.Joints[i]; const auto label = (joint.IsJoint ? "[bone] " : "[node] ") + (joint.Name.empty() ? std::to_string(i) : joint.Name);
+                    if (ImGui::Selectable(label.c_str(),bone_ == i)) { bone_ = static_cast<JointId>(i); } ImGui::PopID(); }
+                ImGui::EndCombo();
+            }
+            if (bone_ != NoJoint) {
+                const auto& joint = skeleton.Joints[bone_];
+                ImGui::Text("Joint ID: %u",bone_);
+                ImGui::TextWrapped("Parent: %s",joint.Parent == NoJoint ? "<root>" : skeleton.Joints[joint.Parent].Name.c_str());
+                if (!joint.Editable) { ImGui::TextWrapped("Matrix contains shear; TRS editing is unavailable."); }
+                else {
+                    const auto pose = instance.Animation.CapturePose();
+                    auto local = std::find_if(pose.Joints.begin(),pose.Joints.end(),[&](const auto& p) { return p.Joint == bone_; })->Local;
+                    ImGui::TextWrapped("Local TRS overrides replace animation on this node.");
+                    bool edited = VecInput("Position",local.Position); edited = RotationInput(local.Rotation) || edited; edited = VecInput("Scale",local.Scale,0.01f) || edited;
+                    if (edited) { Report(Document.SetJointPose(object,bone_,local)); }
+                    const auto& overrides = instance.Animation.Overrides().Joints;
+                    ImGui::Text("Override: %s",std::any_of(overrides.begin(),overrides.end(),[&](const auto& p) { return p.Joint == bone_; }) ? "enabled" : "none");
+                    if (ImGui::Button("Clear joint override")) { Report(Document.ClearJointPose(object,bone_)); }
+                }
+            }
+            if (ImGui::Button("Clear all overrides")) { Report(Document.ClearPoseOverrides(object)); }
+            if (ImGui::Button("Reference Pose")) { Report(Document.ResetPose(object)); }
+            ImGui::Separator();
+            if (ImGui::Button("Save full Pose...")) { FileDialog(Dialog::PoseFull); }
+            if (ImGui::Button("Save overrides...")) { FileDialog(Dialog::PosePartial); }
+            if (ImGui::Button("Load Pose...")) { FileDialog(Dialog::PoseLoad); }
+        }
+    } ImGui::End();
+}
+void EditorUI::AnimationControls() {
+    if (!animation_) { return; }
+    if (ImGui::Begin("Animation Controls",&animation_)) {
+        const auto object = Document.Selection();
+        if (!object || !Document.GetScene().GetObject(object).Model) { ImGui::TextUnformatted("Select a model instance in Hierarchy."); }
+        else {
+            const auto& instance = Document.GetScene().GetObject(object); const auto& clips = instance.Model->Animations; const auto& player = instance.Animation;
+            if (clips.empty()) { ImGui::TextUnformatted("This model has no animation clips. Pose editing remains available."); }
+            else {
+                if (ImGui::BeginCombo("Clip",player.Clip() ? clips[*player.Clip()].Name.c_str() : "<none>")) {
+                    for (std::size_t i=0;i<clips.size();++i) { ImGui::PushID(static_cast<int>(i));
+                        if (ImGui::Selectable(clips[i].Name.c_str(),player.Clip() == i)) { Report(Document.PlayAnimation(object,i)); } ImGui::PopID(); }
+                    ImGui::EndCombo();
+                }
+                if (ImGui::Button("Play / Restart")) { Report(Document.PlayAnimation(object,player.Clip().value_or(0))); }
+                ImGui::SameLine(); if (ImGui::Button(player.State() == PlaybackState::Playing ? "Pause" : "Resume")) {
+                    if (player.State() == PlaybackState::Playing) { Report(Document.PauseAnimation(object)); }
+                    else if (player.Clip()) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
+                }
+                ImGui::SameLine(); if (ImGui::Button("Stop")) { Report(Document.StopAnimation(object)); }
+                if (player.Clip()) {
+                    double time = player.Time(), zero = 0, duration = clips[*player.Clip()].Duration;
+                    if (ImGui::SliderScalar("Time",ImGuiDataType_Double,&time,&zero,&duration,"%.3f s")) { Report(Document.SeekAnimation(object,time)); }
+                }
+                float speed = static_cast<float>(player.Speed()); if (ImGui::DragFloat("Speed",&speed,0.05f,-100,100)) { Report(Document.SetAnimationSpeed(object,speed)); }
+                bool loop = player.Loop(); if (ImGui::Checkbox("Loop",&loop)) { Report(Document.SetAnimationLoop(object,loop)); }
+                ImGui::Text("%s | %zu joint overrides",player.State() == PlaybackState::Playing ? "Playing" : player.State() == PlaybackState::Paused ? "Paused" : "Stopped",player.Overrides().Joints.size());
+            }
+        }
+    } ImGui::End();
 }
 void EditorUI::AssetBrowser() {
     if (!assets_) { return; }
@@ -313,19 +403,20 @@ void EditorUI::Dialogs() {
     }
     if (dialog_ != Dialog::None) { ImGui::OpenPopup("File path"); }
     if (ImGui::BeginPopupModal("File path",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : "Import model (.gltf / .glb)");
+        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : dialog_ == Dialog::Import ? "Import model (.gltf / .glb)" : "Pose file (.mvxpose.json)");
         ImGui::SetNextItemWidth(620);
         if (ImGui::IsWindowAppearing()) { ImGui::SetKeyboardFocusHere(); }
         const bool enter = ImGui::InputText("Path",&pathInput_,ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
         if (ImGui::Button("OK") || enter) {
             const auto path = detail::PathFromUtf8(pathInput_);
             bool close = true;
-            if (dialog_ == Dialog::Save) {
+            if (dialog_ == Dialog::Save || dialog_ == Dialog::PoseFull || dialog_ == Dialog::PosePartial) {
                 std::error_code error;
-                if (std::filesystem::is_regular_file(path,error)) { overwritePath_ = path; }
-                else { close = Save(path); }
+                if (std::filesystem::is_regular_file(path,error)) { overwritePath_ = path; overwriteDialog_ = dialog_; }
+                else { close = SaveDialog(dialog_,path); }
             }
             else if (dialog_ == Dialog::Open) { RequestOpen(path); }
+            else if (dialog_ == Dialog::PoseLoad) { close = Report(Document.LoadPoseFile(poseObject_,path)); }
             else { Import(path,false); }
             if (close) { dialog_ = Dialog::None; ImGui::CloseCurrentPopup(); }
         }
@@ -336,7 +427,7 @@ void EditorUI::Dialogs() {
     if (ImGui::BeginPopupModal("Replace file?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted("A file with this name already exists. Replace it?");
         if (ImGui::Button("Replace")) {
-            if (Save(overwritePath_)) { overwritePath_.clear(); ImGui::CloseCurrentPopup(); }
+            if (SaveDialog(overwriteDialog_,overwritePath_)) { overwritePath_.clear(); ImGui::CloseCurrentPopup(); }
         }
         ImGui::SameLine(); if (ImGui::Button("Cancel")) { overwritePath_.clear(); pending_ = Action::None; ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
@@ -348,7 +439,7 @@ void EditorUI::Dialogs() {
     }
 }
 void EditorUI::Draw() {
-    Menu(); Dockspace(); Hierarchy(); Inspector(); AssetBrowser(); ViewportPanel(); Dialogs();
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); ViewportPanel(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());

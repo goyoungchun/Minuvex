@@ -12,18 +12,22 @@ bool Same(lv::Vec3 a, lv::Vec3 b) { return Near(a.X,b.X) && Near(a.Y,b.Y) && Nea
 int main(int argc, char* argv[]) {
     if (argc != 2) { return 2; }
     const std::string mode(argv[1]);
+    const bool animated = mode == "animation" || mode == "animation-manual";
     lv::Viewer viewer;
     lv::Viewer nested;
     lv::ObjectId modelId = 0;
     if (mode != "empty") {
-        const auto model = viewer.AddModel(Fixture("SharedBox.glb"));
+        const auto model = viewer.AddModel(Fixture(animated ? "AnimatedRibbon.gltf" : "SharedBox.glb"));
         if (!model) { Check(false,model.Error().Message.c_str()); return Finish(); }
         modelId = model.Value();
     }
+    if (animated) { Require(viewer.PlayAnimation(modelId,0)); viewer.GetScene().GetAnimation(modelId).Seek(.5); }
     std::uint64_t callbacks = 0;
     bool consume = false, throwInput = false, recursive = false;
     lv::ViewerRunOptions options;
     options.FrameLimit = 3;
+    options.AdvanceAnimations = mode != "animation-manual";
+    double expectedTime = .5;
     options.OnInput = [&](lv::Viewer& v, const lv::ViewerInputEvent& event) {
         if (recursive && event.Key == lv::ViewerKey::Space) {
             const auto reentered = v.ProcessInput(event);
@@ -38,6 +42,11 @@ int main(int argc, char* argv[]) {
         Check(info.FrameNumber == callbacks && info.FramebufferWidth > 0 && info.FramebufferHeight > 0 &&
             std::isfinite(info.DeltaTimeSeconds) && info.DeltaTimeSeconds >= 0,"frame callback receives valid framebuffer/timing information");
         ++callbacks;
+        if (animated) {
+            if (mode == "animation") { expectedTime += info.DeltaTimeSeconds; }
+            Check(std::abs(v.GetScene().GetAnimation(modelId).Time()-expectedTime) < 0.000001,"runtime advances animation before OnFrame, or leaves it to manual updates");
+            if (mode == "animation-manual") { v.GetScene().UpdateAnimations(.125); expectedTime += .125; }
+        }
         if (mode == "callback-error") { throw std::runtime_error("expected frame failure"); }
         if (mode == "render-error") { v.GetScene().MainCamera.Target = v.GetScene().MainCamera.Position; return; }
         if (mode == "normal" && info.FrameNumber == 0) {

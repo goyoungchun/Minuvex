@@ -9,6 +9,7 @@ struct Vec3 {
     float Y = 0.0f;
     float Z = 0.0f;
 };
+struct Bounds { Vec3 Min{}, Max{}; };
 
 struct Quaternion {
     float X = 0.0f;
@@ -49,5 +50,6 @@ struct Transform {
 };
 
 Mat4 operator*(const Mat4& left, const Mat4& right) noexcept;
+Transform DecomposeTRS(const Mat4& matrix); // Rejects shear, projective and singular matrices.
 
 } // namespace lv

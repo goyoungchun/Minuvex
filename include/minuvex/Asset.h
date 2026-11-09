@@ -1,6 +1,7 @@
 #pragma once
 
 #include <minuvex/Math.h>
+#include <minuvex/Animation.h>
 #include <minuvex/Mesh.h>
 
 #include <filesystem>
@@ -65,6 +66,7 @@ struct MaterialAsset {
 struct MeshPrimitive {
     MeshData Geometry;
     std::size_t MaterialIndex = 0;
+    bool HasSkinning = false;
 };
 
 struct MeshAsset {
@@ -77,16 +79,14 @@ struct ModelNode {
     std::optional<std::size_t> Parent;
     std::optional<std::size_t> MeshIndex;
     Mat4 LocalTransform = Mat4::Identity();
+    std::optional<std::size_t> SkinIndex;
 };
 
 struct ModelPart {
     std::size_t MeshIndex = 0;
     Mat4 Transform = Mat4::Identity();
-};
-
-struct Bounds {
-    Vec3 Min{};
-    Vec3 Max{};
+    JointId Node = NoJoint;
+    std::optional<std::size_t> SkinIndex;
 };
 
 struct ModelAsset {
@@ -96,18 +96,19 @@ struct ModelAsset {
     std::vector<std::filesystem::path> Dependencies;
     // FNV-1a of source and loaded resource bytes, for change tracking, not security.
     std::uint64_t ContentHash = 0;
-    std::uint32_t ImportVersion = 1;
+    std::uint32_t ImportVersion = 2;
     std::vector<MeshAsset> Meshes;
     std::vector<MaterialAsset> Materials;
     std::vector<ImageAsset> Images;
     std::vector<TextureAsset> Textures;
     std::vector<ModelNode> Nodes;
     std::vector<ModelPart> Parts; // Only nodes reachable from the selected glTF scene.
+    SkeletonAsset Skeleton;
+    std::vector<SkinAsset> Skins;
+    std::vector<AnimationClip> Animations;
     Bounds ModelBounds;
     std::vector<std::string> Warnings;
 };
-
-using ModelHandle = std::shared_ptr<const ModelAsset>;
 
 // CPU-only, synchronous, single-threaded registry. Strongly retains loaded assets
 // until Clear(); handles and Scene instances remain valid after Clear().

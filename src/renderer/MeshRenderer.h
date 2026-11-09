@@ -5,6 +5,7 @@
 #include <minuvex/Scene.h>
 
 #include <sokol_gfx.h>
+#include <span>
 
 namespace lv::detail {
 
@@ -19,9 +20,9 @@ public:
     MeshRenderer(const MeshRenderer&) = delete;
     MeshRenderer& operator=(const MeshRenderer&) = delete;
 
-    void Initialize(const MeshData& mesh, bool doubleSided = false);
+    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false);
     void Draw(const Mat4& model, const Mat4& viewProjection, const DirectionalLight& light = {},
-              const MaterialAsset& material = {}, sg_view texture = {}, sg_sampler sampler = {}) const;
+              const MaterialAsset& material = {}, sg_view texture = {}, sg_sampler sampler = {}, std::span<const Mat4> palette = {}) const;
     void Shutdown() noexcept;
 
 private:
@@ -33,6 +34,7 @@ private:
     sg_view whiteView_{};
     sg_sampler whiteSampler_{};
     int indexCount_ = 0;
+    bool skinned_ = false;
 };
 
 } // namespace lv::detail

@@ -66,6 +66,7 @@ struct ViewerRunOptions {
     std::function<void(Viewer&, const ViewerFrameInfo&)> OnFrame;
     // Return true to consume a normalized event before the default controls.
     std::function<bool(Viewer&, const ViewerInputEvent&)> OnInput;
+    bool AdvanceAnimations = true; // Advance before OnFrame; disable for manual Scene updates.
 };
 
 // Synchronous standalone facade. Construct/use on the owning thread, run on the
@@ -87,6 +88,11 @@ public:
     Result<void> SetCamera(const Camera& camera); // Disables automatic framing.
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> FrameScene();
+    Result<void> PlayAnimation(ObjectId id, std::size_t clip);
+    Result<void> PauseAnimation(ObjectId id);
+    Result<void> StopAnimation(ObjectId id);
+    Result<void> SetPose(ObjectId id, const PoseAsset& pose); // Manual override after animation.
+    Result<void> ResetPose(ObjectId id);
     Result<void> ProcessInput(const ViewerInputEvent& event);
 
     // Advanced API: owner thread only, retaining Phase 2's exception contracts.

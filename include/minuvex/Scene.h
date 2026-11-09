@@ -34,12 +34,14 @@ struct SceneObject {
     Transform LocalTransform;
     bool Visible = true;
     ModelHandle Model;
+    AnimationPlayer Animation;
 };
 
 struct RenderItem {
     ObjectId Object = NoObject;
     ModelHandle Model;
     Mat4 WorldTransform;
+    const AnimationPlayer* Animation = nullptr; // Valid until the owning Scene object is removed.
 };
 
 class Scene {
@@ -62,6 +64,8 @@ public:
     void SetTransform(ObjectId id, const Transform& transform);
     void SetVisible(ObjectId id, bool visible);
     void SetModel(ObjectId id, ModelHandle model); // Empty handle detaches the model.
+    AnimationPlayer& GetAnimation(ObjectId id); // Model instance state; throws for empty objects.
+    void UpdateAnimations(double deltaSeconds);
     Mat4 GetWorldTransform(ObjectId id) const;
     std::vector<RenderItem> CollectRenderItems() const;
 

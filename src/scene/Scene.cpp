@@ -39,11 +39,13 @@ ObjectId Scene::CreateObject(std::string name, ObjectId parent) {
 ObjectId Scene::AddModel(ModelHandle model, const Transform& transform, ObjectId parent) {
     if (!model) { throw std::invalid_argument("AddModel requires a nonempty model handle."); }
     (void)transform.Matrix().NormalMatrix();
+    AnimationPlayer animation; animation.Bind(model);
     const auto utf8Name = model->SourcePath.stem().generic_u8string();
     const auto id = CreateObject(std::string(utf8Name.begin(), utf8Name.end()), parent);
     auto& object = objects_.at(id);
     object.LocalTransform = transform;
     object.Model = std::move(model);
+    object.Animation = std::move(animation);
     return id;
 }
 
@@ -72,7 +74,18 @@ void Scene::SetTransform(ObjectId id, const Transform& transform) {
 }
 
 void Scene::SetVisible(ObjectId id, bool visible) { (void)GetObject(id); objects_.at(id).Visible = visible; }
-void Scene::SetModel(ObjectId id, ModelHandle model) { (void)GetObject(id); objects_.at(id).Model = std::move(model); }
+void Scene::SetModel(ObjectId id, ModelHandle model) {
+    (void)GetObject(id); AnimationPlayer animation; animation.Bind(model);
+    objects_.at(id).Model = std::move(model); objects_.at(id).Animation = std::move(animation);
+}
+AnimationPlayer& Scene::GetAnimation(ObjectId id) {
+    if (!GetObject(id).Model) { throw std::invalid_argument("Object has no model animation state."); }
+    return objects_.at(id).Animation;
+}
+void Scene::UpdateAnimations(double deltaSeconds) {
+    if (!std::isfinite(deltaSeconds) || deltaSeconds < 0) { throw std::invalid_argument("Animation delta must be finite and nonnegative."); }
+    for (auto id : order_) { if (objects_.at(id).Model) { objects_.at(id).Animation.Update(deltaSeconds); } }
+}
 
 Mat4 Scene::GetWorldTransform(ObjectId id) const {
     auto result = Mat4::Identity();
@@ -106,7 +119,8 @@ std::vector<RenderItem> Scene::CollectRenderItems() const {
             states.emplace(*it, state);
         }
         const auto& object = GetObject(id);
-        if (states.at(id).Visible && object.Model) { result.push_back({id, object.Model, states.at(id).World}); }
+        if (object.Model && object.Animation.Model() != object.Model) { throw std::invalid_argument("Scene-owned player was rebound; use Scene::SetModel."); }
+        if (states.at(id).Visible && object.Model) { result.push_back({id, object.Model, states.at(id).World,&object.Animation}); }
     }
     return result;
 }

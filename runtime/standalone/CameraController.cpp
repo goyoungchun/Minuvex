@@ -65,7 +65,7 @@ Camera FitSceneCamera(const Scene& scene, float aspect) {
     bool first = true;
     for (const auto& item : items) {
         (void)item.WorldTransform.NormalMatrix();
-        const auto& bounds = item.Model->ModelBounds;
+        const auto bounds = item.Animation ? item.Animation->GetBounds() : item.Model->ModelBounds;
         for (unsigned mask = 0; mask < 8; ++mask) {
             const auto point = item.WorldTransform.TransformPoint({mask & 1 ? bounds.Max.X : bounds.Min.X,
                 mask & 2 ? bounds.Max.Y : bounds.Min.Y, mask & 4 ? bounds.Max.Z : bounds.Min.Z});

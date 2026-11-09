@@ -7,7 +7,8 @@
 
 namespace lv {
 
-// Version 1: external glTF/GLB references, library, hierarchy, TRS, camera and light.
+// Writes version 2 with per-instance animation/pose; reads versions 1 and 2.
+// External glTF/GLB references, library, hierarchy, TRS, camera and light.
 // Runtime ObjectId/AssetId values are remapped when opening an archive.
 struct SceneArchive {
     Scene World;

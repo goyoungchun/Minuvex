@@ -1,6 +1,7 @@
 #pragma once
 
 #include <minuvex/SceneIO.h>
+#include <minuvex/PoseIO.h>
 
 namespace lv {
 
@@ -27,6 +28,21 @@ public:
     Result<void> SetVisible(ObjectId object, bool visible);
     Result<void> SetCamera(const Camera& camera);
     Result<void> SetLight(const DirectionalLight& light);
+    Result<void> PlayAnimation(ObjectId object, std::size_t clip);
+    Result<void> PauseAnimation(ObjectId object);
+    Result<void> ResumeAnimation(ObjectId object);
+    Result<void> StopAnimation(ObjectId object);
+    Result<void> SeekAnimation(ObjectId object, double seconds);
+    Result<void> SetAnimationSpeed(ObjectId object, double speed);
+    Result<void> SetAnimationLoop(ObjectId object, bool loop);
+    Result<void> SetJointPose(ObjectId object, JointId joint, const Transform& local);
+    Result<void> ClearJointPose(ObjectId object, JointId joint);
+    Result<void> ClearPoseOverrides(ObjectId object);
+    Result<void> ResetPose(ObjectId object);
+    Result<void> ApplyPose(ObjectId object, const PoseAsset& pose);
+    Result<void> SavePoseFile(ObjectId object, const std::filesystem::path& path, bool overridesOnly = false) const;
+    Result<void> LoadPoseFile(ObjectId object, const std::filesystem::path& path);
+    Result<void> UpdateAnimations(double deltaSeconds); // Preview tick; does not mark dirty.
 
 private:
     AssetRegistry registry_;

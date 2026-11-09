@@ -1,10 +1,36 @@
 #include <minuvex/Math.h>
 
 #include <cmath>
+#include <algorithm>
 #include <numbers>
 #include <stdexcept>
 
 namespace lv {
+
+Transform DecomposeTRS(const Mat4& matrix) {
+    (void)matrix.NormalMatrix();
+    const auto& m = matrix.Elements;
+    Transform t; t.Position = {m[12],m[13],m[14]};
+    double x = std::hypot(double(m[0]),double(m[1]),double(m[2]));
+    const double y = std::hypot(double(m[4]),double(m[5]),double(m[6]));
+    const double z = std::hypot(double(m[8]),double(m[9]),double(m[10]));
+    if (matrix.LinearDeterminant() < 0) { x = -x; }
+    t.Scale = {static_cast<float>(x),static_cast<float>(y),static_cast<float>(z)};
+    const double a = m[0]/x, b = m[4]/y, c = m[8]/z, d = m[1]/x, e = m[5]/y, f = m[9]/z, g = m[2]/x, h = m[6]/y, i = m[10]/z;
+    double qx, qy, qz, qw;
+    if (a+e+i > 0) { const auto s = std::sqrt(a+e+i+1)*2; qw=s/4; qx=(h-f)/s; qy=(c-g)/s; qz=(d-b)/s; }
+    else if (a > e && a > i) { const auto s = std::sqrt(1+a-e-i)*2; qw=(h-f)/s; qx=s/4; qy=(b+d)/s; qz=(c+g)/s; }
+    else if (e > i) { const auto s = std::sqrt(1+e-a-i)*2; qw=(c-g)/s; qx=(b+d)/s; qy=s/4; qz=(f+h)/s; }
+    else { const auto s = std::sqrt(1+i-a-e)*2; qw=(d-b)/s; qx=(c+g)/s; qy=(f+h)/s; qz=s/4; }
+    t.Rotation = {static_cast<float>(qx),static_cast<float>(qy),static_cast<float>(qz),static_cast<float>(qw)};
+    const auto rebuilt = t.Matrix();
+    for (std::size_t k = 0; k < 16; ++k) {
+        if (!std::isfinite(rebuilt.Elements[k]) || std::abs(double(m[k])-rebuilt.Elements[k]) > 0.0001*std::max(1.0,std::abs(double(m[k])))) {
+            throw std::invalid_argument("Matrix contains shear and cannot be represented by TRS.");
+        }
+    }
+    return t;
+}
 namespace {
 
 Vec3 Subtract(Vec3 a, Vec3 b) noexcept {

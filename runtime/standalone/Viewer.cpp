@@ -91,6 +91,32 @@ Result<void> Viewer::SetVisible(ObjectId id, bool visible) {
     return Result<void>::Success();
 }
 
+Result<void> Viewer::PlayAnimation(ObjectId id, std::size_t clip) {
+    auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
+    try { state_->World.GetAnimation(id).Play(clip); return Result<void>::Success(); }
+    catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use an animation clip from this model.")); }
+}
+Result<void> Viewer::PauseAnimation(ObjectId id) {
+    auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
+    try { state_->World.GetAnimation(id).Pause(); return Result<void>::Success(); }
+    catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a model instance.")); }
+}
+Result<void> Viewer::StopAnimation(ObjectId id) {
+    auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
+    try { state_->World.GetAnimation(id).Stop(); return Result<void>::Success(); }
+    catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a model instance.")); }
+}
+Result<void> Viewer::SetPose(ObjectId id, const PoseAsset& pose) {
+    auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
+    try { state_->World.GetAnimation(id).ApplyPose(pose); return Result<void>::Success(); }
+    catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a compatible pose and finite nonsingular TRS.")); }
+}
+Result<void> Viewer::ResetPose(ObjectId id) {
+    auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
+    try { state_->World.GetAnimation(id).ResetPose(); return Result<void>::Success(); }
+    catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a model instance.")); }
+}
+
 Result<void> Viewer::SetCamera(const Camera& camera) {
     auto ready = Ready(*state_); if (!ready) { return ready; }
     try {

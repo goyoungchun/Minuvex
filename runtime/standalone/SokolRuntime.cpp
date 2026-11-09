@@ -90,6 +90,7 @@ void Frame(void* user) noexcept {
         runtime.State.Height = std::max(1,static_cast<int>(std::lround(static_cast<float>(height)/dpi)));
         const auto elapsed = sapp_frame_duration();
         const ViewerFrameInfo info{runtime.Frames,std::isfinite(elapsed) ? std::clamp(elapsed,0.0,0.25) : 0.0,width,height};
+        if (runtime.Options.AdvanceAnimations) { runtime.State.World.UpdateAnimations(info.DeltaTimeSeconds); }
         if (runtime.Options.OnFrame) {
             try { runtime.Options.OnFrame(runtime.Facade,info); }
             catch (...) { runtime.Capture(ErrorCode::CallbackFailure,"Handle exceptions inside OnFrame or return control without throwing."); }

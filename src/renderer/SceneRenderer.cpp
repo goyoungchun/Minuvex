@@ -87,7 +87,7 @@ struct SceneRenderer::GpuModel {
             for (const auto& primitive : Asset->Meshes.at(part.MeshIndex).Primitives) {
                 const auto& material = Asset->Materials.at(primitive.MaterialIndex);
                 auto renderer = std::make_unique<MeshRenderer>();
-                renderer->Initialize(primitive.Geometry, material.DoubleSided);
+                renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning);
                 primitives.push_back(std::move(renderer));
                 if (!material.BaseColorTexture) { continue; }
                 const auto textureIndex = *material.BaseColorTexture;
@@ -159,8 +159,22 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
         const auto found = models_.find(item.Model.get());
         if (found == models_.end()) { throw std::logic_error("Call SceneRenderer::Prepare after changing visible model instances."); }
         const auto& model = *found->second;
+        std::optional<EvaluatedPose> pose;
+        if (item.Animation && item.Animation->NeedsEvaluation()) { pose = item.Animation->Evaluate(); }
         for (const auto& part : item.Model->Parts) {
-            const auto transform = item.WorldTransform * part.Transform;
+            auto transform = item.WorldTransform * (pose && part.Node != NoJoint ? pose->Global.at(part.Node) : part.Transform);
+            std::vector<Mat4> palette;
+            if (part.SkinIndex) {
+                if (!pose) { throw std::logic_error("Skinned instances require evaluated pose state."); }
+                const auto& skin = item.Model->Skins.at(*part.SkinIndex);
+                for (std::size_t i=0;i<skin.Joints.size();++i) {
+                    const auto matrix = pose->Global.at(skin.Joints[i])*skin.InverseBindMatrices.at(i);
+                    (void)matrix.NormalMatrix(); palette.push_back(matrix);
+                }
+                // Mesh-node world cancels against inverse(mesh world) in glTF's
+                // joint palette. Apply the Scene instance transform exactly once.
+                transform = item.WorldTransform;
+            }
             const auto& mesh = item.Model->Meshes.at(part.MeshIndex);
             for (std::size_t i = 0; i < mesh.Primitives.size(); ++i) {
                 const auto& material = item.Model->Materials.at(mesh.Primitives[i].MaterialIndex);
@@ -171,7 +185,7 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
                     texture = model.Images.at(item.Model->Textures.at(index).ImageIndex).View;
                     sampler = model.Samplers.at(index);
                 }
-                model.Meshes.at(part.MeshIndex).at(i)->Draw(transform, viewProjection, scene.Sun, material, texture, sampler);
+                model.Meshes.at(part.MeshIndex).at(i)->Draw(transform, viewProjection, scene.Sun, material, texture, sampler,palette);
                 ++stats_.LastDrawCalls;
             }
         }

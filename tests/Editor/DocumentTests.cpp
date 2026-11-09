@@ -73,7 +73,7 @@ void InvalidArchives() {
     const auto bytes = Read(file); const auto valid = Json::parse(bytes);
     lv::AssetRegistry registry;
     const auto rejects = [&](Json j,const char* label) { Write(file,j.dump()); auto result = lv::LoadScene(file,registry); Check(!result && result.Error().Code == lv::ErrorCode::InvalidData,label); };
-    auto j = valid; j["version"] = 2; rejects(j,"future scene versions rejected");
+    auto j = valid; j["version"] = 3; rejects(j,"future scene versions rejected");
     j = valid; j["version"] = 1.0; rejects(j,"noninteger schema version rejected");
     j = valid; j["objects"][1]["id"] = j["objects"][0]["id"]; rejects(j,"duplicate object IDs rejected");
     j = valid; j["objects"][0]["id"] = 0; rejects(j,"zero object IDs rejected");

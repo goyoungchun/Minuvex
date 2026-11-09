@@ -23,6 +23,9 @@ auto Edit(Function function) -> Result<decltype(function())> {
         return Result<T>::Failure({ErrorCode::InvalidState,e.what(),"Check the document state and available resources.",{}});
     }
 }
+template<typename Function> Result<void> AnimationEdit(Scene& world, bool& dirty, ObjectId object, Function function) {
+    return Edit([&] { function(world.GetAnimation(object)); dirty = true; });
+}
 }
 void EditorDocument::New() {
     world_ = Scene{}; library_.clear(); registry_.Clear(); path_.clear(); selection_ = NoObject; dirty_ = false;
@@ -86,5 +89,37 @@ Result<void> EditorDocument::SetCamera(const Camera& camera) {
 }
 Result<void> EditorDocument::SetLight(const DirectionalLight& light) {
     return Edit([&] { light.Validate(); world_.Sun = light; dirty_ = true; });
+}
+Result<void> EditorDocument::PlayAnimation(ObjectId object, std::size_t clip) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.Play(clip); }); }
+Result<void> EditorDocument::PauseAnimation(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.Pause(); }); }
+Result<void> EditorDocument::ResumeAnimation(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.Resume(); }); }
+Result<void> EditorDocument::StopAnimation(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.Stop(); }); }
+Result<void> EditorDocument::SeekAnimation(ObjectId object, double seconds) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.Seek(seconds); }); }
+Result<void> EditorDocument::SetAnimationSpeed(ObjectId object, double speed) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.SetSpeed(speed); }); }
+Result<void> EditorDocument::SetAnimationLoop(ObjectId object, bool loop) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.SetLoop(loop); }); }
+Result<void> EditorDocument::SetJointPose(ObjectId object, JointId joint, const Transform& local) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.SetJointOverride(joint,local); }); }
+Result<void> EditorDocument::ClearJointPose(ObjectId object, JointId joint) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.ClearJointOverride(joint); }); }
+Result<void> EditorDocument::ClearPoseOverrides(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.ClearOverrides(); }); }
+Result<void> EditorDocument::ResetPose(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.ResetPose(); }); }
+Result<void> EditorDocument::ApplyPose(ObjectId object, const PoseAsset& pose) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.ApplyPose(pose); }); }
+Result<void> EditorDocument::UpdateAnimations(double deltaSeconds) { return Edit([&] { world_.UpdateAnimations(deltaSeconds); }); }
+Result<void> EditorDocument::SavePoseFile(ObjectId object, const std::filesystem::path& path, bool overridesOnly) const {
+    auto captured = Edit([&] {
+        const auto& instance = world_.GetObject(object);
+        if (!instance.Model) { throw std::invalid_argument("Select a model instance to save a pose."); }
+        return overridesOnly ? instance.Animation.Overrides() : instance.Animation.CapturePose("Saved Pose");
+    });
+    if (!captured) { return Result<void>::Failure(captured.Error()); }
+    return lv::SavePose(captured.Value(),world_.GetObject(object).Model->Skeleton,path);
+}
+Result<void> EditorDocument::LoadPoseFile(ObjectId object, const std::filesystem::path& path) {
+    auto selected = Edit([&] {
+        const auto& instance = world_.GetObject(object);
+        if (!instance.Model) { throw std::invalid_argument("Select a model instance to load a pose."); } return instance.Model;
+    });
+    if (!selected) { return Result<void>::Failure(selected.Error()); }
+    auto loaded = lv::LoadPose(path,selected.Value()->Skeleton);
+    if (!loaded) { return Result<void>::Failure(loaded.Error()); }
+    return ApplyPose(object,loaded.Value());
 }
 } // namespace lv

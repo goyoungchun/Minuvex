@@ -10,6 +10,7 @@
 namespace lv::detail {
 
 static_assert(sizeof(Mat4) == 64 && std::is_trivially_copyable_v<Mat4>);
+static_assert(std::extent_v<decltype(skin_params_t::joint_matrices)> == MaxSkinJoints);
 static_assert(alignof(mesh_params_t) >= 16 && offsetof(mesh_params_t, normal_matrix) == 64);
 static_assert(std::is_standard_layout_v<Vertex>);
 
@@ -17,7 +18,7 @@ MeshRenderer::~MeshRenderer() {
     Shutdown();
 }
 
-void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided) {
+void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinned) {
     if (vertices_.id || indices_.id || shader_.id || pipelines_[0].id) {
         throw std::logic_error("MeshRenderer is already initialized.");
     }
@@ -36,7 +37,8 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided) {
     indexDesc.data = {mesh.Indices.data(), mesh.Indices.size() * sizeof(std::uint32_t)};
     indexDesc.label = "minuvex-mesh-indices";
     indices_ = sg_make_buffer(indexDesc);
-    shader_ = sg_make_shader(mesh_shader_desc(sg_query_backend()));
+    skinned_ = skinned;
+    shader_ = sg_make_shader(skinned ? skin_shader_desc(sg_query_backend()) : mesh_shader_desc(sg_query_backend()));
 
     if (sg_query_buffer_state(vertices_) != SG_RESOURCESTATE_VALID ||
         sg_query_buffer_state(indices_) != SG_RESOURCESTATE_VALID ||
@@ -56,8 +58,15 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided) {
     pipelineDesc.layout.attrs[ATTR_mesh_color0].offset = offsetof(Vertex, Color);
     pipelineDesc.layout.attrs[ATTR_mesh_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
     pipelineDesc.layout.attrs[ATTR_mesh_texcoord0].offset = offsetof(Vertex, TexCoord);
+    static_assert(ATTR_mesh_position == ATTR_skin_position && ATTR_mesh_normal == ATTR_skin_normal && ATTR_mesh_color0 == ATTR_skin_color0 && ATTR_mesh_texcoord0 == ATTR_skin_texcoord0);
+    if (skinned) {
+        pipelineDesc.layout.attrs[ATTR_skin_joint_indices].format = SG_VERTEXFORMAT_USHORT4;
+        pipelineDesc.layout.attrs[ATTR_skin_joint_indices].offset = offsetof(Vertex,Joints);
+        pipelineDesc.layout.attrs[ATTR_skin_joint_weights].format = SG_VERTEXFORMAT_FLOAT4;
+        pipelineDesc.layout.attrs[ATTR_skin_joint_weights].offset = offsetof(Vertex,Weights);
+    }
     pipelineDesc.index_type = SG_INDEXTYPE_UINT32;
-    pipelineDesc.cull_mode = doubleSided ? SG_CULLMODE_NONE : SG_CULLMODE_BACK;
+    pipelineDesc.cull_mode = doubleSided || skinned ? SG_CULLMODE_NONE : SG_CULLMODE_BACK;
     pipelineDesc.depth.write_enabled = true;
     pipelineDesc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     pipelineDesc.label = "minuvex-mesh-pipeline";
@@ -94,7 +103,7 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided) {
 }
 
 void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const DirectionalLight& light,
-                        const MaterialAsset& material, sg_view texture, sg_sampler sampler) const {
+                        const MaterialAsset& material, sg_view texture, sg_sampler sampler, std::span<const Mat4> palette) const {
     if (!pipelines_[0].id) {
         throw std::logic_error("Initialize MeshRenderer before drawing.");
     }
@@ -117,6 +126,13 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     sg_apply_bindings(bindings);
     sg_apply_uniforms(UB_mesh_params, SG_RANGE(uniforms));
     sg_apply_uniforms(UB_material_params, SG_RANGE(fragment));
+    if (skinned_) {
+        if (palette.size() > MaxSkinJoints) { throw std::invalid_argument("Skin palette exceeds 128 joints."); }
+        skin_params_t skin{};
+        for (std::size_t i=0;i<palette.size();++i) { skin.joint_matrices[i] = palette[i]; }
+        skin.skin_options = {palette.empty() ? 0.0f : 1.0f,0,0,0};
+        sg_apply_uniforms(UB_skin_params,SG_RANGE(skin));
+    }
     sg_draw(0, indexCount_, 1);
 }
 

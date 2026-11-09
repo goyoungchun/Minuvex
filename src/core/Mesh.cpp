@@ -23,6 +23,12 @@ void ValidateMesh(const MeshData& mesh) {
     }
     const auto finite = [](float value) { return std::isfinite(value); };
     for (const auto& vertex : mesh.Vertices) {
+        double weight = 0;
+        for (std::size_t i=0;i<4;++i) {
+            if (!std::isfinite(vertex.Weights[i]) || vertex.Weights[i] < 0 || vertex.Joints[i] >= 128) { throw std::invalid_argument("Invalid joint index/weight."); }
+            weight += vertex.Weights[i];
+        }
+        if (std::abs(weight-1) > 0.0001) { throw std::invalid_argument("Joint weights must sum to one."); }
         if (!std::all_of(vertex.Position.begin(), vertex.Position.end(), finite) ||
             !std::all_of(vertex.Normal.begin(), vertex.Normal.end(), finite) ||
             !std::all_of(vertex.Color.begin(), vertex.Color.end(), finite) ||

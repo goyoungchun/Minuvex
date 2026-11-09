@@ -1,4 +1,5 @@
 #include <minuvex/SceneIO.h>
+#include <minuvex/PoseIO.h>
 #include "core/Utf8Path.h"
 
 #include <json.hpp>
@@ -6,6 +7,8 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <charconv>
+#include <cstdio>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -34,14 +37,105 @@ std::uint64_t UInt(const Json& value, std::uint64_t max = UINT64_MAX) {
     const auto number = value.get<std::uint64_t>();
     Require(number <= max,"Scene integer exceeds its supported range."); return number;
 }
-float Float(const Json& value) {
+double Number(const Json& value) {
     Require(value.is_number(),"Expected a numeric value."); const auto number = value.get<double>();
+    Require(std::isfinite(number),"Archive number is nonfinite."); return number;
+}
+float Float(const Json& value) {
+    const auto number = Number(value);
     Require(std::isfinite(number) && std::abs(number) <= std::numeric_limits<float>::max(),"Scene number is nonfinite or too large.");
     return static_cast<float>(number);
 }
 Vec3 Vector(const Json& value) {
     Require(value.is_array() && value.size() == 3,"Expected a three-component vector.");
     return {Float(value[0]),Float(value[1]),Float(value[2])};
+}
+Json Local(const Transform& t) {
+    (void)t.Matrix().NormalMatrix();
+    return {{"position",Json::array({t.Position.X,t.Position.Y,t.Position.Z})},
+        {"rotation",Json::array({t.Rotation.X,t.Rotation.Y,t.Rotation.Z,t.Rotation.W})},
+        {"scale",Json::array({t.Scale.X,t.Scale.Y,t.Scale.Z})}};
+}
+Transform Local(const Json& j) {
+    const auto& q = j.at("rotation"); Require(q.is_array() && q.size() == 4,"Expected a quaternion.");
+    Transform t{Vector(j.at("position")),{Float(q[0]),Float(q[1]),Float(q[2]),Float(q[3])},Vector(j.at("scale"))};
+    (void)t.Matrix().NormalMatrix(); return t;
+}
+Json Pose(const PoseAsset& pose, const SkeletonAsset& skeleton) {
+    ValidatePose(skeleton,pose); char signature[17]; std::snprintf(signature,sizeof(signature),"%016llx",static_cast<unsigned long long>(pose.SkeletonSignature));
+    Json json{{"name",String(pose.Name)},{"skeleton",signature},{"joints",Json::array()}};
+    for (const auto& joint : pose.Joints) { auto entry = Local(joint.Local); entry["joint"] = joint.Joint; json["joints"].push_back(std::move(entry)); }
+    return json;
+}
+PoseAsset Pose(const Json& json, const SkeletonAsset& skeleton) {
+    PoseAsset pose; pose.Name = String(json.at("name")); const auto signature = String(json.at("skeleton"));
+    const auto [end,error] = std::from_chars(signature.data(),signature.data()+signature.size(),pose.SkeletonSignature,16);
+    Require(signature.size() == 16 && error == std::errc{} && end == signature.data()+signature.size(),"Invalid skeleton signature.");
+    const auto& joints = json.at("joints"); Require(joints.is_array() && joints.size() <= skeleton.Joints.size(),"Invalid pose joint list.");
+    for (const auto& joint : joints) { pose.Joints.push_back({static_cast<JointId>(UInt(joint.at("joint"),UINT32_MAX)),Local(joint)}); }
+    ValidatePose(skeleton,pose); return pose;
+}
+Json Animation(const SceneObject& object) {
+    if (!object.Model) { return nullptr; }
+    const auto& player = object.Animation;
+    Require(player.Model() == object.Model,"Scene player was rebound to a foreign model; use Scene::SetModel.");
+    (void)player.Evaluate();
+    Json json{{"clip",nullptr},{"clipName",""},{"time",player.Time()},{"speed",player.Speed()},{"loop",player.Loop()},
+        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)}};
+    if (player.Clip()) { json["clip"] = *player.Clip(); json["clipName"] = String(object.Model->Animations.at(*player.Clip()).Name); }
+    return json;
+}
+void Animation(const Json& json, Scene& scene, ObjectId id) {
+    const auto& object = scene.GetObject(id);
+    if (!object.Model) { Require(json.is_null(),"Empty object cannot have animation state."); return; }
+    auto& player = scene.GetAnimation(id);
+    player.SetSpeed(Number(json.at("speed"))); player.SetLoop(json.at("loop").get<bool>());
+    const auto state = UInt(json.at("state"),2); const auto time = Number(json.at("time"));
+    Require(std::isfinite(time) && time >= 0,"Invalid playback time.");
+    if (!json.at("clip").is_null()) {
+        const auto clip = UInt(json.at("clip"));
+        Require(clip < object.Model->Animations.size(),"Saved animation clip no longer exists.");
+        Require(String(json.at("clipName")) == object.Model->Animations[clip].Name,"Saved animation clip identity has changed.");
+        Require(time <= object.Model->Animations[clip].Duration,"Saved animation time exceeds duration.");
+        player.Play(static_cast<std::size_t>(clip));
+        if (state == static_cast<unsigned>(PlaybackState::Stopped)) { player.Stop(); }
+        if (state == static_cast<unsigned>(PlaybackState::Paused)) { player.Pause(); }
+        player.Seek(time);
+    } else { Require(time == 0 && state == static_cast<unsigned>(PlaybackState::Stopped),"A clipless player must be stopped at time zero."); }
+    player.ApplyPose(Pose(json.at("overrides"),object.Model->Skeleton)); (void)player.Evaluate();
+}
+Json ReadJson(const std::filesystem::path& path) {
+    Require(!path.empty(),"Archive path is empty.");
+    std::ifstream stream(path,std::ios::binary | std::ios::ate);
+    if (!stream) { throw std::runtime_error("Cannot open archive file."); }
+    const auto size = stream.tellg(); Require(size > 0 && size <= static_cast<std::streamoff>(MaxBytes),"Archive JSON is empty or exceeds 16 MiB.");
+    std::string bytes(static_cast<std::size_t>(size),'\0'); stream.seekg(0);
+    if (!stream.read(bytes.data(),size)) { throw std::runtime_error("Cannot read complete archive file."); }
+    std::unordered_map<int,std::unordered_set<std::string>> keys;
+    return Json::parse(bytes,[&](int depth, Json::parse_event_t event, Json& value) {
+        Require(depth <= 32,"Archive JSON nesting limit exceeded.");
+        if (event == Json::parse_event_t::object_start) { keys[depth].clear(); }
+        if (event == Json::parse_event_t::key) { Require(keys[depth-1].insert(value.get<std::string>()).second,"Duplicate JSON key."); }
+        return true;
+    });
+}
+void WriteJson(const Json& json, const std::filesystem::path& path) {
+    Require(!path.empty(),"Archive path is empty.");
+    const auto destination = std::filesystem::absolute(path).lexically_normal();
+    const auto bytes = json.dump(2)+'\n'; Require(bytes.size() <= MaxBytes,"Archive JSON exceeds 16 MiB.");
+    static std::atomic_uint64_t sequence{0};
+    auto temporary = destination;
+    temporary += ".tmp-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(sequence.fetch_add(1));
+    try {
+        std::ofstream stream(temporary,std::ios::binary | std::ios::trunc);
+        if (!stream.write(bytes.data(),static_cast<std::streamsize>(bytes.size()))) { throw std::runtime_error("Cannot write temporary archive file."); }
+        stream.close(); if (!stream) { throw std::runtime_error("Cannot close temporary archive file."); }
+#if defined(_WIN32)
+        if (!MoveFileExW(temporary.c_str(),destination.c_str(),MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) { throw std::runtime_error("Cannot replace archive file (Windows error "+std::to_string(GetLastError())+")."); }
+#else
+        std::filesystem::rename(temporary,destination);
+#endif
+    } catch (...) { std::error_code error; std::filesystem::remove(temporary,error); throw; }
 }
 Json Vector(Vec3 value) {
     Require(std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z),"Cannot serialize a nonfinite vector.");
@@ -84,18 +178,17 @@ Error Failure(const std::filesystem::path& path) {
             e.Code == ImportErrorCode::InvalidData ? ErrorCode::InvalidData : ErrorCode::AssetLoad;
         return {code,e.what(),"Restore the referenced glTF/GLB and its resources, or check import settings.",path};
     }
-    catch (const std::invalid_argument& e) { return {ErrorCode::InvalidData,e.what(),"Check the version-1 Minuvex scene schema and supported limits.",path}; }
+    catch (const std::invalid_argument& e) { return {ErrorCode::InvalidData,e.what(),"Check the Minuvex Scene/Pose schema, skeleton compatibility and supported limits.",path}; }
     catch (const Json::exception& e) { return {ErrorCode::InvalidData,e.what(),"Check the scene JSON field types, UTF-8 encoding and required fields.",path}; }
     catch (const std::exception& e) { return {ErrorCode::SceneIo,e.what(),"Check the scene path, permissions and available storage.",path}; }
 }
 } // namespace
 
 Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, std::span<const ModelHandle> library) {
-    std::filesystem::path temporary;
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",1},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",2},{"assets",Json::array()},{"objects",Json::array()}};
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -118,49 +211,23 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
             const Json rotation = Json::array({t.Rotation.X,t.Rotation.Y,t.Rotation.Z,t.Rotation.W});
             root["objects"].push_back({{"id",ids.at(id)},{"parent",object.Parent ? ids.at(object.Parent) : 0},
                 {"name",String(object.Name)},{"visible",object.Visible},{"asset",object.Model ? assetIds.at(object.Model.get()) : 0},
-                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)}});
+                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object)}});
         }
         const auto& c = scene.MainCamera; const auto& l = scene.Sun;
         root["camera"] = {{"position",Vector(c.Position)},{"target",Vector(c.Target)},{"up",Vector(c.Up)},
             {"fov",c.VerticalFovRadians},{"near",c.NearPlane},{"far",c.FarPlane}};
         root["light"] = {{"direction",Vector(l.Direction)},{"color",Vector(l.Color)},{"intensity",l.Intensity},{"ambient",l.Ambient}};
-        const auto bytes = root.dump(2) + '\n'; Require(bytes.size() <= MaxBytes,"Scene JSON exceeds 16 MiB.");
-        static std::atomic_uint64_t sequence{0};
-        temporary = destination;
-        temporary += ".tmp-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" + std::to_string(sequence.fetch_add(1));
-        std::ofstream stream(temporary,std::ios::binary | std::ios::trunc);
-        if (!stream.write(bytes.data(),static_cast<std::streamsize>(bytes.size()))) { throw std::runtime_error("Cannot write temporary scene file."); }
-        stream.close(); if (!stream) { throw std::runtime_error("Cannot close temporary scene file."); }
-#if defined(_WIN32)
-        if (!MoveFileExW(temporary.c_str(),destination.c_str(),MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            throw std::runtime_error("Cannot replace scene file (Windows error " + std::to_string(GetLastError()) + ").");
-        }
-#else
-        std::filesystem::rename(temporary,destination);
-#endif
+        WriteJson(root,path);
         return Result<void>::Success();
     } catch (...) {
-        if (!temporary.empty()) { std::error_code error; std::filesystem::remove(temporary,error); }
         return Result<void>::Failure(Failure(path));
     }
 }
 
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
-        Require(!path.empty(),"Scene path is empty.");
-        std::ifstream stream(path,std::ios::binary | std::ios::ate);
-        if (!stream) { throw std::runtime_error("Cannot open scene file."); }
-        const auto size = stream.tellg(); Require(size > 0 && size <= static_cast<std::streamoff>(MaxBytes),"Scene JSON is empty or exceeds 16 MiB.");
-        std::string bytes(static_cast<std::size_t>(size),'\0'); stream.seekg(0);
-        if (!stream.read(bytes.data(),size)) { throw std::runtime_error("Cannot read complete scene file."); }
-        std::unordered_map<int,std::unordered_set<std::string>> keys;
-        const auto root = Json::parse(bytes,[&](int depth, Json::parse_event_t event, Json& value) {
-            Require(depth <= 32,"Scene JSON nesting limit exceeded.");
-            if (event == Json::parse_event_t::object_start) { keys[depth].clear(); }
-            if (event == Json::parse_event_t::key) { Require(keys[depth-1].insert(value.get<std::string>()).second,"Duplicate JSON key."); }
-            return true;
-        });
-        Require(root.at("format") == "MinuvexScene" && UInt(root.at("version")) == 1,"Unsupported scene format/version.");
+        const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
+        Require(root.at("format") == "MinuvexScene" && (version == 1 || version == 2),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -212,9 +279,24 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
+            if (version == 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id")))); }
         }
         return Result<SceneArchive>::Success(std::move(archive));
     } catch (...) { return Result<SceneArchive>::Failure(Failure(path)); }
+}
+
+Result<void> SavePose(const PoseAsset& pose, const SkeletonAsset& skeleton, const std::filesystem::path& path) {
+    try {
+        ValidateSkeleton(skeleton); auto root = Pose(pose,skeleton); root["format"] = "MinuvexPose"; root["version"] = 1;
+        WriteJson(root,path); return Result<void>::Success();
+    } catch (...) { return Result<void>::Failure(Failure(path)); }
+}
+Result<PoseAsset> LoadPose(const std::filesystem::path& path, const SkeletonAsset& skeleton) {
+    try {
+        ValidateSkeleton(skeleton); const auto root = ReadJson(path);
+        Require(root.at("format") == "MinuvexPose" && UInt(root.at("version")) == 1,"Unsupported pose format/version.");
+        return Result<PoseAsset>::Success(Pose(root,skeleton));
+    } catch (...) { return Result<PoseAsset>::Failure(Failure(path)); }
 }
 
 } // namespace lv
