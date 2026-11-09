@@ -1,0 +1,19 @@
+#pragma once
+
+#include <minuvex/Viewer.h>
+
+namespace lv::detail {
+
+void ValidateViewerOptions(const ViewerOptions& options);
+Camera FitSceneCamera(const Scene& scene, float aspect);
+
+class CameraController {
+public:
+    // Returns true only if the camera changed. Throws for invalid numeric input.
+    bool Process(Camera& camera, const ViewerInputEvent& event, const CameraControlOptions& options, int viewportHeight);
+    void Reset() noexcept { left_ = right_ = middle_ = false; }
+private:
+    bool left_ = false, right_ = false, middle_ = false;
+};
+
+} // namespace lv::detail
