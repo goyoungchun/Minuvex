@@ -31,7 +31,8 @@ struct QualityEstimate {
     // Additional allocation and logical transient peak while old resources remain alive.
     std::uint64_t ReusedBytes = 0, AdditionalBytes = 0, TemporaryPeakBytes = 0;
 };
-// Logical sizes: RGBA8, depth 4 B/px, full mip chains, immutable vertex/index buffers.
+// Logical sizes include LDR/HDR, depth, MSAA, shadow/post targets, role-specific
+// full mip chains and immutable vertex/index buffers (see RenderTargetBytes).
 // Unique visible assets/meshes/images match renderer sharing. No driver alignment or OS usage claims.
 Result<QualityEstimate> EstimateQualityResources(const QualityProfile& profile, const QualityCapabilities& caps,
     const Scene& scene, int width, int height, const QualityEstimate* current = nullptr);

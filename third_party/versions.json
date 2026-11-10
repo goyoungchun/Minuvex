@@ -1,4 +1,11 @@
 {
+  "sokol": {
+    "source": "https://github.com/floooh/sokol",
+    "revision": "f3a42297dfe64edb390deaa5883728a558499eb5",
+    "archiveSha256": "95570a918b2d84793447827894a945e02892a40cb6531b7f3885725f1f789dd8",
+    "license": "zlib/libpng (fetched source LICENSE)",
+    "build": "cmake/Dependencies.cmake (native SDK only)"
+  },
   "nlohmann_json": {
     "source": "https://github.com/nlohmann/json",
     "revision": "v3.12.0",

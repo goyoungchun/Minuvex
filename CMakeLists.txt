@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Minuvex VERSION 0.9.0 LANGUAGES CXX)
+# Embed MSVC object debug information so relocated static Debug libraries do not
+# depend on compiler PDB files in the producer's checkout.
+if(POLICY CMP0141)
+    cmake_policy(SET CMP0141 NEW)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
+endif()
+project(Minuvex VERSION 1.0.0 LANGUAGES CXX)
+if(MSVC)
+    if(POLICY CMP0141)
+        # Reconfigured pre-CMP0141 build trees may retain /Zi in their cache.
+        string(REGEX REPLACE "/Z[iI]" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+        string(REGEX REPLACE "/Z[iI]" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+    else()
+        string(REGEX REPLACE "/Z[iI]" "/Z7" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+    endif()
+endif()
+
+include(GNUInstallDirs)
 
 include(cmake/MSVCDependencies.cmake)
 
@@ -9,6 +27,8 @@ option(MINUVEX_BUILD_EXAMPLES "Build the foundation, asset/scene and standalone 
 option(MINUVEX_BUILD_EDITOR "Build the ImGui docking Editor application" ${MINUVEX_BUILD_RENDERER})
 option(MINUVEX_ENABLE_RENDER_SMOKE_TEST "Register a test requiring a desktop and GPU" OFF)
 option(MINUVEX_ENABLE_EXTENDED_TESTS "Register detailed legacy desktop regression cases in addition to the compact suite" OFF)
+option(MINUVEX_INSTALL "Generate SDK install rules and binary packages" ${PROJECT_IS_TOP_LEVEL})
+option(MINUVEX_BUILD_BENCHMARKS "Build the optional reproducible SDK benchmark" OFF)
 
 include(CTest)
 
@@ -22,9 +42,17 @@ function(minuvex_configure_target target)
     endif()
 endfunction()
 
-add_library(minuvex_core STATIC src/core/Math.cpp src/core/Mesh.cpp)
+configure_file(cmake/Version.h.in generated/include/minuvex/Version.h @ONLY)
+add_library(minuvex_core STATIC src/core/Math.cpp src/core/Mesh.cpp src/core/Version.cpp)
 add_library(minuvex::core ALIAS minuvex_core)
-target_include_directories(minuvex_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(minuvex_core PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_compile_definitions(minuvex_core PRIVATE
+    MINUVEX_BUILD_CONFIGURATION="$<CONFIG>"
+    MINUVEX_BUILD_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}"
+    MINUVEX_BUILD_GRAPHICS=$<BOOL:${MINUVEX_BUILD_RENDERER}>)
 minuvex_configure_target(minuvex_core)
 
 add_library(minuvex_json_io STATIC src/core/JsonFile.cpp)
@@ -43,7 +71,7 @@ minuvex_configure_target(minuvex_quality)
 # Small CPU codecs are vendored with their licenses: core-only/offline builds
 # need no network or graphics dependencies for importing and testing assets.
 add_library(minuvex_asset_codecs STATIC src/assets/ThirdParty.cpp)
-target_include_directories(minuvex_asset_codecs SYSTEM PUBLIC third_party/cgltf third_party/stb)
+target_include_directories(minuvex_asset_codecs SYSTEM PRIVATE third_party/cgltf third_party/stb)
 target_compile_features(minuvex_asset_codecs PRIVATE cxx_std_20)
 
 add_library(minuvex_animation STATIC src/animation/Animation.cpp)
@@ -54,6 +82,7 @@ minuvex_configure_target(minuvex_animation)
 add_library(minuvex_assets STATIC src/assets/AssetRegistry.cpp src/assets/GltfImport.cpp)
 add_library(minuvex::assets ALIAS minuvex_assets)
 target_link_libraries(minuvex_assets PUBLIC minuvex_animation PRIVATE minuvex_asset_codecs)
+target_include_directories(minuvex_assets SYSTEM PRIVATE third_party/cgltf third_party/stb)
 minuvex_configure_target(minuvex_assets)
 
 add_library(minuvex_scene STATIC src/scene/Scene.cpp)
@@ -194,6 +223,17 @@ if(MINUVEX_BUILD_EXAMPLES)
     add_subdirectory(examples/StandaloneViewer)
     add_subdirectory(examples/EmbeddedViewer)
     add_subdirectory(examples/RenderingEnhancement)
+endif()
+
+if(MINUVEX_BUILD_BENCHMARKS)
+    if(NOT MINUVEX_BUILD_RENDERER)
+        message(FATAL_ERROR "MINUVEX_BUILD_BENCHMARKS requires MINUVEX_BUILD_RENDERER.")
+    endif()
+    add_subdirectory(benchmarks/Minuvex)
+endif()
+
+if(MINUVEX_INSTALL)
+    include(cmake/Install.cmake)
 endif()
 
 if(BUILD_TESTING)

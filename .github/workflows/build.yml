@@ -23,7 +23,22 @@ jobs:
         run: cmake --build out/ci --config ${{ matrix.configuration }} --parallel
       - name: CPU regression tests (desktop smoke is opt-in)
         run: ctest --test-dir out/ci --build-config ${{ matrix.configuration }} --output-on-failure
-      - name: Configure an external SDK consumer
-        run: cmake -S tests/Consumer -B out/consumer -DMINUVEX_SOURCE_DIR="${{ github.workspace }}" -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DFETCHCONTENT_SOURCE_DIR_SOKOL="${{ github.workspace }}/out/ci/_deps/sokol-src"
-      - name: Build public SDK consumers including Embedded (no desktop required)
-        run: cmake --build out/consumer --config ${{ matrix.configuration }} --parallel
+      - name: Install, relocate and verify an independent SDK consumer
+        run: cmake -DBUILD_DIR=out/ci -DCONFIG=${{ matrix.configuration }} -P cmake/VerifySdk.cmake
+      - name: Build platform SDK archive (Release only)
+        if: matrix.configuration == 'Release'
+        run: cpack --config out/ci/CPackConfig.cmake -C Release
+      - name: Retain SDK archives and checksums (Release only)
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Minuvex-SDK-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            out/ci/packages/*.zip
+            out/ci/packages/*.tar.gz
+            out/ci/packages/*.sha256
+          if-no-files-found: error
+      - name: Validate benchmark and AI evaluation tools (Windows Release only)
+        if: runner.os == 'Windows' && matrix.configuration == 'Release'
+        shell: pwsh
+        run: ./tests/Release/ToolChecks.ps1 -OutputRoot out/tool-checks

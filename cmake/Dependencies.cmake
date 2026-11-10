@@ -12,10 +12,10 @@ FetchContent_Declare(sokol
 FetchContent_MakeAvailable(sokol)
 
 add_library(minuvex_sokol_headers INTERFACE)
-target_include_directories(minuvex_sokol_headers SYSTEM INTERFACE "${sokol_SOURCE_DIR}")
-target_compile_definitions(minuvex_sokol_headers INTERFACE ${MINUVEX_SOKOL_BACKEND})
+target_include_directories(minuvex_sokol_headers SYSTEM INTERFACE "$<BUILD_INTERFACE:${sokol_SOURCE_DIR}>")
+target_compile_definitions(minuvex_sokol_headers INTERFACE "$<BUILD_INTERFACE:${MINUVEX_SOKOL_BACKEND}>")
 if(WIN32)
-    target_compile_definitions(minuvex_sokol_headers INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(minuvex_sokol_headers INTERFACE "$<BUILD_INTERFACE:NOMINMAX;WIN32_LEAN_AND_MEAN>")
 endif()
 
 set(MINUVEX_SOKOL_SHDC "" CACHE FILEPATH "Override the pinned sokol-shdc executable (for offline builds)")

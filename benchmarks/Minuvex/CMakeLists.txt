@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.24)
+if(NOT TARGET minuvex::viewer)
+    project(MinuvexBenchmark LANGUAGES CXX)
+    find_package(Minuvex 1 CONFIG REQUIRED COMPONENTS viewer graphics)
+endif()
+add_executable(minuvex_benchmark Main.cpp)
+target_link_libraries(minuvex_benchmark PRIVATE minuvex::viewer)
