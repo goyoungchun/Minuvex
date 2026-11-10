@@ -1,6 +1,7 @@
 #include "ViewerState.h"
 #include "RuntimePlatform.h"
 #include "renderer/RenderSurface.h"
+#include "platform/GraphicsSession.h"
 
 #include <sokol_gfx.h>
 #include <sokol_glue.h>
@@ -198,9 +199,11 @@ Result<void> RunStandalone(Viewer& viewer, ViewerState& state, const ViewerRunOp
     }
     // Claim the session before reading Sokol's non-thread-safe global state.
     // Another Viewer on another owner thread must fail without touching it.
+    GraphicsLease graphicsLease{&state};
+    if (!graphicsLease.Acquire()) {standaloneUsed.store(false);return Result<void>::Failure({ErrorCode::InvalidState,"Another Minuvex graphics session is active.","Shutdown EmbeddedRenderer before entering Standalone Run.",{}});}
     if (!StandaloneApplicationAvailable() || sg_isvalid() || sapp_isvalid()) {
         standaloneUsed.store(false);
-        return Result<void>::Failure({ErrorCode::InvalidState,"An existing application/graphics context already owns the standalone runtime.","Use Viewer in a standalone process; embedded integration is a later feature.",{}});
+        return Result<void>::Failure({ErrorCode::InvalidState,"An existing application/graphics context already owns the standalone runtime.","Use EmbeddedRenderer for a compatible native Host integration.",{}});
     }
     Runtime runtime{viewer,state,options};
     state.ApplyQuality=[&](const QualityProfile& profile) {

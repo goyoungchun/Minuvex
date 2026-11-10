@@ -145,7 +145,7 @@ void SmokeAfterDraw(Application& app) {
         auto r=lv::RecommendQuality(t.Quality.Capabilities,t.System,doc.GetScene(),ui.Viewport.OutputWidth(),ui.Viewport.OutputHeight(),&current,&t.Frames);
         Require(r.Profiles.size() == 3 && !r.PerformanceValidated,"Editor quality comparison lost initial recommendation assessments.");
         app.RecommendedQuality=r.Preset;Require(!doc.IsDirty(),"Telemetry collection dirtied scene.");
-        if (r.Preset) {ui.RequestQualityProfile(lv::MakeQualityProfile(*r.Preset));}
+        if (r.Preset) {auto recommended=lv::MakeQualityProfile(*r.Preset);if (app.QualitySmoke) {recommended.Overrides.TargetFps=0;}ui.RequestQualityProfile(std::move(recommended));}
         const auto dir=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT);Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.json"));Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.csv",lv::TelemetryFormat::Csv));
         std::puts("Editor telemetry: visible Performance panel, active device/counters, profile comparison/application and JSON/CSV exports passed.");
     }
@@ -242,6 +242,7 @@ int Run(const std::vector<std::string>& args) {
             else if (args[i] == "--animation-smoke-test") { app.Smoke = app.AnimationSmoke = true; app.Limit = 10; }
             else if (args[i] == "--quality-smoke-test") {app.Smoke=app.AnimationSmoke=app.QualitySmoke=true;app.Limit=10;}
             else if (args[i] == "--telemetry-smoke-test") {app.Smoke=app.AnimationSmoke=app.TelemetrySmoke=true;app.Limit=10;}
+            else if (args[i] == "--integration-smoke-test") {app.Smoke=app.AnimationSmoke=app.QualitySmoke=app.TelemetrySmoke=true;app.Limit=10;}
             else if (args[i] == "--quality" && i+1 < args.size()) {auto profile=lv::LoadQuality(lv::detail::PathFromUtf8(args[++i]));Require(profile);app.InitialQuality=std::move(profile).Value();}
             else if (args[i] == "--frames" && i+1 < args.size()) {
                 const auto& value = args[++i]; auto [end,error] = std::from_chars(value.data(),value.data()+value.size(),app.Limit);

@@ -1,5 +1,6 @@
 #include "TestHarness.h"
 #include <minuvex/Viewer.h>
+#include <minuvex/EmbeddedRenderer.h>
 
 #include <atomic>
 #include <limits>
@@ -220,7 +221,18 @@ void TestInput() {
 }
 
 int main() {
-    try { TestFacade(); TestFailures(); TestInput(); }
+    try {
+        TestFacade();TestFailures();TestInput();
+        lv::EmbeddedRenderer embedded;lv::Scene scene;
+        Check(!embedded.IsInitialized() && embedded.Shutdown().HasValue(),"Embedded inactive shutdown is idempotent");
+        ErrorIs(embedded.Render(scene,{}),lv::ErrorCode::InvalidState,"Embedded render requires initialization");
+#if MINUVEX_TEST_NO_GRAPHICS
+        ErrorIs(embedded.Initialize({}),lv::ErrorCode::UnsupportedFeature,"CPU-only Embedded facade reports unavailable backend");
+#else
+        ErrorIs(embedded.Initialize({}),lv::ErrorCode::InvalidArgument,"Embedded rejects missing native device/context without starting graphics");
+#endif
+        bool wrong=false;std::thread other([&]{const auto r=embedded.Initialize({});wrong=!r && r.Error().Code == lv::ErrorCode::WrongThread;});other.join();Check(wrong,"Embedded initialization uses owner thread");
+    }
     catch (const std::exception& error) { Check(false,error.what()); }
     return Finish();
 }
