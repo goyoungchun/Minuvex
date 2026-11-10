@@ -2,6 +2,7 @@
 
 #include "renderer/MeshRenderer.h"
 #include "renderer/TextureData.h"
+#include "telemetry/ResourceSignature.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,6 +28,7 @@ struct SceneRenderer::GpuModel {
     std::vector<GpuImage> Images;
     std::vector<sg_sampler> Samplers;
     std::vector<Bounds> MeshBounds;
+    std::uint64_t TextureBytes=0,BufferBytes=0;
 
     ~GpuModel() {
         Meshes.clear();
@@ -57,6 +59,8 @@ struct SceneRenderer::GpuModel {
                 const auto& material = Asset->Materials.at(primitive.MaterialIndex);
                 auto renderer = std::make_unique<MeshRenderer>();
                 renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples);
+                BufferBytes+=primitive.Geometry.Vertices.size()*sizeof(Vertex)+primitive.Geometry.Indices.size()*sizeof(std::uint32_t);
+                TextureBytes+=4;
                 primitives.push_back(std::move(renderer));
                 if (!material.BaseColorTexture) { continue; }
                 const auto textureIndex = *material.BaseColorTexture;
@@ -66,6 +70,7 @@ struct SceneRenderer::GpuModel {
                 if (!gpuImage.Image.id) {
                     const auto& image = Asset->Images.at(texture.ImageIndex);
                     const auto packed=PackTexture(image,std::min(settings.MaxTextureSize,sg_query_limits().max_image_size_2d));
+                    TextureBytes+=packed.Pixels.size();
                     sg_image_desc desc{};
                     desc.width = packed.Width; desc.height = packed.Height;
                     desc.num_mipmaps = packed.Levels;
@@ -101,8 +106,9 @@ SceneRenderer::~SceneRenderer() = default;
 void SceneRenderer::Prepare(const Scene& scene) {
     if (!sg_isvalid()) { throw std::logic_error("Initialize Sokol GFX before preparing a Scene."); }
     std::unordered_set<const ModelAsset*> needed;
+    std::uint64_t signature=14695981039346656037ull;
     for (const auto& item : scene.CollectRenderItems()) {
-        needed.insert(item.Model.get());
+        if (needed.insert(item.Model.get()).second) {HashResourceIdentity(signature,item.Model.get());}
         if (!models_.contains(item.Model.get())) {
             auto model = std::make_unique<GpuModel>();
             model->Upload(item.Model,settings_);
@@ -111,10 +117,13 @@ void SceneRenderer::Prepare(const Scene& scene) {
     }
     std::erase_if(models_, [&needed](const auto& entry) { return !needed.contains(entry.first); });
     stats_.ResidentModels = models_.size();
+    stats_.ResidentAssetSignature=signature;
     stats_.ResidentPrimitives = stats_.ResidentImages = 0;
     stats_.MaxResidentTextureSize=0;
+    stats_.LogicalTextureBytes=stats_.LogicalBufferBytes=0;
     for (const auto& [key, model] : models_) {
         (void)key;
+        stats_.LogicalTextureBytes+=model->TextureBytes;stats_.LogicalBufferBytes+=model->BufferBytes;
         for (const auto& mesh : model->Meshes) { stats_.ResidentPrimitives += mesh.size(); }
         for (const auto& image : model->Images) { if (image.Image.id) { ++stats_.ResidentImages;stats_.MaxResidentTextureSize=std::max(stats_.MaxResidentTextureSize,image.Size); } }
     }
@@ -125,6 +134,7 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
     scene.Sun.Validate();
     stats_.LastDrawCalls = 0;
     stats_.LastCulledParts=0;
+    stats_.LastTriangles=0;
     for (const auto& item : scene.CollectRenderItems()) {
         const auto found = models_.find(item.Model.get());
         if (found == models_.end()) { throw std::logic_error("Call SceneRenderer::Prepare after changing visible model instances."); }
@@ -171,6 +181,7 @@ void SceneRenderer::Draw(const Scene& scene, float aspect) {
                 }
                 model.Meshes.at(part.MeshIndex).at(i)->Draw(transform, viewProjection, scene.Sun, material, texture, sampler,palette,settings_.Lighting == LightingMode::Unlit);
                 ++stats_.LastDrawCalls;
+                stats_.LastTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3;
             }
         }
     }

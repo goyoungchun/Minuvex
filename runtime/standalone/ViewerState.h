@@ -25,6 +25,8 @@ struct ViewerState {
     QualityState Quality;
     std::function<Result<void>(const QualityProfile&)> ApplyQuality;
     std::function<void()> Invalidate;
+    std::function<TelemetrySnapshot()> ReadTelemetry;
+    std::optional<TelemetrySnapshot> LastTelemetry;
     float Aspect() const {
         return static_cast<float>(Width > 0 ? Width : Options.Width) / static_cast<float>(Height > 0 ? Height : Options.Height);
     }

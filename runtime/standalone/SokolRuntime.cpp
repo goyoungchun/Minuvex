@@ -179,6 +179,7 @@ void Event(const sapp_event* source, void* user) noexcept {
 
 void Cleanup(void* user) noexcept {
     auto& runtime = *static_cast<Runtime*>(user);
+    try {if (runtime.Initialized) {runtime.State.LastTelemetry=runtime.Surface.Telemetry(RenderClockSeconds());runtime.State.LastTelemetry->Live=false;}}catch (...) { /* Diagnostic collection must not prevent native cleanup. */ }
     runtime.Surface.Clear();runtime.State.Quality.Applied=false;runtime.State.Quality.Effective.reset();runtime.State.Quality.RenderWidth=runtime.State.Quality.RenderHeight=0;
     runtime.State.Controls.Reset();
     if (sg_isvalid()) { sg_shutdown(); }
@@ -207,11 +208,12 @@ Result<void> RunStandalone(Viewer& viewer, ViewerState& state, const ViewerRunOp
         const auto result=runtime.Surface.ApplyQuality(profile,state.World,std::max(1,sapp_width()),std::max(1,sapp_height()));state.Quality=runtime.Surface.Quality();return result;
     };
     state.Invalidate=[&]{runtime.Surface.Invalidate();};
+    state.ReadTelemetry=[&]{return runtime.Surface.Telemetry(RenderClockSeconds());};
     state.CloseRequested.store(false);
     state.HasRun = true;
     state.ActiveRun = &options;
     state.Running.store(true);
-    struct ResetRunning { ViewerState& State; ~ResetRunning() { State.ApplyQuality={};State.Invalidate={};State.ActiveRun = nullptr; State.Running.store(false); } } reset{state};
+    struct ResetRunning { ViewerState& State; ~ResetRunning() { State.ApplyQuality={};State.Invalidate={};State.ReadTelemetry={};State.ActiveRun = nullptr; State.Running.store(false); } } reset{state};
     sapp_desc app{};
     app.user_data = &runtime;
     app.init_userdata_cb = Initialize; app.frame_userdata_cb = Frame;

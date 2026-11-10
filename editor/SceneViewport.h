@@ -18,6 +18,9 @@ public:
     const QualityState& Quality() const noexcept {return surface_.Quality();}
     bool ApplyingQuality() const noexcept {return surface_.Applying();}
     std::uint64_t RenderedFrames() const noexcept {return surface_.RenderedFrames();}
+    TelemetrySnapshot Telemetry() {return surface_.Telemetry(detail::RenderClockSeconds());}
+    int OutputWidth() const noexcept {return width_;}
+    int OutputHeight() const noexcept {return height_;}
 private:
     detail::RenderSurface surface_;
     Scene empty_;

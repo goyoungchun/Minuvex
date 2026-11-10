@@ -212,6 +212,14 @@ Result<void> Viewer::Run(const ViewerRunOptions& options) {
 }
 
 void Viewer::RequestClose() noexcept { if (state_->Running.load()) { state_->CloseRequested.store(true); } }
+Result<TelemetrySnapshot> Viewer::GetTelemetry() const {
+    if (std::this_thread::get_id() != state_->Owner) {return Result<TelemetrySnapshot>::Failure({ErrorCode::WrongThread,"Read telemetry on the Viewer owner thread.","Copy a snapshot before sharing it with other threads.",{}});}
+    try {
+        if (state_->ReadTelemetry) {return Result<TelemetrySnapshot>::Success(state_->ReadTelemetry());}
+        if (state_->LastTelemetry) {return Result<TelemetrySnapshot>::Success(*state_->LastTelemetry);}
+        return Result<TelemetrySnapshot>::Failure({detail::GraphicsRuntimeAvailable() ? ErrorCode::InvalidState:ErrorCode::UnsupportedFeature,"No graphics telemetry session is available.","Use SystemInfo/SystemMonitor without graphics, or query during/after Viewer::Run.",{}});
+    } catch (...) {return Result<TelemetrySnapshot>::Failure(detail::CurrentException(ErrorCode::Rendering,"Cannot collect the telemetry snapshot."));}
+}
 bool Viewer::IsRunning() const noexcept { return state_->Running.load(); }
 
 } // namespace lv

@@ -19,9 +19,11 @@ public:
     void ShowError(const Error& error);
     void LoadQualityProfile(const std::filesystem::path& path);
     Result<void> ApplyQualityProfile(const QualityProfile& profile);
+    // Queue from UI actions after Image commands exist; commit at the next Draw entry.
+    void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
     enum class Action { None, New, Open, Quit } pending_ = Action::None;
-    enum class Dialog { None, Import, Open, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad } dialog_ = Dialog::None, overwriteDialog_ = Dialog::None;
+    enum class Dialog { None, Import, Open, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad, TelemetryJson, TelemetryCsv } dialog_ = Dialog::None, overwriteDialog_ = Dialog::None;
     std::filesystem::path directory_ = std::filesystem::current_path(), openPath_, overwritePath_;
     std::string pathInput_, error_, status_ = "Import a glTF/GLB to begin.";
     std::string filter_;
@@ -30,7 +32,14 @@ private:
     bool hierarchy_ = true, inspector_ = true, assets_ = true, viewport_ = true;
     bool bones_ = true, animation_ = true;
     bool quality_ = true;
+    bool performance_ = true;
     QualityProfile qualityDraft_;
+    std::optional<QualityProfile> pendingQuality_;
+    QualityProfile analyzedProfile_;
+    std::optional<QualityEstimate> selectedEstimate_;
+    QualityRecommendation recommendation_;
+    std::string estimateError_;
+    double lastAnalysis_ = -1;
     ObjectId boneObject_ = NoObject, poseObject_ = NoObject;
     JointId bone_ = NoJoint;
     detail::CameraController controls_;
@@ -47,6 +56,7 @@ private:
     void BoneInspector();
     void AnimationControls();
     void QualitySettings();
+    void PerformancePanel();
     void AssetBrowser();
     void ViewportPanel();
     void Dialogs();

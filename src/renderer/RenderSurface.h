@@ -1,9 +1,11 @@
 #pragma once
 #include "SceneRenderer.h"
 #include "GraphicsQuality.h"
+#include <minuvex/Telemetry.h>
 #include <sokol_gfx.h>
 
 namespace lv::detail {
+class GraphicsTelemetry;
 class RenderSurface final {
 public:
     RenderSurface();
@@ -23,12 +25,17 @@ public:
     const QualityState& Quality() const noexcept {return state_;}
     SceneRenderStats Stats() const noexcept {return renderer_ ? renderer_->GetStats():SceneRenderStats{};}
     std::uint64_t RenderedFrames() const noexcept {return frames_;}
+    TelemetrySnapshot Telemetry(double now);
 private:
     struct Targets;
     struct Presenter;
     std::unique_ptr<Targets> targets_;
     std::unique_ptr<Presenter> presenter_;
     std::unique_ptr<SceneRenderer> renderer_;
+    std::unique_ptr<GraphicsTelemetry> telemetry_;
+    FrameMonitor frameMonitor_;
+    std::optional<FrameStatistics> previousFrames_;
+    std::string previousName_;
     QualityState state_;
     RenderScheduler scheduler_;
     int outputWidth_=0,outputHeight_=0,failedWidth_=-1,failedHeight_=-1;

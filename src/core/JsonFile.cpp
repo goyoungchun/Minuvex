@@ -27,8 +27,11 @@ Json ReadJsonFile(const std::filesystem::path& path,std::size_t limit) {
     });
 }
 void WriteJsonFile(const Json& json,const std::filesystem::path& path,std::size_t limit) {
+    WriteTextFile(json.dump(2)+'\n',path,limit);
+}
+void WriteTextFile(std::string_view bytes,const std::filesystem::path& path,std::size_t limit) {
     if (path.empty()) {throw std::invalid_argument("Archive path is empty.");}
-    const auto bytes=json.dump(2)+'\n';if (bytes.size() > limit) {throw std::invalid_argument("Archive JSON exceeds its byte limit.");}
+    if (bytes.size() > limit) {throw std::invalid_argument("Archive exceeds its byte limit.");}
     const auto destination=std::filesystem::absolute(path).lexically_normal();
     static std::atomic_uint64_t sequence{0};auto temporary=destination;
     temporary+=".tmp-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(sequence.fetch_add(1));

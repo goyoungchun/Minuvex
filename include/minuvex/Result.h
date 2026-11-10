@@ -11,7 +11,7 @@ namespace lv {
 enum class ErrorCode {
     AssetLoad, InvalidData, UnsupportedFeature, InvalidArgument, InvalidHandle,
     InvalidState, WrongThread, GraphicsInitialization, Rendering,
-    InsufficientResource, CallbackFailure, SceneIo, QualityIo
+    InsufficientResource, CallbackFailure, SceneIo, QualityIo, TelemetryIo
 };
 
 struct Error {

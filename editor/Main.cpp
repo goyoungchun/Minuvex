@@ -25,8 +25,9 @@ struct Application {
     std::unique_ptr<lv::editor::EditorUI> UI;
     std::filesystem::path Initial, Directory = std::filesystem::current_path();
     std::uint64_t Frames = 0, Limit = 0;
-    bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, Gui = false, Failed = false;
+    bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, TelemetrySmoke = false, Gui = false, Failed = false;
     std::optional<lv::QualityProfile> InitialQuality;
+    std::optional<lv::QualityPreset> RecommendedQuality;
     std::uint64_t CachedFrames=0;
     double PreviousTime = 0;
     char Message[2048]{};
@@ -127,7 +128,7 @@ void SmokeAfterDraw(Application& app) {
         CheckViewportPixels(ui.Viewport);
 #endif
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
-        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.QualitySmoke ? "quality-smoke.mvxscene.json":app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
+        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.TelemetrySmoke ? "telemetry-smoke.mvxscene.json":app.QualitySmoke ? "quality-smoke.mvxscene.json":app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
         std::filesystem::create_directories(output.parent_path()); Require(doc.Save(output));
         ui.RequestNew(); Require(doc.GetScene().Size() == 0,"New Scene did not reset the document.");
         ui.RequestOpen(output); Require(doc.GetScene().Size() == 3 && doc.Assets().size() == 1 && !doc.IsDirty(),"Editor saved Scene did not reopen.");
@@ -137,7 +138,19 @@ void SmokeAfterDraw(Application& app) {
         }
     }
     if (app.AnimationSmoke && app.Frames == 0) { app.PreviousTime = doc.GetScene().GetObject(doc.Selection()).Animation.Time(); }
+    if (app.TelemetrySmoke && app.Frames == 2) {
+        const auto* panel=ImGui::FindWindowByName("Performance");Require(panel && panel->DockId && !panel->Hidden,"Performance panel was not visible and docked.");
+        auto t=ui.Viewport.Telemetry();Require(t.Hardware.ActiveGraphicsDevice && t.Frames.SampleCount > 0 && t.Resident.TotalBytes > 0,"Editor did not collect real device, frame and resource statistics.");
+        lv::QualityEstimate current;current.Quality=t.Quality;current.Cost=t.Resident;current.AssetSignature=t.ResidentAssetSignature;
+        auto r=lv::RecommendQuality(t.Quality.Capabilities,t.System,doc.GetScene(),ui.Viewport.OutputWidth(),ui.Viewport.OutputHeight(),&current,&t.Frames);
+        Require(r.Profiles.size() == 3 && !r.PerformanceValidated,"Editor quality comparison lost initial recommendation assessments.");
+        app.RecommendedQuality=r.Preset;Require(!doc.IsDirty(),"Telemetry collection dirtied scene.");
+        if (r.Preset) {ui.RequestQualityProfile(lv::MakeQualityProfile(*r.Preset));}
+        const auto dir=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT);Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.json"));Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.csv",lv::TelemetryFormat::Csv));
+        std::puts("Editor telemetry: visible Performance panel, active device/counters, profile comparison/application and JSON/CSV exports passed.");
+    }
     if (app.QualitySmoke && app.Frames == 2) {Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::High && ui.Viewport.Quality().Applied,"Editor High quality did not commit.");Require(!doc.IsDirty(),"Quality application dirtied Scene data.");}
+    if (app.TelemetrySmoke && app.Frames == 3 && app.RecommendedQuality) {Require(ui.Viewport.Quality().Requested.Base == *app.RecommendedQuality && !doc.IsDirty(),"Queued telemetry recommendation did not apply safely before UI commands.");}
     if (app.QualitySmoke && app.Frames == 4) {app.CachedFrames=ui.Viewport.RenderedFrames();}
     if (app.QualitySmoke && app.Frames == 5) {Require(ui.Viewport.RenderedFrames() == app.CachedFrames,"Static Editor viewport did not reuse its on-demand image.");}
     if (app.QualitySmoke && app.Frames == 6) {Require(ui.Viewport.RenderedFrames() > app.CachedFrames,"Scene edit failed to wake Editor viewport.");}
@@ -181,6 +194,7 @@ void Frame(void* user) noexcept {
             app.UI->Viewport.Render(app.UI->Document.GetScene());
             app.UI->Viewport.Resize(0,0); Require(!app.UI->Viewport.Texture().id,"Suspended viewport retained its target.");
         }
+        if (app.TelemetrySmoke && app.Frames == 1) {ImGui::SetWindowFocus("Performance");}
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());
         if (app.Smoke) { SmokeAfterDraw(app); }
@@ -227,6 +241,7 @@ int Run(const std::vector<std::string>& args) {
             if (args[i] == "--smoke-test") { app.Smoke = true; app.Limit = 10; }
             else if (args[i] == "--animation-smoke-test") { app.Smoke = app.AnimationSmoke = true; app.Limit = 10; }
             else if (args[i] == "--quality-smoke-test") {app.Smoke=app.AnimationSmoke=app.QualitySmoke=true;app.Limit=10;}
+            else if (args[i] == "--telemetry-smoke-test") {app.Smoke=app.AnimationSmoke=app.TelemetrySmoke=true;app.Limit=10;}
             else if (args[i] == "--quality" && i+1 < args.size()) {auto profile=lv::LoadQuality(lv::detail::PathFromUtf8(args[++i]));Require(profile);app.InitialQuality=std::move(profile).Value();}
             else if (args[i] == "--frames" && i+1 < args.size()) {
                 const auto& value = args[++i]; auto [end,error] = std::from_chars(value.data(),value.data()+value.size(),app.Limit);

@@ -1,4 +1,5 @@
 #include "RenderSurface.h"
+#include "GraphicsTelemetry.h"
 #include "present.glsl.h"
 #include <algorithm>
 #include <chrono>
@@ -65,7 +66,11 @@ Result<void> RenderSurface::ApplyQuality(const QualityProfile& profile,const Sce
         std::unique_ptr<SceneRenderer> renderer;
         if (rebuild) {renderer=std::make_unique<SceneRenderer>(settings);renderer->Prepare(scene);}
         std::unique_ptr<Presenter> presenter;if (!presenter_) {presenter=std::make_unique<Presenter>();}
+        std::unique_ptr<GraphicsTelemetry> telemetry;if (!telemetry_) {telemetry=std::make_unique<GraphicsTelemetry>();}
+        const bool changed=state_.Effective && (state_.Requested != next.Requested || *state_.Effective != settings || next.RenderWidth != state_.RenderWidth || next.RenderHeight != state_.RenderHeight);
+        if (changed && frameMonitor_.Snapshot(RenderClockSeconds()).SampleCount) {previousFrames_=frameMonitor_.Snapshot(RenderClockSeconds());if (telemetry_) {previousFrames_->GpuFrameMs=telemetry_->GpuTime();}previousName_=state_.Requested.Name;}
         if (resize) {targets_.swap(targets);}if (rebuild) {renderer_.swap(renderer);}if (presenter) {presenter_.swap(presenter);}
+        if (telemetry) {telemetry_.swap(telemetry);}if (changed) {frameMonitor_.Reset();telemetry_->ResetGpu();}
         renderer_->SetDrawSettings(settings);next.Applied=bool(targets_);
         if (!targets_) {next.RenderWidth=next.RenderHeight=0;}
         state_=std::move(next);outputWidth_=width;outputHeight_=height;failedWidth_=failedHeight_=-1;scheduler_.Invalidate();return Result<void>::Success();
@@ -83,14 +88,26 @@ bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::a
     if (!targets_ || !renderer_ || !state_.Effective || !Due(now)) {return false;}
     auto signature=SceneRenderSignature(scene);for (float value:clear) {signature^=std::bit_cast<std::uint32_t>(value);signature*=1099511628211ull;}
     if (!scheduler_.NeedsRender(state_.Effective->OnDemand,signature,force || SceneHasActiveAnimation(scene))) {return false;}
+    const auto cpuStart=RenderClockSeconds();telemetry_->BeginGpu();
+    struct EndGpu {GraphicsTelemetry& Telemetry;~EndGpu() {Telemetry.EndGpu();}} gpuScope{*telemetry_};
     renderer_->Prepare(scene);sg_pass pass{};pass.attachments.colors[0]=targets_->Attachment;pass.attachments.resolves[0]=targets_->Resolve;pass.attachments.depth_stencil=targets_->DepthAttachment;
     pass.action.colors[0].load_action=SG_LOADACTION_CLEAR;pass.action.colors[0].clear_value={clear[0],clear[1],clear[2],clear[3]};pass.action.depth.load_action=SG_LOADACTION_CLEAR;pass.action.depth.clear_value=1;
     sg_begin_pass(pass);try {renderer_->Draw(scene,static_cast<float>(std::max(1,outputWidth_))/static_cast<float>(std::max(1,outputHeight_)));}catch (...) {sg_end_pass();throw;}sg_end_pass();
+    const auto cpuEnd=RenderClockSeconds();const auto stats=renderer_->GetStats();
+    frameMonitor_.Record(cpuEnd,(cpuEnd-cpuStart)*1000,stats.LastDrawCalls,stats.LastTriangles);
     scheduler_.Submitted(now,signature);++frames_;return true;
 }
 void RenderSurface::Present() const {
     if (!targets_ || !presenter_) {return;}sg_bindings bindings{};bindings.views[VIEW_rendered_texture]=targets_->Texture;bindings.samplers[SMP_rendered_sampler]=presenter_->Sampler;
     sg_apply_pipeline(presenter_->Pipeline);sg_apply_bindings(bindings);sg_draw(0,3,1);
 }
-void RenderSurface::Clear() noexcept {targets_.reset();renderer_.reset();presenter_.reset();state_.Effective.reset();state_.Applied=false;state_.RenderWidth=state_.RenderHeight=0;scheduler_.Invalidate();}
+TelemetrySnapshot RenderSurface::Telemetry(double now) {
+    TelemetrySnapshot result;result.CapturedAtSeconds=now;result.Live=sg_isvalid();result.Quality=state_;result.Frames=frameMonitor_.Snapshot(now);
+    if (telemetry_) {result.Hardware=telemetry_->Hardware();result.System=telemetry_->Sample(now);result.Frames.GpuFrameMs=telemetry_->GpuTime();}
+    const auto stats=Stats();result.ResidentAssetSignature=stats.ResidentAssetSignature;result.Resident.TextureBytes=stats.LogicalTextureBytes;result.Resident.BufferBytes=stats.LogicalBufferBytes;
+    if (targets_ && state_.Effective) {const auto samples=state_.Effective->MsaaSamples;result.Resident.RenderTargetBytes=std::uint64_t(state_.RenderWidth)*state_.RenderHeight*(8u*samples+(samples > 1 ? 4u:0u));}
+    result.Resident.TotalBytes=result.Resident.TextureBytes+result.Resident.BufferBytes+result.Resident.RenderTargetBytes;
+    result.PreviousQualityFrames=previousFrames_;result.PreviousQualityName=previousName_;return result;
+}
+void RenderSurface::Clear() noexcept {targets_.reset();renderer_.reset();presenter_.reset();telemetry_.reset();frameMonitor_.Reset();previousFrames_.reset();previousName_.clear();state_.Effective.reset();state_.Applied=false;state_.RenderWidth=state_.RenderHeight=0;scheduler_.Invalidate();}
 }

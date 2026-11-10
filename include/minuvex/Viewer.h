@@ -3,6 +3,7 @@
 #include <minuvex/Result.h>
 #include <minuvex/Scene.h>
 #include <minuvex/Quality.h>
+#include <minuvex/Telemetry.h>
 
 #include <functional>
 #include <memory>
@@ -99,6 +100,7 @@ public:
     Result<void> SetQuality(const QualityProfile& profile);
     Result<QualityState> GetQuality() const;
     Result<QualityCapabilities> GetQualityCapabilities() const;
+    Result<TelemetrySnapshot> GetTelemetry() const; // Live on owner thread; last snapshot retained after Run.
     Result<void> RequestRedraw(); // Invalidate on-demand rendering on the owner thread.
 
     // Advanced API: owner thread only, retaining Phase 2's exception contracts.

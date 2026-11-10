@@ -26,6 +26,7 @@ int main(int argc, char* argv[]) {
     bool consume = false, throwInput = false, recursive = false;
     lv::ViewerRunOptions options;
     options.FrameLimit = 3;
+    if (mode == "telemetry") {options.FrameLimit=80;}
     options.AdvanceAnimations = mode != "animation-manual";
     double expectedTime = .5;
     options.OnInput = [&](lv::Viewer& v, const lv::ViewerInputEvent& event) {
@@ -42,6 +43,16 @@ int main(int argc, char* argv[]) {
         Check(info.FrameNumber == callbacks && info.FramebufferWidth > 0 && info.FramebufferHeight > 0 &&
             std::isfinite(info.DeltaTimeSeconds) && info.DeltaTimeSeconds >= 0,"frame callback receives valid framebuffer/timing information");
         ++callbacks;
+        if (mode == "telemetry") {
+            auto t=v.GetTelemetry();Check(t && t.Value().Live && t.Value().Hardware.ActiveGraphicsDevice && !t.Value().Hardware.GpuName.empty() && !t.Value().Hardware.Formats.empty(),"live telemetry identifies the actual graphics device and relevant format support");
+            if (info.FrameNumber == 20) {
+                const auto& s=t.Value();Check(s.Frames.SampleCount > 0 && s.Frames.DrawCalls > 0 && s.Frames.Triangles > 0 && s.Frames.AverageCpuMs.Value,"actual rendered frames expose timing and draw/triangle counters");
+                auto estimate=lv::EstimateQualityResources(s.Quality.Requested,s.Quality.Capabilities,v.GetScene(),info.FramebufferWidth,info.FramebufferHeight);
+                Check(estimate && estimate.Value().Cost.TotalBytes == s.Resident.TotalBytes && estimate.Value().Cost.TextureBytes == s.Resident.TextureBytes,"public estimate matches resident renderer logical allocation accounting");
+                Check(!s.System.GpuMemoryUsage.Value || s.System.GpuMemoryUsage.Status == lv::MetricStatus::Measured,"native memory availability is explicit rather than fabricated");
+            }
+            if (info.FrameNumber == 40) {auto p=lv::MakeQualityProfile(lv::QualityPreset::Low);Require(v.SetQuality(p));auto changed=v.GetTelemetry();Check(changed && changed.Value().PreviousQualityFrames && changed.Value().Frames.SampleCount == 0,"successful quality change retains before history and resets current timing window");}
+        }
         if (mode == "quality") {
             auto caps=v.GetQualityCapabilities();Check(caps && caps.Value().GraphicsAvailable,"Viewer exposes active graphics capabilities");
             if (info.FrameNumber == 0) {
@@ -116,7 +127,15 @@ int main(int argc, char* argv[]) {
         Require(viewer.SetCamera(lv::Camera{}));
     } else {
         Check(result.HasValue(),result ? "standalone run succeeds" : result.Error().Message.c_str());
-        if (mode != "close") { Check(callbacks == 3,"frame limit submits exactly three frame callbacks"); }
+        if (mode != "close") { Check(callbacks == (mode == "telemetry" ? 80u:3u),"frame limit uses the Run entry snapshot"); }
+    }
+    if (mode == "telemetry") {
+        const auto t=viewer.GetTelemetry();Check(t && !t.Value().Live && t.Value().Frames.SampleCount > 0,"last telemetry snapshot survives graphics cleanup and is marked historical");
+        if (t) {
+            Check(t.Value().Frames.GpuFrameMs.Status == lv::MetricStatus::Unsupported || (t.Value().Frames.GpuFrameMs.Value && *t.Value().Frames.GpuFrameMs.Value >= 0),"supported GPU timestamps resolve asynchronously without blocking");
+            Check(t.Value().System.ProcessCpuPercent.Value.has_value(),"native runtime refreshes process counters after one second");
+            TemporaryDirectory temp;Check(bool(lv::SaveTelemetry(t.Value(),temp.File("native.json"))),"native telemetry snapshot exports after shutdown");
+        }
     }
     const auto again = viewer.Run();
     Check(!again && again.Error().Code == lv::ErrorCode::InvalidState,"Viewer cannot start a second native session");

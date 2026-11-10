@@ -14,6 +14,8 @@ struct SceneRenderStats {
     std::size_t ResidentImages = 0;
     std::size_t LastDrawCalls = 0;
     std::size_t LastCulledParts = 0;
+    std::uint64_t LastTriangles = 0, LogicalTextureBytes = 0, LogicalBufferBytes = 0;
+    std::uint64_t ResidentAssetSignature = 0;
     int MaxResidentTextureSize = 0;
 };
 

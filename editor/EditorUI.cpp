@@ -76,10 +76,12 @@ void EditorUI::FileDialog(Dialog type) {
     pathInput_ = type == Dialog::Save ? (Document.Path().empty() ? Text(directory_/"Scene.mvxscene.json") : Text(Document.Path())) : Text(directory_) + "/";
     if (type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad) { poseObject_ = Document.Selection(); pathInput_ = Text(directory_/"Pose.mvxpose.json"); }
     if (type == Dialog::QualitySave || type == Dialog::QualityLoad) {pathInput_=Text(directory_/"Profile.mvxquality.json");}
+    if (type == Dialog::TelemetryJson || type == Dialog::TelemetryCsv) {pathInput_=Text(directory_/(type == Dialog::TelemetryJson ? "Telemetry.json":"Telemetry.csv"));}
 }
 bool EditorUI::SaveDialog(Dialog type, const std::filesystem::path& path) {
     if (type == Dialog::Save) { return Save(path); }
     if (type == Dialog::QualitySave) {return Report(SaveQuality(qualityDraft_,path));}
+    if (type == Dialog::TelemetryJson || type == Dialog::TelemetryCsv) {return Report(SaveTelemetry(Viewport.Telemetry(),path,type == Dialog::TelemetryJson ? TelemetryFormat::Json:TelemetryFormat::Csv));}
     if (!Report(Document.SavePoseFile(poseObject_,path,type == Dialog::PosePartial))) { return false; }
     status_ = "Saved Pose " + Text(path); return true;
 }
@@ -112,7 +114,8 @@ void EditorUI::Menu() {
             ImGui::MenuItem("Inspector",nullptr,&inspector_); ImGui::MenuItem("Asset Browser",nullptr,&assets_);
             ImGui::MenuItem("Bone Inspector",nullptr,&bones_); ImGui::MenuItem("Animation Controls",nullptr,&animation_);
             ImGui::MenuItem("Quality Settings",nullptr,&quality_);
-            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = true; }
+            ImGui::MenuItem("Performance",nullptr,&performance_);
+            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = performance_ = true; }
             ImGui::EndMenu();
         }
         ImGui::Separator();
@@ -146,10 +149,11 @@ void EditorUI::Dockspace() {
         ImGui::DockBuilderDockWindow("Asset Browser",bottom); ImGui::DockBuilderDockWindow("Viewport",center);
         ImGui::DockBuilderDockWindow("Bone Inspector",right); ImGui::DockBuilderDockWindow("Animation Controls",bottom);
         ImGui::DockBuilderDockWindow("Quality Settings",right);
+        ImGui::DockBuilderDockWindow("Performance",right);
         ImGui::DockBuilderFinish(dock);
     }
     // Add Phase 5 panels to a saved Phase 4 layout without resetting user splits.
-    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"}}) {
+    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"}}) {
         if (!ImGui::FindWindowSettingsByID(ImHashStr(panel.first))) {
             const auto* anchor = ImGui::FindWindowSettingsByID(ImHashStr(panel.second));
             ImGui::DockBuilderDockWindow(panel.first,anchor && anchor->DockId ? anchor->DockId : dock);
@@ -460,14 +464,14 @@ void EditorUI::Dialogs() {
     }
     if (dialog_ != Dialog::None) { ImGui::OpenPopup("File path"); }
     if (ImGui::BeginPopupModal("File path",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : dialog_ == Dialog::Import ? "Import model (.gltf / .glb)" : dialog_ == Dialog::QualitySave || dialog_ == Dialog::QualityLoad ? "Quality profile (.mvxquality.json)":"Pose file (.mvxpose.json)");
+        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : dialog_ == Dialog::Import ? "Import model (.gltf / .glb)" : dialog_ == Dialog::QualitySave || dialog_ == Dialog::QualityLoad ? "Quality profile (.mvxquality.json)":dialog_ == Dialog::TelemetryJson || dialog_ == Dialog::TelemetryCsv ? "Export telemetry snapshot (.json / .csv)":"Pose file (.mvxpose.json)");
         ImGui::SetNextItemWidth(620);
         if (ImGui::IsWindowAppearing()) { ImGui::SetKeyboardFocusHere(); }
         const bool enter = ImGui::InputText("Path",&pathInput_,ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
         if (ImGui::Button("OK") || enter) {
             const auto path = detail::PathFromUtf8(pathInput_);
             bool close = true;
-            if (dialog_ == Dialog::Save || dialog_ == Dialog::PoseFull || dialog_ == Dialog::PosePartial || dialog_ == Dialog::QualitySave) {
+            if (dialog_ == Dialog::Save || dialog_ == Dialog::PoseFull || dialog_ == Dialog::PosePartial || dialog_ == Dialog::QualitySave || dialog_ == Dialog::TelemetryJson || dialog_ == Dialog::TelemetryCsv) {
                 std::error_code error;
                 if (std::filesystem::is_regular_file(path,error)) { overwritePath_ = path; overwriteDialog_ = dialog_; }
                 else { close = SaveDialog(dialog_,path); }
@@ -497,7 +501,8 @@ void EditorUI::Dialogs() {
     }
 }
 void EditorUI::Draw() {
-    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); QualitySettings(); ViewportPanel(); Dialogs();
+    if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());
