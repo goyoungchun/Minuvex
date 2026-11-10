@@ -123,7 +123,7 @@ ImportSettings Settings(const Json& j) {
 }
 void ValidateScene(const Scene& scene) {
     Require(scene.Size() <= MaxObjects,"Scene object limit exceeded.");
-    (void)scene.MainCamera.ViewProjection(1); scene.Sun.Validate();
+    (void)scene.MainCamera.ViewProjection(1); scene.ValidateLighting();
     for (auto id : scene.ObjectIds()) {
         std::size_t depth = 0;
         for (auto current = id; current; current = scene.GetObject(current).Parent) {
@@ -151,7 +151,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",2},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",3},{"assets",Json::array()},{"objects",Json::array()}};
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -180,6 +180,8 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
         root["camera"] = {{"position",Vector(c.Position)},{"target",Vector(c.Target)},{"up",Vector(c.Up)},
             {"fov",c.VerticalFovRadians},{"near",c.NearPlane},{"far",c.FarPlane}};
         root["light"] = {{"direction",Vector(l.Direction)},{"color",Vector(l.Color)},{"intensity",l.Intensity},{"ambient",l.Ambient}};
+        root["pointLights"]=Json::array();for (const auto& light:scene.PointLights) {root["pointLights"].push_back({{"position",Vector(light.Position)},{"color",Vector(light.Color)},{"intensity",light.Intensity},{"range",light.Range}});}
+        root["spotLights"]=Json::array();for (const auto& light:scene.SpotLights) {root["spotLights"].push_back({{"position",Vector(light.Position)},{"direction",Vector(light.Direction)},{"color",Vector(light.Color)},{"intensity",light.Intensity},{"range",light.Range},{"inner",light.InnerConeRadians},{"outer",light.OuterConeRadians}});}
         WriteJson(root,path);
         return Result<void>::Success();
     } catch (...) {
@@ -190,7 +192,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version == 1 || version == 2),"Unsupported scene format/version.");
+        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 3),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -230,6 +232,11 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         scene.MainCamera = {Vector(c.at("position")),Vector(c.at("target")),Vector(c.at("up")),Float(c.at("fov")),Float(c.at("near")),Float(c.at("far"))};
         const auto& l = root.at("light");
         scene.Sun = {Vector(l.at("direction")),Vector(l.at("color")),Float(l.at("intensity")),Float(l.at("ambient"))};
+        if (version >= 3) {
+            const auto& points=root.at("pointLights");const auto& spots=root.at("spotLights");Require(points.is_array() && spots.is_array() && points.size()+spots.size() <= MaxLocalLights,"Invalid local light arrays.");
+            for (const auto& p:points) {scene.PointLights.push_back({Vector(p.at("position")),Vector(p.at("color")),Float(p.at("intensity")),Float(p.at("range"))});}
+            for (const auto& p:spots) {scene.SpotLights.push_back({Vector(p.at("position")),Vector(p.at("direction")),Vector(p.at("color")),Float(p.at("intensity")),Float(p.at("range")),Float(p.at("inner")),Float(p.at("outer"))});}
+        }
         ValidateScene(scene);
         const auto base = std::filesystem::absolute(path).parent_path();
         for (const auto& asset : assets) {
@@ -242,7 +249,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
-            if (version == 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id")))); }
+            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id")))); }
         }
         return Result<SceneArchive>::Success(std::move(archive));
     } catch (...) { return Result<SceneArchive>::Failure(Failure(path)); }

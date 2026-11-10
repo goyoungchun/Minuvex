@@ -16,6 +16,9 @@ QualityCapabilities QueryQualityCapabilities() {
     const auto color=sg_query_pixelformat(defaults.color_format),depth=sg_query_pixelformat(defaults.depth_format);
     caps.GraphicsAvailable=color.render && color.sample && color.filter && depth.render;
     caps.MaxRenderSize=std::min(8192,sg_query_limits().max_image_size_2d);caps.MaxTextureSize=sg_query_limits().max_image_size_2d;
+    const auto shadow=sg_query_pixelformat(SG_PIXELFORMAT_R32F),shadowDepth=sg_query_pixelformat(SG_PIXELFORMAT_DEPTH),hdr=sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
+    caps.ShadowMapping=shadow.render && shadow.sample && shadowDepth.render;
+    caps.HdrPostProcessing=hdr.render && hdr.sample && hdr.filter;
 #if defined(_WIN32)
     caps.Backend=GraphicsBackend::D3D11;
     auto* device=static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));
@@ -32,9 +35,11 @@ QualityCapabilities QueryQualityCapabilities() {
     if (color.msaa && depth.msaa && colorFormat != DXGI_FORMAT_UNKNOWN && depthFormat != DXGI_FORMAT_UNKNOWN) {
         for (int count:{2,4,8}) {UINT c=0,d=0;if (SUCCEEDED(device->CheckMultisampleQualityLevels(colorFormat,count,&c)) && SUCCEEDED(device->CheckMultisampleQualityLevels(depthFormat,count,&d)) && c && d) {caps.SampleCounts|=1u<<count;}}
     }
+    if (hdr.msaa && depth.msaa && depthFormat != DXGI_FORMAT_UNKNOWN) {for (int count:{2,4,8}) {UINT c=0,d=0;if (SUCCEEDED(device->CheckMultisampleQualityLevels(DXGI_FORMAT_R16G16B16A16_FLOAT,count,&c)) && SUCCEEDED(device->CheckMultisampleQualityLevels(depthFormat,count,&d)) && c && d) {caps.HdrSampleCounts|=1u<<count;}}}
 #elif defined(__APPLE__)
     caps.Backend=GraphicsBackend::Metal;id<MTLDevice> device=(__bridge id<MTLDevice>)sg_mtl_device();
     if (color.msaa && depth.msaa) {for (int count:{2,4,8}) {if ([device supportsTextureSampleCount:static_cast<NSUInteger>(count)]) {caps.SampleCounts|=1u<<count;}}}
+    if (hdr.msaa && depth.msaa) {for (int count:{2,4,8}) {if ([device supportsTextureSampleCount:static_cast<NSUInteger>(count)]) {caps.HdrSampleCounts|=1u<<count;}}}
 #endif
     return caps;
 }
@@ -45,6 +50,8 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
     const auto vector=[&](Vec3 value){scalar(value.X);scalar(value.Y);scalar(value.Z);};
     const auto& c=scene.MainCamera;vector(c.Position);vector(c.Target);vector(c.Up);scalar(c.VerticalFovRadians);scalar(c.NearPlane);scalar(c.FarPlane);
     const auto& l=scene.Sun;vector(l.Direction);vector(l.Color);scalar(l.Intensity);scalar(l.Ambient);
+    integer(scene.PointLights.size());for (const auto& light:scene.PointLights) {vector(light.Position);vector(light.Color);scalar(light.Intensity);scalar(light.Range);}
+    integer(scene.SpotLights.size());for (const auto& light:scene.SpotLights) {vector(light.Position);vector(light.Direction);vector(light.Color);scalar(light.Intensity);scalar(light.Range);scalar(light.InnerConeRadians);scalar(light.OuterConeRadians);}
     for (const auto& item:scene.CollectRenderItems()) {
         integer(item.Object);integer(reinterpret_cast<std::uintptr_t>(item.Model.get()));
         for (auto value:item.WorldTransform.Elements) {scalar(value);}

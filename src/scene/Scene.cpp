@@ -36,6 +36,18 @@ ObjectId Scene::CreateObject(std::string name, ObjectId parent) {
     return id;
 }
 
+void PointLight::Validate() const {
+    if (!std::isfinite(Position.X) || !std::isfinite(Position.Y) || !std::isfinite(Position.Z) || !std::isfinite(Color.X) || !std::isfinite(Color.Y) || !std::isfinite(Color.Z) || Color.X < 0 || Color.Y < 0 || Color.Z < 0 || !std::isfinite(Intensity) || Intensity < 0 || !std::isfinite(Range) || Range <= 0) {throw std::invalid_argument("Local lights require finite position, nonnegative color/intensity and positive range.");}
+}
+void SpotLight::Validate() const {
+    PointLight{Position,Color,Intensity,Range}.Validate();const auto length=std::hypot(double(Direction.X),double(Direction.Y),double(Direction.Z));
+    if (!std::isfinite(length) || length == 0 || !std::isfinite(InnerConeRadians) || !std::isfinite(OuterConeRadians) || InnerConeRadians < 0 || InnerConeRadians > OuterConeRadians || OuterConeRadians <= 0 || OuterConeRadians >= 1.570796327f) {throw std::invalid_argument("Spot lights require nonzero direction and 0 <= inner <= outer < pi/2 (outer > 0).");}
+}
+void Scene::ValidateLighting() const {
+    Sun.Validate();if (PointLights.size()+SpotLights.size() > MaxLocalLights) {throw std::invalid_argument("A Scene supports at most 8 local lights.");}
+    for (const auto& l:PointLights) {l.Validate();}for (const auto& l:SpotLights) {l.Validate();}
+}
+
 ObjectId Scene::AddModel(ModelHandle model, const Transform& transform, ObjectId parent) {
     if (!model) { throw std::invalid_argument("AddModel requires a nonempty model handle."); }
     (void)transform.Matrix().NormalMatrix();

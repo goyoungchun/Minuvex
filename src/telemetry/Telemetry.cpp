@@ -13,9 +13,10 @@ double Percentile(std::vector<double> values) {std::sort(values.begin(),values.e
 std::uint64_t Add(std::uint64_t a,std::uint64_t b) {if (b > UINT64_MAX-a) {throw std::invalid_argument("Resource estimate overflow.");}return a+b;}
 std::uint64_t Multiply(std::uint64_t a,std::uint64_t b) {if (a && b > UINT64_MAX/a) {throw std::invalid_argument("Resource estimate overflow.");}return a*b;}
 ResourceCost Cost(const Scene& scene,const QualityState& quality,std::uint64_t& signature) {
+    scene.ValidateLighting();
     signature=14695981039346656037ull;
     ResourceCost cost;const auto& settings=*quality.Effective;
-    cost.RenderTargetBytes=std::uint64_t(quality.RenderWidth)*quality.RenderHeight*(8u*settings.MsaaSamples+(settings.MsaaSamples > 1 ? 4u:0u));
+    cost.RenderTargetBytes=RenderTargetBytes(settings,quality.RenderWidth,quality.RenderHeight);
     std::unordered_set<const ModelAsset*> assets;
     for (const auto& item:scene.CollectRenderItems()) {
         if (!assets.insert(item.Model.get()).second) {continue;}
@@ -28,13 +29,16 @@ ResourceCost Cost(const Scene& scene,const QualityState& quality,std::uint64_t& 
                 cost.BufferBytes=Add(cost.BufferBytes,Add(Multiply(geometry.Vertices.size(),sizeof(Vertex)),Multiply(geometry.Indices.size(),sizeof(std::uint32_t))));
                 cost.TextureBytes=Add(cost.TextureBytes,4); // Renderer owns a white fallback per primitive.
                 const auto& material=asset.Materials.at(primitive.MaterialIndex);
-                if (!material.BaseColorTexture) {continue;}
-                const auto imageIndex=asset.Textures.at(*material.BaseColorTexture).ImageIndex;
-                if (!images.insert(imageIndex).second) {continue;}
+                for (int role=0;role<2;++role) {
+                const auto texture=role == 0 ? material.BaseColorTexture:material.NormalTexture;
+                if (!texture || (role == 1 && settings.Lighting != LightingMode::Advanced)) {continue;}
+                const auto imageIndex=asset.Textures.at(*texture).ImageIndex;
+                if (!images.insert(imageIndex+role*asset.Images.size()).second) {continue;}
                 const auto& image=asset.Images.at(imageIndex);int w=image.Width,h=image.Height;
                 if (w <= 0 || h <= 0 || w > 32768 || h > 32768 || Multiply(Multiply(w,h),4) != image.Rgba.size()) {throw std::invalid_argument("Invalid source image in resource estimate.");}
                 while (w > settings.MaxTextureSize || h > settings.MaxTextureSize) {w=std::max(1,w/2);h=std::max(1,h/2);}
                 for (;;) {cost.TextureBytes=Add(cost.TextureBytes,std::uint64_t(w)*h*4);if (w == 1 && h == 1) {break;}w=std::max(1,w/2);h=std::max(1,h/2);}
+                }
             }
         }
     }
@@ -71,8 +75,10 @@ Result<QualityEstimate> EstimateQualityResources(const QualityProfile& p,const Q
         QualityEstimate e;e.Quality=std::move(resolved).Value();e.Cost=Cost(scene,e.Quality,e.AssetSignature);
         if (current && current->Quality.Effective) {
             const auto& old=*current->Quality.Effective;const auto& next=*e.Quality.Effective;
-            if (old.MsaaSamples == next.MsaaSamples && current->Quality.RenderWidth == e.Quality.RenderWidth && current->Quality.RenderHeight == e.Quality.RenderHeight) {e.ReusedBytes=std::min(e.Cost.RenderTargetBytes,current->Cost.RenderTargetBytes);}
-            if (current->AssetSignature == e.AssetSignature && old.MsaaSamples == next.MsaaSamples && old.MaxTextureSize == next.MaxTextureSize && old.Anisotropy == next.Anisotropy) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.TextureBytes,current->Cost.TextureBytes));e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.BufferBytes,current->Cost.BufferBytes));}
+            const auto shadowBytes=[](const RenderSettings& s) {return s.Shadow != ShadowMode::Off ? std::uint64_t(s.ShadowResolution)*s.ShadowResolution*8:0;};
+            if (old.Shadow != ShadowMode::Off && next.Shadow != ShadowMode::Off && old.ShadowResolution == next.ShadowResolution) {e.ReusedBytes=shadowBytes(next);}
+            if (old.MsaaSamples == next.MsaaSamples && old.PostProcessing == next.PostProcessing && current->Quality.RenderWidth == e.Quality.RenderWidth && current->Quality.RenderHeight == e.Quality.RenderHeight) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.RenderTargetBytes-shadowBytes(next),current->Cost.RenderTargetBytes-shadowBytes(old)));}
+            if (current->AssetSignature == e.AssetSignature && old.MsaaSamples == next.MsaaSamples && old.MaxTextureSize == next.MaxTextureSize && old.Anisotropy == next.Anisotropy && old.PostProcessing == next.PostProcessing && (old.Shadow != ShadowMode::Off) == (next.Shadow != ShadowMode::Off) && (old.Lighting == LightingMode::Advanced) == (next.Lighting == LightingMode::Advanced)) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.TextureBytes,current->Cost.TextureBytes));e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.BufferBytes,current->Cost.BufferBytes));}
         }
         e.AdditionalBytes=e.Cost.TotalBytes-e.ReusedBytes;e.TemporaryPeakBytes=Add(current ? current->Cost.TotalBytes:0,e.AdditionalBytes);
         return Result<QualityEstimate>::Success(std::move(e));

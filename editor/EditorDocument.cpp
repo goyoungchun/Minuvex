@@ -90,6 +90,9 @@ Result<void> EditorDocument::SetCamera(const Camera& camera) {
 Result<void> EditorDocument::SetLight(const DirectionalLight& light) {
     return Edit([&] { light.Validate(); world_.Sun = light; dirty_ = true; });
 }
+Result<void> EditorDocument::SetLocalLights(std::vector<PointLight> points,std::vector<SpotLight> spots) {
+    return Edit([&] {if (points.size()+spots.size() > MaxLocalLights) {throw std::invalid_argument("At most 8 local lights are supported.");}for (const auto& p:points) {p.Validate();}for (const auto& s:spots) {s.Validate();}world_.PointLights=std::move(points);world_.SpotLights=std::move(spots);dirty_=true;});
+}
 Result<void> EditorDocument::PlayAnimation(ObjectId object, std::size_t clip) { return AnimationEdit(world_,dirty_,object,[&](auto& p) { p.Play(clip); }); }
 Result<void> EditorDocument::PauseAnimation(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.Pause(); }); }
 Result<void> EditorDocument::ResumeAnimation(ObjectId object) { return AnimationEdit(world_,dirty_,object,[](auto& p) { p.Resume(); }); }

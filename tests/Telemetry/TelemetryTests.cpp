@@ -7,7 +7,7 @@
 
 using namespace test;
 namespace {
-lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.SampleCounts=(1u<<1)|(1u<<2)|(1u<<4);return c;}
+lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4);return c;}
 void Frames() {
     lv::FrameMonitor m;Check(!m.Snapshot(0).Fps.Value && m.Snapshot(0).SampleCount == 0,"no fabricated FPS before a frame");
     m.Record(1,2,5,12);Check(!m.Snapshot(1).Fps.Value && *m.Snapshot(1).CpuFrameMs.Value == 2,"first frame exposes CPU work without invented cadence");
@@ -22,7 +22,7 @@ void Frames() {
 }
 void Resources() {
     const auto caps=Caps();lv::Scene scene;auto p=lv::MakeQualityProfile(lv::QualityPreset::Medium);auto e=lv::EstimateQualityResources(p,caps,scene,100,50);
-    Check(e && e.Value().Cost.RenderTargetBytes == 100*50*8 && e.Value().Cost.TotalBytes == e.Value().Cost.RenderTargetBytes,"empty scene accounts color/depth attachments");
+    Check(e && e.Value().Cost.RenderTargetBytes == 100*50*8+1024ull*1024*8 && e.Value().Cost.TotalBytes == e.Value().Cost.RenderTargetBytes,"Medium accounts color/depth and directional shadow attachments");
     lv::AssetRegistry assets;const auto model=assets.LoadModel(Fixture("SharedBox.glb"));const auto first=scene.AddModel(model);
     auto one=lv::EstimateQualityResources(p,caps,scene,100,50);scene.AddModel(model);auto shared=lv::EstimateQualityResources(p,caps,scene,100,50);
     Check(one && shared && one.Value().Cost.TotalBytes == shared.Value().Cost.TotalBytes,"instances share logical GPU asset allocations");
@@ -30,8 +30,8 @@ void Resources() {
     Check(one.Value().Cost.BufferBytes == expected && expected > 0,"vertex and uint32 index buffers included");
     const auto reuse=lv::EstimateQualityResources(p,caps,scene,100,50,&shared.Value());Check(reuse && reuse.Value().AdditionalBytes == 0 && reuse.Value().ReusedBytes == shared.Value().Cost.TotalBytes,"identical quality reuses targets and GPU cache");
     p.Overrides.TargetFps=30;const auto fps=lv::EstimateQualityResources(p,caps,scene,100,50,&shared.Value());Check(fps && fps.Value().AdditionalBytes == 0,"pacing-only changes have no new GPU allocation");
-    auto resized=lv::EstimateQualityResources(p,caps,scene,200,100,&shared.Value());Check(resized && resized.Value().AdditionalBytes == resized.Value().Cost.RenderTargetBytes && resized.Value().TemporaryPeakBytes == shared.Value().Cost.TotalBytes+resized.Value().AdditionalBytes,"resize accounts transient old-plus-new attachments");
-    p.Overrides.MsaaSamples=4;const auto msaa=lv::EstimateQualityResources(p,caps,scene,100,50,&shared.Value());Check(msaa && msaa.Value().Cost.RenderTargetBytes == 100*50*36 && msaa.Value().ReusedBytes == 0,"MSAA includes resolve and pipeline/cache recreation");
+    auto resized=lv::EstimateQualityResources(p,caps,scene,200,100,&shared.Value());Check(resized && resized.Value().AdditionalBytes == 200*100*8 && resized.Value().TemporaryPeakBytes == shared.Value().Cost.TotalBytes+resized.Value().AdditionalBytes,"resize reuses shadow map and accounts transient old-plus-new scene attachments");
+    p.Overrides.MsaaSamples=4;const auto msaa=lv::EstimateQualityResources(p,caps,scene,100,50,&shared.Value());Check(msaa && msaa.Value().Cost.RenderTargetBytes == 100*50*36+1024ull*1024*8 && msaa.Value().ReusedBytes == 1024ull*1024*8,"MSAA recreates color/resolve/cache and preserves shadow attachments");
     scene.SetVisible(first,false);scene.SetVisible(scene.ObjectIds()[1],false);const auto hidden=lv::EstimateQualityResources(p,caps,scene,100,50);Check(hidden && hidden.Value().Cost.BufferBytes == 0 && hidden.Value().Cost.TextureBytes == 0,"hidden assets are not resident in renderer cache");
     auto imageModel=std::make_shared<lv::ModelAsset>(*model);imageModel->Images={{1024,512,std::vector<std::uint8_t>(1024*512*4,255)}};imageModel->Textures={lv::TextureAsset{}};for (auto& mat:imageModel->Materials) {mat.BaseColorTexture=0;}
     lv::Scene imageScene;imageScene.AddModel(imageModel);auto low=lv::EstimateQualityResources(lv::MakeQualityProfile(lv::QualityPreset::Low),caps,imageScene,100,50);auto high=lv::EstimateQualityResources(lv::MakeQualityProfile(lv::QualityPreset::High),caps,imageScene,100,50);
@@ -41,7 +41,7 @@ void Resources() {
     auto replacement=std::make_shared<lv::ModelAsset>(*imageModel);lv::Scene replacedScene;replacedScene.AddModel(replacement);
     auto replaced=lv::EstimateQualityResources(lv::MakeQualityProfile(lv::QualityPreset::Low),caps,replacedScene,100,50,&low.Value());
     Check(replaced && replaced.Value().AssetSignature != low.Value().AssetSignature && replaced.Value().AdditionalBytes == replaced.Value().Cost.BufferBytes+replaced.Value().Cost.TextureBytes,"different immutable assets do not reuse a same-sized resident cache");
-    p.Overrides.Shadow=lv::ShadowMode::Pcf;const auto unsupported=lv::EstimateQualityResources(p,caps,scene,100,50);Check(!unsupported && unsupported.Error().Code == lv::ErrorCode::UnsupportedFeature,"estimate applies the same strict capability policy as rendering");
+    p.Overrides.Shadow=lv::ShadowMode::Pcss;const auto unsupported=lv::EstimateQualityResources(p,caps,scene,100,50);Check(!unsupported && unsupported.Error().Code == lv::ErrorCode::UnsupportedFeature,"estimate applies the same strict capability policy as rendering");
     Check(!lv::EstimateQualityResources(p,caps,scene,0,0),"suspended extent does not invent cost");
     imageModel->Images[0].Width=0;Check(!lv::EstimateQualityResources(lv::QualityProfile{},caps,imageScene,100,50),"invalid image data rejected without large allocation");
 }
@@ -51,7 +51,7 @@ void Recommendations() {
     system.GpuMemoryBudget={1024ull*1024*1024,lv::MetricStatus::Measured,"test budget"};system.GpuMemoryUsage={0,lv::MetricStatus::Measured,"test usage"};
     r=lv::RecommendQuality(caps,system,scene,1280,720);Check(r.Preset == lv::QualityPreset::High,"supported High may be suggested when transient memory fits headroom");
     system.GpuMemoryUsage.Value=*system.GpuMemoryBudget.Value;r=lv::RecommendQuality(caps,system,scene,1280,720);Check(!r.Preset && r.Profiles[0].Suitability == lv::ProfileSuitability::PerformanceRisk,"exhausted OS budget yields risk, not imaginary available VRAM");
-    system={};caps.SampleCounts=1u<<1;r=lv::RecommendQuality(caps,system,scene,1280,720);Check(r.Preset == lv::QualityPreset::Medium && r.Profiles[2].Suitability == lv::ProfileSuitability::Unsupported,"unsupported High never silently recommended with fallback");
+    system={};caps.SampleCounts=caps.HdrSampleCounts=1u<<1;r=lv::RecommendQuality(caps,system,scene,1280,720);Check(r.Preset == lv::QualityPreset::Medium && r.Profiles[2].Suitability == lv::ProfileSuitability::Unsupported,"unsupported High never silently recommended with fallback");
     system.AvailableSystemMemory={100ull*1024*1024,lv::MetricStatus::Measured,"test RAM"};r=lv::RecommendQuality(caps,system,scene,1280,720);Check(r.Preset == lv::QualityPreset::Low,"low available RAM marks higher presets as risk");
     system={};auto current=lv::EstimateQualityResources(lv::QualityProfile{},caps,scene,1280,720);lv::FrameStatistics f;f.SampleCount=60;f.P95CpuMs={25,lv::MetricStatus::Measured,"test CPU P95"};
     r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Low && !r.PerformanceValidated,"sustained measured CPU cost over target suggests lower preset without GPU guarantee");

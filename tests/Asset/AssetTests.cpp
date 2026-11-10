@@ -14,7 +14,7 @@ void TestImports() {
     Check(gltf->Id != 0 && gltf->Id != glb->Id, "assets have unique nonzero IDs");
     Check(registry.Find(gltf->Id) == gltf && !registry.Find(0), "registry lookup and invalid asset ID");
     Check(registry.LoadModel(Fixture("../Fixtures/SharedBox.gltf")) == gltf, "canonical path load reuses the same CPU asset");
-    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 2, "registry retains import metadata");
+    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 3, "registry retains import metadata");
     Check(gltf->ContentHash && gltf->SourcePath.is_absolute(), "asset has a content hash and canonical source");
     Check(gltf->Dependencies.size() == 1 && external->Dependencies.size() == 3, "embedded and external dependency lists");
     for (const auto& model : {gltf, glb, external}) {
@@ -144,7 +144,12 @@ void TestLargeIndices() {
 } // namespace
 
 int main() {
-    try { TestImports(); TestFailuresAndLimits(); TestLargeIndices(); }
+    try {
+        TestImports();TestFailuresAndLimits();TestLargeIndices();
+        TemporaryDirectory temp;auto source=Replace(Read(Fixture("SharedBox.gltf")),"\"name\": \"Checker\",","\"name\": \"Checker\", \"normalTexture\": {\"index\":0,\"scale\":0.4},");Write(temp.File("normal.gltf"),source);lv::AssetRegistry registry;auto model=registry.LoadModel(temp.File("normal.gltf"));
+        Check(model->Materials[0].NormalTexture == 0 && Near(model->Materials[0].NormalScale,.4f) && model->Images[0].Width == 2,"normal texture import retains UV0 binding, scale and decoded linear source pixels");
+        Write(temp.File("bad-normal.gltf"),Replace(source,"\"scale\":0.4","\"scale\":0.4,\"texCoord\":1"));ImportRejects([&]{registry.LoadModel(temp.File("bad-normal.gltf"));},lv::ImportErrorCode::UnsupportedFeature,"unsupported normal-map UV set is rejected explicitly");
+    }
     catch (const std::exception& error) { Check(false, error.what()); }
     return Finish();
 }

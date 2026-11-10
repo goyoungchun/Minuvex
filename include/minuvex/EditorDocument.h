@@ -28,6 +28,7 @@ public:
     Result<void> SetVisible(ObjectId object, bool visible);
     Result<void> SetCamera(const Camera& camera);
     Result<void> SetLight(const DirectionalLight& light);
+    Result<void> SetLocalLights(std::vector<PointLight> points,std::vector<SpotLight> spots);
     Result<void> PlayAnimation(ObjectId object, std::size_t clip);
     Result<void> PauseAnimation(ObjectId object);
     Result<void> ResumeAnimation(ObjectId object);

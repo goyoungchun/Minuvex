@@ -237,6 +237,14 @@ void EditorUI::Inspector() {
             changed = ImGui::DragFloat("Ambient",&light.Ambient,0.01f,0,10) || changed;
             if (changed) { Report(Document.SetLight(light)); }
         }
+        if (ImGui::CollapsingHeader("Point / Spot Lights (Advanced)")) {
+            auto points=Document.GetScene().PointLights;auto spots=Document.GetScene().SpotLights;bool changed=false;
+            if (points.size()+spots.size() < MaxLocalLights) {if (ImGui::Button("+ Point")) {points.push_back({});changed=true;}ImGui::SameLine();if (ImGui::Button("+ Spot")) {spots.push_back({});changed=true;}}
+            const auto edit=[&](auto& l) {bool c=VecInput("Position",l.Position);float color[]{l.Color.X,l.Color.Y,l.Color.Z};if (ImGui::ColorEdit3("Color",color)) {l.Color={color[0],color[1],color[2]};c=true;}c=ImGui::DragFloat("Intensity",&l.Intensity,.05f,0,100) || c;c=ImGui::DragFloat("Range",&l.Range,.1f,.01f,10000) || c;return c;};
+            for (std::size_t i=0;i<points.size();++i) {ImGui::PushID(static_cast<int>(i));if (ImGui::TreeNode("Point","Point %zu",i)) {changed=edit(points[i]) || changed;if (ImGui::Button("Remove")) {points.erase(points.begin()+static_cast<std::ptrdiff_t>(i));changed=true;ImGui::TreePop();ImGui::PopID();break;}ImGui::TreePop();}ImGui::PopID();}
+            for (std::size_t i=0;i<spots.size();++i) {ImGui::PushID(static_cast<int>(i)+100);if (ImGui::TreeNode("Spot","Spot %zu",i)) {changed=edit(spots[i]) || changed;changed=VecInput("Direction",spots[i].Direction) || changed;changed=ImGui::SliderFloat("Inner cone",&spots[i].InnerConeRadians,0,1.55f) || changed;changed=ImGui::SliderFloat("Outer cone",&spots[i].OuterConeRadians,.01f,1.56f) || changed;if (ImGui::Button("Remove")) {spots.erase(spots.begin()+static_cast<std::ptrdiff_t>(i));changed=true;ImGui::TreePop();ImGui::PopID();break;}ImGui::TreePop();}ImGui::PopID();}
+            if (changed) {Report(Document.SetLocalLights(std::move(points),std::move(spots)));}
+        }
     }
     ImGui::End();
 }
@@ -337,10 +345,13 @@ void EditorUI::QualitySettings() {
             if (ImGui::Combo("MSAA",&samples,"Off\0x2\0x4\0x8\0")) {o.MsaaSamples=1<<samples;}
             int texture=static_cast<int>(s.Textures);if (ImGui::Combo("Textures",&texture,"Low (512)\0Medium (2048)\0High (8192)\0")) {o.Textures=static_cast<TextureQuality>(texture);}
             if (ImGui::SliderInt("Anisotropy",&s.Anisotropy,1,16)) {o.Anisotropy=s.Anisotropy;}
-            int lighting=static_cast<int>(s.Lighting);if (ImGui::Combo("Lighting",&lighting,"Unlit\0Basic\0Advanced (unavailable)\0")) {o.Lighting=static_cast<LightingMode>(lighting);}
+            int lighting=static_cast<int>(s.Lighting);if (ImGui::Combo("Lighting",&lighting,"Unlit\0Basic\0Advanced (normal maps + local lights)\0")) {o.Lighting=static_cast<LightingMode>(lighting);}
             if (ImGui::Checkbox("Frustum culling",&s.FrustumCulling)) {o.FrustumCulling=s.FrustumCulling;}
             int demand=static_cast<int>(s.OnDemand);if (ImGui::Combo("On demand",&demand,"Off\0On\0Auto\0")) {o.OnDemand=static_cast<OnDemandMode>(demand);}
-            ImGui::TextWrapped("Shadow, LOD and post processing are unavailable in this renderer.");
+            int shadow=static_cast<int>(s.Shadow);if (ImGui::Combo("Sun shadow",&shadow,"Off\0Basic\0PCF (3x3)\0PCSS (unavailable)\0")) {o.Shadow=static_cast<ShadowMode>(shadow);}
+            int shadowSize=s.ShadowResolution == 512 ? 0:s.ShadowResolution == 1024 ? 1:s.ShadowResolution == 2048 ? 2:3;if (ImGui::Combo("Shadow size",&shadowSize,"512\0 1024\0 2048\0 4096\0")) {o.ShadowResolution=512<<shadowSize;}
+            if (ImGui::Checkbox("HDR + FXAA + Reinhard",&s.PostProcessing)) {o.PostProcessing=s.PostProcessing;}
+            ImGui::TextWrapped("PCSS and LOD are not implemented. Shadow applies to the sun only.");
         } else {ImGui::TextWrapped("%s",expanded.Error().Message.c_str());}
         ImGui::Checkbox("Allow supported fallback",&qualityDraft_.AllowFallback);
         ImGui::TextUnformatted(qualityDraft_.IsCustom() ? "Custom overrides":"Preset defaults");
@@ -356,7 +367,9 @@ void EditorUI::QualitySettings() {
             ImGui::Text("Texture limit: %d / %d",q.RequestedSettings.MaxTextureSize,effective.MaxTextureSize);
             ImGui::Text("Anisotropy: %d / %d",q.RequestedSettings.Anisotropy,effective.Anisotropy);
             ImGui::Text("FPS target: %d | culling: %s",effective.TargetFps,effective.FrustumCulling ? "on":"off");
-            ImGui::Text("Supported MSAA: 1%s%s%s",q.Capabilities.SampleCounts&(1u<<2)?", 2":"",q.Capabilities.SampleCounts&(1u<<4)?", 4":"",q.Capabilities.SampleCounts&(1u<<8)?", 8":"");
+            const auto mask=effective.PostProcessing ? q.Capabilities.HdrSampleCounts:q.Capabilities.SampleCounts;
+            ImGui::Text("Supported %s MSAA: 1%s%s%s",effective.PostProcessing ? "HDR":"LDR",mask&(1u<<2)?", 2":"",mask&(1u<<4)?", 4":"",mask&(1u<<8)?", 8":"");
+            ImGui::Text("Shadow format: %s | HDR: %s",q.Capabilities.ShadowMapping ? "supported":"unavailable",q.Capabilities.HdrPostProcessing ? "supported":"unavailable");
             for (const auto& a:q.Adjustments) {ImGui::TextWrapped("%s: %s",a.Field.c_str(),a.Reason.c_str());}
         }
         if (q.LastError) {ImGui::TextWrapped("Previous quality retained: %s",q.LastError->Message.c_str());}

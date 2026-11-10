@@ -13,6 +13,8 @@ struct Vertex {
     std::array<float, 2> TexCoord{};
     std::array<std::uint16_t,4> Joints{};
     std::array<float,4> Weights{1,0,0,0};
+    // W=0 means absent (derive a cotangent frame); authored glTF tangents use +/-1.
+    std::array<float,4> Tangent{1,0,0,0};
 };
 
 // Indexed triangle list; 32-bit indices support imported glTF geometry.

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Minuvex VERSION 0.8.0 LANGUAGES CXX)
+project(Minuvex VERSION 0.9.0 LANGUAGES CXX)
 
 include(cmake/MSVCDependencies.cmake)
 
@@ -193,6 +193,7 @@ if(MINUVEX_BUILD_EXAMPLES)
     add_subdirectory(examples/AssetScene)
     add_subdirectory(examples/StandaloneViewer)
     add_subdirectory(examples/EmbeddedViewer)
+    add_subdirectory(examples/RenderingEnhancement)
 endif()
 
 if(BUILD_TESTING)

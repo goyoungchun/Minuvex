@@ -7,13 +7,13 @@
 using namespace test;
 using Json=nlohmann::json;
 namespace {
-lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.SampleCounts=(1u<<1)|(1u<<2)|(1u<<4)|(1u<<8);return c;}
+lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4)|(1u<<8);return c;}
 void Policy() {
     auto low=lv::MakeQualityProfile(lv::QualityPreset::Low),medium=lv::MakeQualityProfile(lv::QualityPreset::Medium),high=lv::MakeQualityProfile(lv::QualityPreset::High);
     auto l=lv::ExpandQuality(low),m=lv::ExpandQuality(medium),h=lv::ExpandQuality(high);
     Check(l && l.Value().MaxRenderHeight == 720 && l.Value().TargetFps == 30 && l.Value().MaxTextureSize == 512 && l.Value().MsaaSamples == 1,"Low profile reduces render/texture load without disabling skinning");
-    Check(m && m.Value().MaxRenderHeight == 1080 && m.Value().MaxTextureSize == 2048 && m.Value().TargetFps == 60,"Medium baseline settings");
-    Check(h && h.Value().MsaaSamples == 4 && h.Value().Anisotropy == 8 && h.Value().MaxTextureSize == 8192,"High enables supported MSAA/texture/sampling features");
+    Check(m && m.Value().MaxRenderHeight == 1080 && m.Value().MaxTextureSize == 2048 && m.Value().TargetFps == 60 && m.Value().Lighting == lv::LightingMode::Advanced && m.Value().Shadow == lv::ShadowMode::Pcf && !m.Value().PostProcessing,"Medium enables advanced lighting and PCF without HDR");
+    Check(h && h.Value().MsaaSamples == 4 && h.Value().Anisotropy == 8 && h.Value().MaxTextureSize == 8192 && h.Value().PostProcessing && h.Value().ShadowResolution == 2048,"High enables HDR, larger shadows and MSAA/texture/sampling features");
     Check(!low.IsCustom() && !medium.IsCustom() && !high.IsCustom(),"Custom is explicit overrides, not a fourth base preset");
     low.Overrides.TargetFps=0;low.Overrides.FrustumCulling=false;Check(low.IsCustom() && lv::ExpandQuality(low).Value().TargetFps == 0 && !lv::ExpandQuality(low).Value().FrustumCulling,"zero/false overrides are retained");
     auto caps=Caps();auto resolved=lv::ResolveQuality(medium,caps,3840,2160);
@@ -22,7 +22,7 @@ void Policy() {
     Check(resolved && resolved.Value().RenderWidth == 960 && resolved.Value().RenderHeight == 540,"resolution scale applies after preset height cap");
     medium.Overrides.Resolution=lv::ResolutionMode::Fixed;medium.Overrides.FixedWidth=333;medium.Overrides.FixedHeight=222;
     resolved=lv::ResolveQuality(medium,caps,100,80);Check(resolved && resolved.Value().RenderWidth == 333 && resolved.Value().RenderHeight == 222,"fixed extent is independent of output size");
-    auto request=high;request.Overrides.MsaaSamples=8;caps.SampleCounts=(1u<<1)|(1u<<4);
+    auto request=high;request.Overrides.MsaaSamples=8;caps.SampleCounts=caps.HdrSampleCounts=(1u<<1)|(1u<<4);
     auto strict=lv::ResolveQuality(request,caps,640,480);Check(!strict && strict.Error().Code == lv::ErrorCode::UnsupportedFeature,"unsupported MSAA is rejected by default");
     request.AllowFallback=true;resolved=lv::ResolveQuality(request,caps,640,480);
     Check(resolved && resolved.Value().RequestedSettings.MsaaSamples == 8 && resolved.Value().Effective->MsaaSamples == 4 && !resolved.Value().Adjustments.empty(),"requested/effective remain distinct after explicit fallback");
@@ -30,14 +30,19 @@ void Policy() {
     Check(!lv::ResolveQuality(high,caps,640,480),"strict texture/anisotropy capability validation");
     high.AllowFallback=true;resolved=lv::ResolveQuality(high,caps,640,480);
     Check(resolved && resolved.Value().Effective->Anisotropy == 2 && resolved.Value().Effective->MaxTextureSize == 1024,"texture and anisotropy fallback is reported");
-    request=lv::MakeQualityProfile(lv::QualityPreset::Medium);request.Overrides.Lighting=lv::LightingMode::Advanced;request.Overrides.Shadow=lv::ShadowMode::Pcf;request.Overrides.PostProcessing=true;request.Overrides.Lod=true;request.Overrides.LodBias=1.0f;
+    request=lv::MakeQualityProfile(lv::QualityPreset::Medium);request.Overrides.Lighting=lv::LightingMode::Advanced;request.Overrides.Shadow=lv::ShadowMode::Pcss;request.Overrides.PostProcessing=true;request.Overrides.Lod=true;request.Overrides.LodBias=1.0f;
     Check(!lv::ResolveQuality(request,Caps(),640,480),"unimplemented rendering enhancements cannot be advertised as effective");
     request.AllowFallback=true;resolved=lv::ResolveQuality(request,Caps(),640,480);
-    Check(resolved && resolved.Value().Effective->Lighting == lv::LightingMode::Basic && resolved.Value().Effective->Shadow == lv::ShadowMode::Off && !resolved.Value().Effective->PostProcessing && !resolved.Value().Effective->Lod && resolved.Value().Effective->LodBias == 0 && resolved.Value().Adjustments.size() == 4,"fallback explicitly disables unsupported features");
+    Check(resolved && resolved.Value().Effective->Lighting == lv::LightingMode::Advanced && resolved.Value().Effective->Shadow == lv::ShadowMode::Pcf && resolved.Value().Effective->PostProcessing && !resolved.Value().Effective->Lod && resolved.Value().Effective->LodBias == 0 && resolved.Value().Adjustments.size() == 2,"fallback preserves implemented enhancements and rejects only PCSS/LOD");
+    request=lv::MakeQualityProfile(lv::QualityPreset::High);caps=Caps();caps.ShadowMapping=caps.HdrPostProcessing=false;
+    const auto unavailable=lv::ResolveQuality(request,caps,640,480);request.AllowFallback=true;resolved=lv::ResolveQuality(request,caps,640,480);
+    Check(!unavailable && unavailable.Error().Code == lv::ErrorCode::UnsupportedFeature && resolved && resolved.Value().Effective->Shadow == lv::ShadowMode::Off && !resolved.Value().Effective->PostProcessing && resolved.Value().RequestedSettings.PostProcessing,"missing shadow/HDR formats require explicit fallback and preserve the request");
+    caps=Caps();caps.HdrSampleCounts=1u<<1;resolved=lv::ResolveQuality(request,caps,640,480);
+    Check(resolved && resolved.Value().Effective->MsaaSamples == 1 && resolved.Value().Effective->PostProcessing,"HDR uses its own sample mask even when LDR supports 4x");
     request=lv::MakeQualityProfile(lv::QualityPreset::High);caps=Caps();caps.RenderTargetBudgetBytes=1024*1024;
     strict=lv::ResolveQuality(request,caps,1920,1080);Check(!strict && strict.Error().Code == lv::ErrorCode::InsufficientResource,"attachment budget is checked before allocation");
     request.AllowFallback=true;resolved=lv::ResolveQuality(request,caps,1920,1080);
-    Check(resolved && std::uint64_t(resolved.Value().RenderWidth)*resolved.Value().RenderHeight*(8*resolved.Value().Effective->MsaaSamples+(resolved.Value().Effective->MsaaSamples>1?4:0)) <= caps.RenderTargetBudgetBytes,"fallback reduces samples/extent within configured budget");
+    Check(resolved && lv::RenderTargetBytes(*resolved.Value().Effective,resolved.Value().RenderWidth,resolved.Value().RenderHeight) <= caps.RenderTargetBudgetBytes,"fallback includes HDR/shadow/MSAA resources within configured budget");
     request.Overrides.Resolution=lv::ResolutionMode::Fixed;request.Overrides.FixedWidth=16384;request.Overrides.FixedHeight=1;caps.RenderTargetBudgetBytes=8;
     resolved=lv::ResolveQuality(request,caps,1,1);Check(resolved && resolved.Value().RenderWidth == 1 && resolved.Value().RenderHeight == 1,"one-pixel/thin extent cannot escape budget after rounding");
     request=lv::MakeQualityProfile(lv::QualityPreset::Medium);request.Overrides.Resolution=lv::ResolutionMode::Fixed;request.Overrides.FixedWidth=4000;caps=Caps();caps.MaxRenderSize=1024;

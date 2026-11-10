@@ -66,6 +66,8 @@ struct QualityCapabilities {
     bool GraphicsAvailable = false;
     int MaxRenderSize = 8192, MaxTextureSize = 8192, MaxAnisotropy = 16;
     std::uint32_t SampleCounts = 1u << 1; // Bit N denotes support for N samples (1/2/4/8).
+    bool ShadowMapping = false, HdrPostProcessing = false;
+    std::uint32_t HdrSampleCounts = 1u << 1;
     // Host-configured attachment budget, not measured free VRAM (Phase 7).
     std::uint64_t RenderTargetBudgetBytes = 256ull * 1024 * 1024;
 };
@@ -86,6 +88,7 @@ RenderSettings QualityPresetSettings(QualityPreset preset);
 Result<RenderSettings> ExpandQuality(const QualityProfile& profile); // Syntactic validation only.
 Result<QualityState> ResolveQuality(const QualityProfile& profile, const QualityCapabilities& capabilities,
                                    int outputWidth, int outputHeight);
+std::uint64_t RenderTargetBytes(const RenderSettings& settings, int width, int height);
 // CPU-only profile IO, independent of Scene and Editor (.mvxquality.json v1).
 Result<void> SaveQuality(const QualityProfile& profile, const std::filesystem::path& path);
 Result<QualityProfile> LoadQuality(const std::filesystem::path& path);

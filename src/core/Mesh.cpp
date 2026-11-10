@@ -23,6 +23,7 @@ void ValidateMesh(const MeshData& mesh) {
     }
     const auto finite = [](float value) { return std::isfinite(value); };
     for (const auto& vertex : mesh.Vertices) {
+        if (vertex.Tangent[3] != 0 && ((vertex.Tangent[3] != 1 && vertex.Tangent[3] != -1) || std::hypot(vertex.Tangent[0],vertex.Tangent[1],vertex.Tangent[2]) == 0)) {throw std::invalid_argument("Authored tangents require a direction and handedness +/-1.");}
         double weight = 0;
         for (std::size_t i=0;i<4;++i) {
             if (!std::isfinite(vertex.Weights[i]) || vertex.Weights[i] < 0 || vertex.Joints[i] >= 128) { throw std::invalid_argument("Invalid joint index/weight."); }
@@ -33,6 +34,7 @@ void ValidateMesh(const MeshData& mesh) {
             !std::all_of(vertex.Normal.begin(), vertex.Normal.end(), finite) ||
             !std::all_of(vertex.Color.begin(), vertex.Color.end(), finite) ||
             !std::all_of(vertex.TexCoord.begin(), vertex.TexCoord.end(), finite) ||
+            !std::all_of(vertex.Tangent.begin(), vertex.Tangent.end(), finite) ||
             std::hypot(vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]) <= 0.0f) {
             throw std::invalid_argument("Mesh attributes must be finite and normals must be non-zero.");
         }

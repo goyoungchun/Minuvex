@@ -29,9 +29,11 @@ public:
 private:
     struct Targets;
     struct Presenter;
+    struct ShadowTargets;
     std::unique_ptr<Targets> targets_;
     std::unique_ptr<Presenter> presenter_;
     std::unique_ptr<SceneRenderer> renderer_;
+    std::unique_ptr<ShadowTargets> shadow_;
     std::unique_ptr<GraphicsTelemetry> telemetry_;
     FrameMonitor frameMonitor_;
     std::optional<FrameStatistics> previousFrames_;

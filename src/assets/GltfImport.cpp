@@ -176,6 +176,7 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
     if (primitive.has_draco_mesh_compression || primitive.targets_count) { Unsupported("Draco compression and morph targets are not supported in Phase 2."); }
     const auto* position = Attribute(primitive, cgltf_attribute_type_position);
     const auto* normal = Attribute(primitive, cgltf_attribute_type_normal);
+    const auto* tangent = Attribute(primitive, cgltf_attribute_type_tangent);
     const auto* color = Attribute(primitive, cgltf_attribute_type_color);
     const auto* uv = Attribute(primitive, cgltf_attribute_type_texcoord);
     const auto* joints = Attribute(primitive,cgltf_attribute_type_joints);
@@ -196,6 +197,7 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
     if (position->normalized || (normal && normal->normalized)) { Invalid("Float position/normal accessors cannot be normalized."); }
     if (count > context.Model.Settings.MaxVertices - context.Vertices) { Limit("Model exceeds MaxVertices."); }
     if (normal && (normal->type != cgltf_type_vec3 || normal->component_type != cgltf_component_type_r_32f)) { Invalid("NORMAL must be a float VEC3."); }
+    if (tangent && (tangent->type != cgltf_type_vec4 || tangent->component_type != cgltf_component_type_r_32f || tangent->normalized || tangent->count != count)) {Invalid("TANGENT requires a matching float VEC4 accessor.");}
     if (color && color->type != cgltf_type_vec3 && color->type != cgltf_type_vec4) { Invalid("COLOR_0 must be VEC3 or VEC4."); }
     if (uv && uv->type != cgltf_type_vec2) { Invalid("TEXCOORD_0 must be VEC2."); }
     for (const auto* accessor : {color, uv}) {
@@ -211,6 +213,13 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
     mesh.Vertices.resize(count);
     for (std::size_t i = 0; i < count; ++i) {
         auto& vertex = mesh.Vertices[i];
+        if (tangent) {
+            if (!cgltf_accessor_read_float(tangent,i,vertex.Tangent.data(),4)) {Invalid("Cannot decode TANGENT.");}
+            const auto length=std::hypot(double(vertex.Tangent[0]),double(vertex.Tangent[1]),double(vertex.Tangent[2]));
+            if (!std::isfinite(length) || length == 0 || (vertex.Tangent[3] != 1 && vertex.Tangent[3] != -1)) {Invalid("TANGENT must have a nonzero direction and handedness +/-1.");}
+            for (int k=0;k<3;++k) {vertex.Tangent[k]=static_cast<float>(vertex.Tangent[k]/length);}
+            if (!normal) {vertex.Tangent[3]=0;}
+        }
         if (joints) {
             float indices[4]{};
             if (!cgltf_accessor_read_float(joints,i,indices,4) || !cgltf_accessor_read_float(weights,i,vertex.Weights.data(),4)) { Invalid("Cannot decode joint attributes."); }
@@ -250,7 +259,7 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
             mesh.Indices[i] = static_cast<std::uint32_t>(index);
         }
     } else { std::iota(mesh.Indices.begin(), mesh.Indices.end(), 0u); }
-    if (primitive.material && primitive.material->pbr_metallic_roughness.base_color_texture.texture && !uv) {
+    if (primitive.material && (primitive.material->pbr_metallic_roughness.base_color_texture.texture || primitive.material->normal_texture.texture) && !uv) {
         Invalid("Textured primitive requires TEXCOORD_0.");
     }
     if (!normal) {
@@ -310,9 +319,12 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
             std::copy_n(source.pbr_metallic_roughness.base_color_factor, 4, material.BaseColor.begin());
         }
         for (float value : material.BaseColor) { if (!std::isfinite(value) || value < 0 || value > 1) { Invalid("Invalid base color factor."); } }
-        const auto& view = source.pbr_metallic_roughness.base_color_texture;
+        material.NormalScale=source.normal_texture.texture ? source.normal_texture.scale:1.0f;
+        if (!std::isfinite(material.NormalScale) || std::abs(material.NormalScale) > 16) {Invalid("Normal texture scale must be finite and in [-16,16].");}
+        for (int role=0;role<2;++role) {
+        const auto& view = role == 0 ? source.pbr_metallic_roughness.base_color_texture:source.normal_texture;
         if (view.texture) {
-            if (view.texcoord != 0 || view.has_transform) { Unsupported("Phase 2 base-color textures require TEXCOORD_0 without KHR_texture_transform."); }
+            if (view.texcoord != 0 || view.has_transform) { Unsupported("Material textures require TEXCOORD_0 without KHR_texture_transform."); }
             const auto& sourceTexture = *view.texture;
             if (!sourceTexture.image) { Unsupported("Texture has no PNG/JPEG fallback image."); }
             const auto imageIndex = cgltf_image_index(&data, sourceTexture.image);
@@ -335,7 +347,7 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
                 if (sampler->mag_filter == cgltf_filter_type_nearest) { texture.MagFilter = TextureFilter::Nearest; }
                 else if (sampler->mag_filter != cgltf_filter_type_undefined && sampler->mag_filter != cgltf_filter_type_linear) { Invalid("Invalid texture magnification filter."); }
             }
-            material.BaseColorTexture = textureIndex;
+            if (!role) {material.BaseColorTexture=textureIndex;}else {material.NormalTexture=textureIndex;}
             if (!decoded[imageIndex]) {
                 const auto& image = *sourceTexture.image;
                 std::vector<std::uint8_t> encoded;
@@ -357,6 +369,7 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
                 model.Images[imageIndex] = {width, height, {pixels.get(), pixels.get() + decodedSize}};
                 decoded[imageIndex] = true;
             }
+        }
         }
         model.Materials.push_back(std::move(material));
     }

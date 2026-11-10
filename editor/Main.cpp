@@ -183,7 +183,7 @@ void Frame(void* user) noexcept {
             Require(app.UI->Document.PauseAnimation(app.UI->Document.Selection()));auto p=app.UI->Viewport.Quality().Requested;p.Overrides.OnDemand=lv::OnDemandMode::On;Require(app.UI->ApplyQualityProfile(p));
         }
         if (app.QualitySmoke && app.Frames == 6) {
-            const auto prior=app.UI->Viewport.ColorImage().id;auto p=app.UI->Viewport.Quality().Requested;p.AllowFallback=false;p.Overrides.Shadow=lv::ShadowMode::Pcf;
+            const auto prior=app.UI->Viewport.ColorImage().id;auto p=app.UI->Viewport.Quality().Requested;p.AllowFallback=false;p.Overrides.Shadow=lv::ShadowMode::Pcss;
             Require(!app.UI->ApplyQualityProfile(p) && prior == app.UI->Viewport.ColorImage().id,"Editor quality rejection did not retain GPU resources.");
             lv::Transform moved;moved.Position.X=-1.2f;Require(app.UI->Document.SetTransform(app.UI->Document.Selection(),moved));
         }

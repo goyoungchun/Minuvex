@@ -34,7 +34,7 @@ struct GraphicsTelemetry::Impl {
     Impl() {
         Hardware.Capabilities=QueryQualityCapabilities();Hardware.Backend=Hardware.Capabilities.Backend;Hardware.ActiveGraphicsDevice=Hardware.Capabilities.GraphicsAvailable;
         struct FormatEntry {sg_pixel_format Format;const char* Name;};
-        constexpr FormatEntry formats[]={{SG_PIXELFORMAT_RGBA8,"RGBA8"},{SG_PIXELFORMAT_SRGB8A8,"SRGB8A8"},{SG_PIXELFORMAT_BGRA8,"BGRA8"},{SG_PIXELFORMAT_SBGR8A8,"SBGR8A8"},{SG_PIXELFORMAT_DEPTH,"DEPTH"},{SG_PIXELFORMAT_DEPTH_STENCIL,"DEPTH_STENCIL"}};
+        constexpr FormatEntry formats[]={{SG_PIXELFORMAT_RGBA8,"RGBA8"},{SG_PIXELFORMAT_SRGB8A8,"SRGB8A8"},{SG_PIXELFORMAT_BGRA8,"BGRA8"},{SG_PIXELFORMAT_SBGR8A8,"SBGR8A8"},{SG_PIXELFORMAT_DEPTH,"DEPTH"},{SG_PIXELFORMAT_DEPTH_STENCIL,"DEPTH_STENCIL"},{SG_PIXELFORMAT_RGBA16F,"RGBA16F"},{SG_PIXELFORMAT_R32F,"R32F"}};
         for (const auto& entry:formats) {
             const auto f=sg_query_pixelformat(entry.Format);Hardware.Formats.push_back({entry.Name,f.sample,f.filter,f.render,f.msaa});
         }

@@ -29,8 +29,8 @@ RenderSettings QualityPresetSettings(QualityPreset preset) {
     RenderSettings s;
     switch (preset) {
     case QualityPreset::Low: s.MaxRenderHeight=720; s.TargetFps=30; s.Textures=TextureQuality::Low; s.OnDemand=OnDemandMode::Auto; break;
-    case QualityPreset::Medium: break;
-    case QualityPreset::High: s.MaxRenderHeight=2160; s.MsaaSamples=4; s.Textures=TextureQuality::High; s.Anisotropy=8; break;
+    case QualityPreset::Medium: s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Pcf;break;
+    case QualityPreset::High: s.MaxRenderHeight=2160; s.MsaaSamples=4; s.Textures=TextureQuality::High; s.Anisotropy=8;s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Pcf;s.ShadowResolution=2048;s.PostProcessing=true;break;
     default: throw std::invalid_argument("Invalid base quality preset.");
     }
     s.MaxTextureSize=TextureLimit(s.Textures); return s;
@@ -66,7 +66,7 @@ Result<QualityState> ResolveQuality(const QualityProfile& p,const QualityCapabil
     auto expanded=ExpandQuality(p); if (!expanded) { return Result<QualityState>::Failure(expanded.Error()); }
     try {
         Require(width > 0 && width <= 65536 && height > 0 && height <= 65536,"Output dimensions must be in [1,65536].");
-        Require(caps.MaxRenderSize > 0 && caps.MaxRenderSize <= 16384 && caps.MaxTextureSize > 0 && caps.MaxTextureSize <= 32768 && caps.MaxAnisotropy >= 1 && caps.MaxAnisotropy <= 16 && (caps.SampleCounts&(1u<<1)) && caps.RenderTargetBudgetBytes >= 8,"Invalid graphics capabilities or attachment budget.");
+        Require(caps.MaxRenderSize > 0 && caps.MaxRenderSize <= 16384 && caps.MaxTextureSize > 0 && caps.MaxTextureSize <= 32768 && caps.MaxAnisotropy >= 1 && caps.MaxAnisotropy <= 16 && (caps.SampleCounts&(1u<<1)) && (!caps.HdrPostProcessing || (caps.HdrSampleCounts&(1u<<1))) && caps.RenderTargetBudgetBytes >= 8,"Invalid graphics capabilities or attachment budget.");
         if (!caps.GraphicsAvailable) { return Result<QualityState>::Failure({ErrorCode::UnsupportedFeature,"No graphics context is available.","Resolve against a graphics device, or stage the profile before Viewer::Run.",{}}); }
         QualityState state; state.Requested=p; state.RequestedSettings=expanded.Value(); state.Capabilities=caps; auto s=expanded.Value();
         const auto adjust=[&](bool condition,const char* field,const char* reason,auto change) {
@@ -75,28 +75,39 @@ Result<QualityState> ResolveQuality(const QualityProfile& p,const QualityCapabil
             change(); state.Adjustments.push_back({field,reason}); return true;
         };
         const auto unsupported=[&](const char* message) { return Result<QualityState>::Failure({ErrorCode::UnsupportedFeature,message,"Choose supported settings or explicitly allow fallback.",{}}); };
-        if (!adjust(s.Lighting == LightingMode::Advanced,"lighting","Advanced lighting is not implemented; using Basic.",[&]{s.Lighting=LightingMode::Basic;})) { return unsupported("Advanced lighting is not implemented."); }
-        if (!adjust(s.Shadow != ShadowMode::Off,"shadow","Shadow mapping is a later rendering feature; disabled.",[&]{s.Shadow=ShadowMode::Off;})) { return unsupported("Shadow mapping is not implemented."); }
-        if (!adjust(s.PostProcessing,"postProcessing","Post processing is not implemented; disabled.",[&]{s.PostProcessing=false;})) { return unsupported("Post processing is not implemented."); }
+        if (!adjust(s.Shadow == ShadowMode::Pcss,"shadow","PCSS is not implemented; using PCF.",[&]{s.Shadow=ShadowMode::Pcf;})) {return unsupported("PCSS is not implemented.");}
+        if (!adjust(s.Shadow != ShadowMode::Off && !caps.ShadowMapping,"shadow","Shadow format support is unavailable; disabled.",[&]{s.Shadow=ShadowMode::Off;})) {return unsupported("Shadow render/sample formats are unavailable.");}
+        if (!adjust(s.Shadow != ShadowMode::Off && s.ShadowResolution > caps.MaxRenderSize,"shadowResolution","Shadow size clamped to supported power of two.",[&]{while (s.ShadowResolution > 512 && s.ShadowResolution > caps.MaxRenderSize) {s.ShadowResolution/=2;}if (s.ShadowResolution > caps.MaxRenderSize) {s.Shadow=ShadowMode::Off;}})) {return unsupported("Shadow map exceeds the device extent limit.");}
+        if (!adjust(s.PostProcessing && !caps.HdrPostProcessing,"postProcessing","HDR render/filter formats are unavailable; disabled.",[&]{s.PostProcessing=false;})) {return unsupported("HDR post processing is unavailable.");}
         if (!adjust(s.Lod || s.LodBias != 0,"lod","LOD assets/selection are not implemented; disabled.",[&]{s.Lod=false;s.LodBias=0;})) { return unsupported("LOD selection is not implemented."); }
-        if (!adjust(!(caps.SampleCounts&(1u<<s.MsaaSamples)),"msaaSamples","Requested MSAA is unavailable; using the highest supported lower count.",[&]{while (s.MsaaSamples > 1 && !(caps.SampleCounts&(1u<<s.MsaaSamples))) {s.MsaaSamples/=2;}})) { return unsupported("Requested MSAA count is not supported for the render formats."); }
+        const auto sampleMask=[&]{return s.PostProcessing ? caps.HdrSampleCounts:caps.SampleCounts;};
+        if (!adjust(!(sampleMask()&(1u<<s.MsaaSamples)),"msaaSamples","Requested MSAA is unavailable; using the highest supported lower count.",[&]{while (s.MsaaSamples > 1 && !(sampleMask()&(1u<<s.MsaaSamples))) {s.MsaaSamples/=2;}})) { return unsupported("Requested MSAA count is not supported for the render formats."); }
         if (!adjust(s.Anisotropy > caps.MaxAnisotropy,"anisotropy","Clamped to the device's anisotropy limit.",[&]{s.Anisotropy=caps.MaxAnisotropy;})) { return unsupported("Requested anisotropy exceeds the device limit."); }
         if (!adjust(s.MaxTextureSize > caps.MaxTextureSize,"maxTextureSize","Texture size capped by the device.",[&]{s.MaxTextureSize=caps.MaxTextureSize;})) { return unsupported("Texture quality exceeds the device limit."); }
         double w=s.FixedWidth,h=s.FixedHeight;
         if (s.Resolution == ResolutionMode::Relative) { const double scale=std::min(1.0,double(s.MaxRenderHeight)/height)*s.ResolutionScale; w=width*scale;h=height*scale; }
         auto dimensions=[&]{state.RenderWidth=std::max(1,static_cast<int>(std::floor(w)));state.RenderHeight=std::max(1,static_cast<int>(std::floor(h)));}; dimensions();
         if (!adjust(w > caps.MaxRenderSize || h > caps.MaxRenderSize,"renderSize","Render extent reduced to the device limit.",[&]{const double scale=caps.MaxRenderSize/std::max(w,h);w*=scale;h*=scale;dimensions();})) { return unsupported("Render extent exceeds the device limit."); }
-        const auto bytes=[&]{return std::uint64_t(state.RenderWidth)*state.RenderHeight*(8u*s.MsaaSamples+(s.MsaaSamples > 1 ? 4u : 0u));};
+        const auto bytes=[&]{return RenderTargetBytes(s,state.RenderWidth,state.RenderHeight);};
         if (bytes() > caps.RenderTargetBudgetBytes) {
             if (!p.AllowFallback) { return Result<QualityState>::Failure({ErrorCode::InsufficientResource,"Render targets exceed the configured attachment budget.","Reduce resolution/MSAA or explicitly allow fallback.",{}}); }
-            while (s.MsaaSamples > 1 && bytes() > caps.RenderTargetBudgetBytes) { s.MsaaSamples/=2; while (s.MsaaSamples > 1 && !(caps.SampleCounts&(1u<<s.MsaaSamples))) {s.MsaaSamples/=2;} }
-            if (bytes() > caps.RenderTargetBudgetBytes) { const double scale=std::sqrt(double(caps.RenderTargetBudgetBytes)/double(bytes()));w=state.RenderWidth*scale;h=state.RenderHeight*scale;dimensions(); }
+            while (s.MsaaSamples > 1 && bytes() > caps.RenderTargetBudgetBytes) { s.MsaaSamples/=2; while (s.MsaaSamples > 1 && !(sampleMask()&(1u<<s.MsaaSamples))) {s.MsaaSamples/=2;} }
+            while (s.Shadow != ShadowMode::Off && s.ShadowResolution > 512 && bytes() > caps.RenderTargetBudgetBytes) {s.ShadowResolution/=2;}
+            if (s.Shadow != ShadowMode::Off && bytes() > caps.RenderTargetBudgetBytes) {s.Shadow=ShadowMode::Off;}
+            if (s.PostProcessing && RenderTargetBytes(s,1,1) > caps.RenderTargetBudgetBytes) {s.PostProcessing=false;}
+            if (bytes() > caps.RenderTargetBudgetBytes) {const double scale=std::sqrt(double(caps.RenderTargetBudgetBytes)/double(bytes()));w=state.RenderWidth*scale;h=state.RenderHeight*scale;dimensions();}
             while (bytes() > caps.RenderTargetBudgetBytes) {if (state.RenderWidth >= state.RenderHeight && state.RenderWidth > 1) {--state.RenderWidth;}else if (state.RenderHeight > 1) {--state.RenderHeight;}else {break;}}
-            state.Adjustments.push_back({"renderBudget","MSAA/resolution reduced to the configured attachment budget."});
+            state.Adjustments.push_back({"renderBudget","MSAA/shadow/post-processing/extent reduced to the configured attachment budget."});
         }
         if (s.Resolution == ResolutionMode::Fixed) { s.FixedWidth=state.RenderWidth;s.FixedHeight=state.RenderHeight; }
         state.Effective=s; return Result<QualityState>::Success(std::move(state));
     } catch (const std::invalid_argument& e) { return Result<QualityState>::Failure({ErrorCode::InvalidArgument,e.what(),"Check output dimensions and supplied graphics capabilities.",{}}); }
+}
+std::uint64_t RenderTargetBytes(const RenderSettings& s,int width,int height) {
+    Require(width > 0 && height > 0 && width <= 65536 && height <= 65536 && (s.MsaaSamples == 1 || s.MsaaSamples == 2 || s.MsaaSamples == 4 || s.MsaaSamples == 8),"Invalid render target extent/sample count.");
+    Require(s.Shadow == ShadowMode::Off || ((s.Shadow == ShadowMode::Basic || s.Shadow == ShadowMode::Pcf) && s.ShadowResolution >= 512 && s.ShadowResolution <= 4096),"Invalid shadow target settings.");
+    const std::uint64_t color=s.PostProcessing ? 8:4;
+    return std::uint64_t(width)*height*((color+4)*s.MsaaSamples+(s.MsaaSamples > 1 ? color:0)+(s.PostProcessing ? 4:0))+(s.Shadow != ShadowMode::Off ? std::uint64_t(s.ShadowResolution)*s.ShadowResolution*8:0);
 }
 bool IntersectsFrustum(const Bounds& b,const Mat4& world,const Mat4& vp) {
     Require(std::isfinite(b.Min.X) && std::isfinite(b.Min.Y) && std::isfinite(b.Min.Z) && std::isfinite(b.Max.X) && std::isfinite(b.Max.Y) && std::isfinite(b.Max.Z) && b.Min.X <= b.Max.X && b.Min.Y <= b.Max.Y && b.Min.Z <= b.Max.Z,"Invalid culling bounds.");

@@ -2,6 +2,7 @@
 
 #include <minuvex/Scene.h>
 #include <minuvex/Quality.h>
+#include "MeshRenderer.h"
 
 #include <memory>
 #include <unordered_map>
@@ -17,6 +18,7 @@ struct SceneRenderStats {
     std::uint64_t LastTriangles = 0, LogicalTextureBytes = 0, LogicalBufferBytes = 0;
     std::uint64_t ResidentAssetSignature = 0;
     int MaxResidentTextureSize = 0;
+    std::uint64_t LastShadowDrawCalls=0,LastShadowTriangles=0;
 };
 
 // Context/thread ownership stays with the caller. Prepare outside a render pass,
@@ -29,16 +31,19 @@ public:
     SceneRenderer& operator=(const SceneRenderer&) = delete;
 
     void Prepare(const Scene& scene);
-    void Draw(const Scene& scene, float aspect);
+    void Draw(const Scene& scene, float aspect,const ShadowSampling& shadow={});
+    void DrawShadow(const Scene& scene,const Mat4& lightViewProjection);
+    Mat4 ShadowViewProjection(const Scene& scene) const;
     SceneRenderStats GetStats() const noexcept { return stats_; }
     void Clear() noexcept;
-    void SetDrawSettings(const RenderSettings& settings) noexcept { settings_.Lighting=settings.Lighting;settings_.FrustumCulling=settings.FrustumCulling; }
+    void SetDrawSettings(const RenderSettings& settings) noexcept {settings_=settings;}
 
 private:
     struct GpuModel;
     std::unordered_map<const ModelAsset*, std::unique_ptr<GpuModel>> models_;
     SceneRenderStats stats_;
     RenderSettings settings_;
+    void DrawImpl(const Scene& scene,const Mat4& viewProjection,bool shadowPass,const ShadowSampling& shadow);
 };
 
 } // namespace lv::detail

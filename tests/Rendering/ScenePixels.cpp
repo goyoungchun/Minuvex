@@ -230,7 +230,7 @@ void RunQuality() {
     sg_begin_pass(pass);surface.Present();sg_end_pass();sg_commit();
     Check(ReadImage(destination.Color,Size,Size) == bright,"fullscreen presentation preserves image orientation and pixels");
     const auto originalImage=surface.ColorImage().id;const auto originalRequest=surface.Quality().Requested;
-    auto invalid=profile;invalid.Overrides.Shadow=lv::ShadowMode::Pcf;
+    auto invalid=profile;invalid.Overrides.Shadow=lv::ShadowMode::Pcss;
     Check(!surface.ApplyQuality(invalid,scene,Size,Size) && surface.ColorImage().id == originalImage && surface.Quality().Requested == originalRequest,"capability rejection preserves the previous GPU target and request");
     auto bad=std::make_shared<lv::ModelAsset>(*triangle);bad->Meshes[0].Primitives[0].Geometry.Vertices[0].Normal={0,0,0};lv::Scene badScene;badScene.AddModel(bad);
     auto changed=profile;changed.Overrides.Textures=lv::TextureQuality::Low;changed.Overrides.FixedWidth=64;
@@ -272,6 +272,36 @@ void RunQuality() {
     Check(surface.Texture().id && surface.Quality().Applied,"viewport resumes with latest requested quality");
 }
 
+std::shared_ptr<lv::ModelAsset> EnhancementPlane(float half=1) {
+    auto model=std::make_shared<lv::ModelAsset>();lv::MeshPrimitive primitive;
+    primitive.Geometry.Vertices={{{-half,-half,0},{0,0,1},{1,1,1,1},{0,0}},{{half,-half,0},{0,0,1},{1,1,1,1},{1,0}},{{half,half,0},{0,0,1},{1,1,1,1},{1,1}},{{-half,half,0},{0,0,1},{1,1,1,1},{0,1}}};primitive.Geometry.Indices={0,1,2,0,2,3};model->Meshes.push_back({"Plane",{primitive}});model->Materials.push_back({});model->Materials[0].DoubleSided=true;model->Parts.push_back({0});model->ModelBounds={{-half,-half,0},{half,half,0}};return model;
+}
+void RunEnhancements() {
+    lv::Scene scene;scene.MainCamera.Position={0,0,2};scene.MainCamera.Target={0,0,0};scene.MainCamera.VerticalFovRadians=std::numbers::pi_v<float>/2;scene.Sun.Direction={0,0,-1};scene.Sun.Intensity=1;scene.Sun.Ambient=0;
+    auto model=EnhancementPlane();model->Images={{1,1,{128,128,255,255}}};model->Textures.push_back({});model->Materials[0].NormalTexture=0;for (auto& vertex:model->Meshes[0].Primitives[0].Geometry.Vertices) {vertex.Tangent={1,0,0,1};}
+    const auto object=scene.AddModel(model);lv::detail::RenderSurface surface;auto p=lv::MakeQualityProfile(lv::QualityPreset::Low);p.Overrides.TargetFps=0;p.Overrides.Lighting=lv::LightingMode::Advanced;p.Overrides.OnDemand=lv::OnDemandMode::On;
+    double time=100;const auto apply=[&] {const auto r=surface.ApplyQuality(p,scene,Size,Size);Require(bool(r),r ? "":r.Error().Message.c_str());};
+    const auto render=[&](bool force=true) {surface.Render(scene,time+=1,force,{0,0,0,1});sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    apply();auto flat=render();auto tilted=std::make_shared<lv::ModelAsset>(*model);tilted->Images[0].Rgba={255,128,128,255};scene.SetModel(object,tilted);auto normal=render();
+    Check(flat[64*Size+64][0] > 240 && normal[64*Size+64][0] < 20,"linear glTF normal texture and authored tangent change actual lighting");
+    auto derived=std::make_shared<lv::ModelAsset>(*tilted);for (auto& vertex:derived->Meshes[0].Primitives[0].Geometry.Vertices) {vertex.Tangent[3]=0;}scene.SetModel(object,derived);auto cotangent=render();Check(cotangent[64*Size+64][0] < 20,"UV derivatives provide normal mapping when glTF tangents are absent");
+    p.Overrides.Lighting=lv::LightingMode::Basic;apply();auto basic=render();Check(basic[64*Size+64][0] > 240 && surface.Stats().ResidentImages == 0,"Basic quality bypasses normal-map upload and shading");
+    p.Overrides.Lighting=lv::LightingMode::Advanced;scene.SetModel(object,EnhancementPlane());scene.Sun.Intensity=0;scene.PointLights={{{0,0,2},{1,0,0},8,10}};apply();auto point=render();
+    Check(point[64*Size+64][0] > 180 && point[64*Size+64][1] < 5,"Advanced point light contributes range-attenuated colored illumination");
+    scene.PointLights.clear();scene.SpotLights={{{0,0,2},{0,0,-1},{0,1,0},8,10,.2f,.4f}};auto spot=render(false);scene.SpotLights[0].Direction={1,0,0};auto away=render(false);
+    Check(spot[64*Size+64][1] > 180 && away[64*Size+64][1] < 5,"spot cone affects pixels and direct light edits wake On-Demand cache");
+    scene.SpotLights.clear();scene.Sun.Intensity=1;scene.Sun.Direction={.6f,0,-1};auto caster=EnhancementPlane(.25f);lv::Transform placed;placed.Position={-.4f,0,.7f};const auto casterId=scene.AddModel(caster,placed);
+    auto unshadowed=render();p.Overrides.Shadow=lv::ShadowMode::Basic;p.Overrides.ShadowResolution=512;apply();auto hard=render();p.Overrides.Shadow=lv::ShadowMode::Pcf;apply();auto soft=render();
+    std::size_t occluded=0,filtered=0;for (int y=38;y<90;++y) {for (int x=60;x<95;++x) {const auto i=y*Size+x;if (unshadowed[i][0] > 180 && hard[i][0] < 50) {++occluded;}if (hard[i][0] != soft[i][0] && soft[i][0] > 10 && soft[i][0] < 210) {++filtered;}}}
+    Check(occluded > 5 && surface.Stats().LastShadowDrawCalls == 2,"directional shadow pass darkens receiver pixels behind an occluder");
+    Check(filtered > 0,"3x3 PCF produces intermediate edge visibility compared with Basic shadow");
+    auto masked=std::make_shared<lv::ModelAsset>(*caster);masked->Materials[0].AlphaCutoff=.5f;masked->Materials[0].BaseColor[3]=0;scene.SetModel(casterId,masked);auto transparent=render();std::size_t lit=0;for (std::size_t i=0;i<hard.size();++i) {if (hard[i][0] < 50 && transparent[i][0] > 180) {++lit;}}
+    Check(lit > 10,"alpha-masked geometry is discarded in shadow and color passes");
+    scene.RemoveObject(casterId);scene.Sun.Intensity=0;scene.Sun.Ambient=3;p.Overrides.Shadow=lv::ShadowMode::Off;p.Overrides.PostProcessing=false;apply();auto clipped=render();p.Overrides.PostProcessing=true;apply();auto hdr=render();
+    Check(clipped[64*Size+64][0] == 255 && hdr[64*Size+64][0] > 175 && hdr[64*Size+64][0] < 210,"RGBA16F scene and Reinhard post processing preserve and tone-map HDR light energy");
+    auto shared=std::make_shared<lv::ModelAsset>(*model);shared->Materials[0].BaseColorTexture=0;scene.SetModel(object,shared);p.Overrides.Shadow=lv::ShadowMode::Pcf;apply();(void)render();
+    auto estimate=lv::EstimateQualityResources(p,surface.Quality().Capabilities,scene,Size,Size);auto measured=surface.Telemetry(lv::detail::RenderClockSeconds());Check(estimate && estimate.Value().Cost.TotalBytes == measured.Resident.TotalBytes && surface.Stats().ResidentImages == 2 && measured.Resident.TextureBytes == 12,"combined shadow/HDR and shared sRGB/linear image accounting agrees with renderer allocations");
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -282,7 +312,7 @@ void Initialize() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();} else if (animationTests) { RunAnimation(); } else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();} else if (animationTests) { RunAnimation(); } else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }

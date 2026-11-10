@@ -26,6 +26,18 @@ struct DirectionalLight {
     float Ambient = 0.25f;
     void Validate() const;
 };
+inline constexpr std::size_t MaxLocalLights = 8;
+struct PointLight {
+    Vec3 Position{}, Color{1,1,1};
+    float Intensity = 1, Range = 10;
+    void Validate() const;
+};
+struct SpotLight {
+    Vec3 Position{}, Direction{0,-1,0}, Color{1,1,1};
+    float Intensity = 1, Range = 10;
+    float InnerConeRadians = .35f, OuterConeRadians = .7f;
+    void Validate() const;
+};
 
 struct SceneObject {
     ObjectId Id = NoObject;
@@ -71,6 +83,9 @@ public:
 
     Camera MainCamera;
     DirectionalLight Sun;
+    std::vector<PointLight> PointLights;
+    std::vector<SpotLight> SpotLights;
+    void ValidateLighting() const; // At most 8 point+spot lights in total.
 
 private:
     std::unordered_map<ObjectId, SceneObject> objects_;

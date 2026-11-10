@@ -39,9 +39,11 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
         root["capturedAtSeconds"]=s.CapturedAtSeconds;root["live"]=s.Live;
         root["hardware"]["gpuVendor"]=h.GpuVendor;root["hardware"]["gpuVendorId"]=h.GpuVendorId;root["hardware"]["gpuDeviceId"]=h.GpuDeviceId;
         root["hardware"]["capabilities"]={{"graphicsAvailable",h.Capabilities.GraphicsAvailable},{"sampleCounts",h.Capabilities.SampleCounts},{"maxRenderSize",h.Capabilities.MaxRenderSize},{"maxTextureSize",h.Capabilities.MaxTextureSize},{"maxAnisotropy",h.Capabilities.MaxAnisotropy}};
+        root["hardware"]["capabilities"]["shadowMapping"]=h.Capabilities.ShadowMapping;root["hardware"]["capabilities"]["hdrPostProcessing"]=h.Capabilities.HdrPostProcessing;root["hardware"]["capabilities"]["hdrSampleCounts"]=h.Capabilities.HdrSampleCounts;
         root["hardware"]["formats"]=Json::array();for (const auto& formatInfo:h.Formats) {root["hardware"]["formats"].push_back({{"name",formatInfo.Name},{"sampled",formatInfo.Sampled},{"filtered",formatInfo.Filtered},{"renderTarget",formatInfo.RenderTarget},{"msaa",formatInfo.Msaa}});}
         root["quality"]["effective"]=nullptr;
         if (s.Quality.Effective) {const auto& e=*s.Quality.Effective;root["quality"]["effective"]={{"msaaSamples",e.MsaaSamples},{"maxTextureSize",e.MaxTextureSize},{"anisotropy",e.Anisotropy},{"targetFps",e.TargetFps},{"onDemand",static_cast<int>(e.OnDemand)},{"lighting",static_cast<int>(e.Lighting)},{"frustumCulling",e.FrustumCulling}};}
+        if (s.Quality.Effective) {const auto& e=*s.Quality.Effective;root["quality"]["effective"]["shadow"]=static_cast<int>(e.Shadow);root["quality"]["effective"]["shadowResolution"]=e.ShadowResolution;root["quality"]["effective"]["postProcessing"]=e.PostProcessing;}
         const auto validated=root.dump(2); // Validate UTF-8 before any destination modification.
         if (format == TelemetryFormat::Json) {detail::WriteTextFile(validated+'\n',path,1024*1024);}
         else {

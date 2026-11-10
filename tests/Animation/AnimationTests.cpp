@@ -13,7 +13,7 @@ void MatrixNear(const lv::Mat4& a, const lv::Mat4& b, const char* label) {
 }
 void DataAndPlayer() {
     lv::AssetRegistry registry; auto model = registry.LoadModel(Fixture("AnimatedRibbon.gltf"));
-    Check(model->ImportVersion == 2 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
+    Check(model->ImportVersion == 3 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
     Check(model->Skeleton.Joints.size() == 4 && model->Skeleton.Joints[1].IsJoint && model->Skeleton.Joints[2].Parent == 1,"joint mapping includes non-joint ancestors");
     Check(model->Skins[0].Joints == std::vector<lv::JointId>({1,2}) && Near(model->Skins[0].InverseBindMatrices[1].Elements[13],-1),"inverse binds and joint mapping retained");
     Check(model->Parts.size() == 1 && model->Parts[0].SkinIndex == 0 && model->Parts[0].Node == 3,"part keeps skin and node identity");
@@ -103,14 +103,18 @@ void Persistence() {
     auto json = Json::parse(Read(partial)); Check(json["joints"].size() == 1,"partial file contains only manual overrides");
     const auto& skeleton = doc.GetScene().GetObject(id).Model->Skeleton;
     auto loaded = lv::LoadPose(full,skeleton); Check(loaded && loaded.Value().Joints.size() == 4,"standalone full pose loads without Scene");
-    Check(bool(doc.Save(scene)) && !doc.IsDirty(),"animated Scene version 2 saves");
+    Check(bool(doc.SetLocalLights({{{1,2,3},{1,.5f,.25f},2,5}},{{{0,3,0},{0,-1,0},{.2f,.4f,1},3,10,.2f,.5f}})),"Editor validates local light edits");
+    Check(bool(doc.Save(scene)) && !doc.IsDirty(),"animated Scene version 3 saves");
+    Check(!doc.SetLocalLights({{{0,0,0},{1,1,1},1,-1}}, {}) && doc.GetScene().PointLights.size() == 1 && doc.GetScene().SpotLights.size() == 1 && !doc.IsDirty(),"invalid light edit preserves both lists and clean document state");
     Check(bool(doc.UpdateAnimations(.5)) && !doc.IsDirty(),"preview tick does not dirty document");
     lv::EditorDocument reopened; Check(bool(reopened.Open(scene)),"animated Scene reloads");
+    Check(reopened.GetScene().PointLights.size() == 1 && reopened.GetScene().SpotLights.size() == 1 && reopened.GetScene().PointLights[0].Range == 5,"Scene v3 round-trips point and spot lights");
     const auto newId = reopened.GetScene().ObjectIds()[0]; const auto& player = reopened.GetScene().GetObject(newId).Animation;
     Check(player.Clip() == 0 && player.Time() == .75 && player.State() == lv::PlaybackState::Paused && player.Speed() == -2 && !player.Loop(),"clip/time/state/speed/loop restored per instance");
     Check(player.Overrides().Joints.size() == 1 && Near(player.CapturePose().Joints[2].Local.Rotation.Z,.5f),"Scene pose overrides restored");
     Check(bool(reopened.ClearPoseOverrides(newId)) && bool(reopened.LoadPoseFile(newId,full)),"Editor can load full pose onto an existing instance");
     const auto original = Json::parse(Read(scene)); auto legacy = original; legacy["version"] = 1; for (auto& entry : legacy["objects"]) { entry.erase("animation"); }
+    auto version2=original;version2["version"]=2;version2.erase("pointLights");version2.erase("spotLights");Write(scene,version2.dump());lv::EditorDocument v2;Check(bool(v2.Open(scene)) && v2.GetScene().GetObject(v2.GetScene().ObjectIds()[0]).Animation.Clip() == 0 && v2.GetScene().PointLights.empty(),"legacy Scene v2 retains animation and defaults local lights to empty");
     Write(scene,legacy.dump()); lv::EditorDocument old; Check(bool(old.Open(scene)) && !old.GetScene().GetObject(old.GetScene().ObjectIds()[0]).Animation.Clip(),"version-1 Scene loads in reference pose");
     const auto rejects = [&](Json changed,const char* label) {
         Write(scene,changed.dump()); auto result = reopened.Open(scene); Check(!result && reopened.GetScene().Contains(newId) && reopened.IsDirty(),label);

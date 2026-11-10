@@ -61,6 +61,8 @@ struct MaterialAsset {
     bool Unlit = false;
     // Negative cutoff means OPAQUE; otherwise MASK. BLEND is not yet supported.
     float AlphaCutoff = -1.0f;
+    std::optional<std::size_t> NormalTexture; // Linear tangent-space data, TEXCOORD_0.
+    float NormalScale = 1.0f;
 };
 
 struct MeshPrimitive {
@@ -96,7 +98,7 @@ struct ModelAsset {
     std::vector<std::filesystem::path> Dependencies;
     // FNV-1a of source and loaded resource bytes, for change tracking, not security.
     std::uint64_t ContentHash = 0;
-    std::uint32_t ImportVersion = 2;
+    std::uint32_t ImportVersion = 3;
     std::vector<MeshAsset> Meshes;
     std::vector<MaterialAsset> Materials;
     std::vector<ImageAsset> Images;
