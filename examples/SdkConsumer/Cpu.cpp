@@ -31,6 +31,8 @@ int main(int argc, char** argv) {
         const auto optimized=lv::OptimizeMesh(lv::MakeCube());if (optimized.Geometry.Indices.size()!=36) {return 1;}
         const auto async=viewer.AddModelAsync(argv[1]);if (!async || !viewer.CancelModelLoad(async.Value()) || !viewer.SetHotReload(true) || !viewer.PollHotReload(0) || !viewer.GetAssetLoadError()) {return 1;}
         lv::EmbeddedRenderer embedded;if (embedded.IsInitialized()) {return 1;}
+        lv::EmbeddedFrameOptions frame;frame.Viewport={8,8,64,48};frame.TargetLoad=lv::EmbeddedTargetLoad::Preserve;
+        const auto queue=embedded.GetMetalCommandQueue();if (queue || queue.Error().Code != lv::ErrorCode::InvalidState) {return 1;}
         const auto hardware=lv::SystemInfo::QueryHardware();
         std::printf("Minuvex %.*s | %.*s | %.*s | %d bit | graphics=%d | %s\n",
             int(info.Version.size()),info.Version.data(),int(info.Compiler.size()),info.Compiler.data(),

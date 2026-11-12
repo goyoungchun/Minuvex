@@ -88,17 +88,17 @@ Result<void> HostBridge::ValidateTarget(const HostRenderTarget& t) const {
 #if defined(_WIN32)
     auto check=[&](const void* pointer,bool depth) {
         auto* texture=static_cast<ID3D11Texture2D*>(const_cast<void*>(pointer));ComPtr<ID3D11Device> device;texture->GetDevice(&device);D3D11_TEXTURE2D_DESC d{};texture->GetDesc(&d);
-        const auto format=depth ? (impl_->Host.DepthFormat == EmbeddedDepthFormat::Depth32Float ? DXGI_FORMAT_D32_FLOAT:DXGI_FORMAT_D24_UNORM_S8_UINT):NativeColor(impl_->Host.ColorFormat);
+        const auto format=depth ? (impl_->Host.DepthFormat == EmbeddedDepthFormat::Depth32Float ? DXGI_FORMAT_D32_FLOAT:DXGI_FORMAT_D32_FLOAT_S8X24_UINT):NativeColor(impl_->Host.ColorFormat);
         return device.Get() == impl_->Device.Get() && d.Width == static_cast<UINT>(t.Width) && d.Height == static_cast<UINT>(t.Height) && d.Format == format && d.SampleDesc.Count == 1 && d.SampleDesc.Quality == 0 && d.ArraySize == 1 && d.MipLevels == 1 && d.Usage == D3D11_USAGE_DEFAULT && (d.BindFlags&(depth ? D3D11_BIND_DEPTH_STENCIL:D3D11_BIND_RENDER_TARGET));
     };
-    if (!check(t.ColorTexture,false) || !check(t.DepthTexture,true)) {return Invalid("Host texture device, extent, format, usage or sample count does not match.");}
+    if (!check(t.ColorTexture,false) || (t.DepthTexture && !check(t.DepthTexture,true))) {return Invalid("Host texture device, extent, format, usage or sample count does not match.");}
 #elif defined(__APPLE__)
     const MTLPixelFormat colors[]={MTLPixelFormatRGBA8Unorm,MTLPixelFormatRGBA8Unorm_sRGB,MTLPixelFormatBGRA8Unorm,MTLPixelFormatBGRA8Unorm_sRGB};
     auto check=[&](const void* pointer,bool depth) {
         id<MTLTexture> texture=(__bridge id<MTLTexture>)pointer;const auto format=depth ? (impl_->Host.DepthFormat == EmbeddedDepthFormat::Depth32Float ? MTLPixelFormatDepth32Float:MTLPixelFormatDepth32Float_Stencil8):colors[static_cast<int>(impl_->Host.ColorFormat)];
         return texture.device == impl_->Device && texture.width == static_cast<NSUInteger>(t.Width) && texture.height == static_cast<NSUInteger>(t.Height) && texture.pixelFormat == format && texture.textureType == MTLTextureType2D && texture.sampleCount == 1 && texture.arrayLength == 1 && texture.mipmapLevelCount == 1 && texture.storageMode != MTLStorageModeMemoryless && (texture.usage&MTLTextureUsageRenderTarget) && texture.hazardTrackingMode != MTLHazardTrackingModeUntracked;
     };
-    if (!check(t.ColorTexture,false) || !check(t.DepthTexture,true)) {return Invalid("Metal target must match device/extent/format and use tracked, persistent 2D render-target storage.");}
+    if (!check(t.ColorTexture,false) || (t.DepthTexture && !check(t.DepthTexture,true))) {return Invalid("Metal target must match device/extent/format and use tracked, persistent 2D render-target storage.");}
 #endif
     return Result<void>::Success();
 }

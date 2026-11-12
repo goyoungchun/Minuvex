@@ -35,16 +35,20 @@ struct TargetBinding {
 #else
             d.mtl_texture=host.ColorTexture;
 #endif
-            Color=sg_make_image(d);d.usage={};d.usage.depth_stencil_attachment=true;d.pixel_format=environment.defaults.depth_format;d.label="embedded-borrowed-depth";
+            Color=sg_make_image(d);
+            if (host.DepthTexture) {
+                d.usage={};d.usage.depth_stencil_attachment=true;d.pixel_format=environment.defaults.depth_format;d.label="embedded-borrowed-depth";
 #if defined(_WIN32)
-            d.d3d11_texture=host.DepthTexture;
+                d.d3d11_texture=host.DepthTexture;
 #else
-            d.mtl_texture=host.DepthTexture;
+                d.mtl_texture=host.DepthTexture;
 #endif
-            Depth=sg_make_image(d);
-            if (sg_query_image_state(Color) != SG_RESOURCESTATE_VALID || sg_query_image_state(Depth) != SG_RESOURCESTATE_VALID) {throw std::runtime_error("Cannot wrap Host render target images.");}
-            sg_view_desc v{};v.color_attachment.image=Color;ColorView=sg_make_view(v);v={};v.depth_stencil_attachment.image=Depth;DepthView=sg_make_view(v);
-            if (sg_query_view_state(ColorView) != SG_RESOURCESTATE_VALID || sg_query_view_state(DepthView) != SG_RESOURCESTATE_VALID) {throw std::runtime_error("Cannot create Host target attachment views.");}
+                Depth=sg_make_image(d);
+            }
+            if (sg_query_image_state(Color) != SG_RESOURCESTATE_VALID || (host.DepthTexture && sg_query_image_state(Depth) != SG_RESOURCESTATE_VALID)) {throw std::runtime_error("Cannot wrap Host render target images.");}
+            sg_view_desc v{};v.color_attachment.image=Color;ColorView=sg_make_view(v);
+            if (host.DepthTexture) {v={};v.depth_stencil_attachment.image=Depth;DepthView=sg_make_view(v);}
+            if (sg_query_view_state(ColorView) != SG_RESOURCESTATE_VALID || (host.DepthTexture && sg_query_view_state(DepthView) != SG_RESOURCESTATE_VALID)) {throw std::runtime_error("Cannot create Host target attachment views.");}
         }catch (...) {Clear();throw;}
     }
     ~TargetBinding() {Clear();}
@@ -61,6 +65,7 @@ struct EmbeddedRenderer::Impl {
     std::unique_ptr<detail::HostBridge> Bridge;
     std::unique_ptr<detail::RenderSurface> Surface;
     std::unique_ptr<TargetBinding> Target;
+    int ViewWidth=0,ViewHeight=0;
     std::optional<TelemetrySnapshot> LastTelemetry;
     char Diagnostics[1024]{};
     static void Log(const char* tag,std::uint32_t level,std::uint32_t item,const char* text,std::uint32_t,const char*,void* user) noexcept {
@@ -114,24 +119,35 @@ Result<void> EmbeddedRenderer::Update(Scene& scene,double delta) {
 Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const HostRenderTarget& target,const EmbeddedFrameOptions& options) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<EmbeddedFrameResult>::Failure(ready.Error());}
     for (const float c:options.ClearColor) {if (!std::isfinite(c) || c < 0 || c > 1) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Clear color must be finite and in [0,1].");}}
-    if (target.Width < 0 || target.Height < 0 || target.Width > 8192 || target.Height > 8192 || (target.Width == 0) != (target.Height == 0) || (target.Width > 0 && (!target.ColorTexture || !target.DepthTexture || target.ColorTexture == target.DepthTexture))) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Provide two matching Host textures and dimensions, or a zero-size suspended target.");}
+    if (target.Width < 0 || target.Height < 0 || target.Width > 8192 || target.Height > 8192 || (target.Width == 0) != (target.Height == 0) || (target.Width > 0 && (!target.ColorTexture || target.ColorTexture == target.DepthTexture))) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Provide a Host color texture, optional distinct depth texture and matching dimensions, or a zero-size suspended target.");}
+    auto viewport=options.Viewport;
+    const bool full=viewport.X == 0 && viewport.Y == 0 && viewport.Width == 0 && viewport.Height == 0;
+    if ((!full && (viewport.X < 0 || viewport.Y < 0 || viewport.Width <= 0 || viewport.Height <= 0)) || (options.TargetLoad != EmbeddedTargetLoad::Clear && options.TargetLoad != EmbeddedTargetLoad::Preserve)) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Use an all-zero or positive viewport and a supported target load action.");}
+    if (full) {viewport.Width=target.Width;viewport.Height=target.Height;}
+    if (target.Width && (viewport.X > target.Width || viewport.Y > target.Height || viewport.Width > target.Width-viewport.X || viewport.Height > target.Height-viewport.Y)) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Viewport must fit inside the Host target in framebuffer pixels.");}
 #if MINUVEX_EMBEDDED_GRAPHICS
     try {
         auto hostState=p.Bridge->Enter();FrameCommit frame;sg_reset_state_cache();p.Diagnostics[0]=0;
-        if (!target.Width) {p.Target.reset();(void)p.Surface->Resize(scene,0,0);frame.Finish();return Result<EmbeddedFrameResult>::Success({});}
+        if (!target.Width) {p.Target.reset();p.ViewWidth=p.ViewHeight=0;(void)p.Surface->Resize(scene,0,0);frame.Finish();return Result<EmbeddedFrameResult>::Success({});}
         const auto valid=p.Bridge->ValidateTarget(target);if (!valid) {return Result<EmbeddedFrameResult>::Failure(valid.Error());}
         std::unique_ptr<TargetBinding> candidate;
         if (!p.Target || !p.Target->Matches(target)) {candidate=std::make_unique<TargetBinding>(target,p.Bridge->Environment());}
-        const auto resized=p.Surface->Resize(scene,target.Width,target.Height);if (!resized) {return Result<EmbeddedFrameResult>::Failure(resized.Error());}
+        const auto resized=p.Surface->Resize(scene,viewport.Width,viewport.Height);if (!resized) {return Result<EmbeddedFrameResult>::Failure(resized.Error());}
         if (candidate) {p.Target.swap(candidate);candidate.reset();}
+        p.ViewWidth=viewport.Width;p.ViewHeight=viewport.Height;
         if (options.ForceRedraw) {p.Surface->Invalidate();}
         const bool rendered=p.Surface->Render(scene,detail::RenderClockSeconds(),false,options.ClearColor,options.ForceRedraw);
         sg_pass pass{};pass.attachments.colors[0]=p.Target->ColorView;pass.attachments.depth_stencil=p.Target->DepthView;
-        pass.action.colors[0].load_action=SG_LOADACTION_CLEAR;pass.action.colors[0].clear_value={options.ClearColor[0],options.ClearColor[1],options.ClearColor[2],options.ClearColor[3]};pass.action.depth.load_action=SG_LOADACTION_CLEAR;pass.action.depth.clear_value=1;
-        sg_begin_pass(pass);p.Surface->Present();sg_end_pass();frame.Finish();
+        const auto load=options.TargetLoad == EmbeddedTargetLoad::Preserve ? SG_LOADACTION_LOAD:SG_LOADACTION_CLEAR;
+        pass.action.colors[0].load_action=load;pass.action.colors[0].clear_value={options.ClearColor[0],options.ClearColor[1],options.ClearColor[2],options.ClearColor[3]};
+        pass.action.depth.load_action=load;pass.action.depth.clear_value=1;pass.action.stencil.load_action=load;pass.action.stencil.clear_value=0;
+        // Preserve must also store depth/stencil: presentation does not copy Scene depth.
+        pass.action.depth.store_action=SG_STOREACTION_STORE;pass.action.stencil.store_action=SG_STOREACTION_STORE;
+        sg_begin_pass(pass);sg_apply_viewport(viewport.X,viewport.Y,viewport.Width,viewport.Height,true);sg_apply_scissor_rect(viewport.X,viewport.Y,viewport.Width,viewport.Height,true);
+        p.Surface->Present(target.DepthTexture != nullptr);sg_end_pass();frame.Finish();
         if (p.Diagnostics[0]) {return Failure<EmbeddedFrameResult>(ErrorCode::Rendering,p.Diagnostics);}
         return Result<EmbeddedFrameResult>::Success({rendered,true,p.Surface->Width(),p.Surface->Height()});
-    }catch (...) {return Result<EmbeddedFrameResult>::Failure(Exception(ErrorCode::Rendering));}
+    }catch (...) {auto error=Exception(ErrorCode::Rendering);if (p.Diagnostics[0]) {error.Message+=" ";error.Message+=p.Diagnostics;}return Result<EmbeddedFrameResult>::Failure(std::move(error));}
 #else
     (void)scene;return Failure<EmbeddedFrameResult>(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
 #endif
@@ -139,7 +155,7 @@ Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const Ho
 Result<void> EmbeddedRenderer::SetQuality(const QualityProfile& profile,const Scene& scene) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
 #if MINUVEX_EMBEDDED_GRAPHICS
-    try {auto scope=p.Bridge->Enter();FrameCommit frame;sg_reset_state_cache();auto result=p.Surface->ApplyQuality(profile,scene,p.Target ? p.Target->Host.Width:0,p.Target ? p.Target->Host.Height:0);frame.Finish();return result;}
+    try {auto scope=p.Bridge->Enter();FrameCommit frame;sg_reset_state_cache();auto result=p.Surface->ApplyQuality(profile,scene,p.ViewWidth,p.ViewHeight);frame.Finish();return result;}
     catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
     (void)profile;(void)scene;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -199,7 +215,7 @@ Result<void> EmbeddedRenderer::RequestRedraw() {
 Result<void> EmbeddedRenderer::DetachTarget() {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
 #if MINUVEX_EMBEDDED_GRAPHICS
-    try {auto scope=p.Bridge->Enter();sg_reset_state_cache();p.Target.reset();Scene empty;(void)p.Surface->Resize(empty,0,0);sg_commit();return Result<void>::Success();}
+    try {auto scope=p.Bridge->Enter();sg_reset_state_cache();p.Target.reset();p.ViewWidth=p.ViewHeight=0;Scene empty;(void)p.Surface->Resize(empty,0,0);sg_commit();return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
     return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -219,10 +235,20 @@ Result<void> EmbeddedRenderer::Shutdown() {
 #if MINUVEX_EMBEDDED_GRAPHICS
     try {
         auto scope=p.Bridge->Enter();try {p.LastTelemetry=p.Surface->Telemetry(detail::RenderClockSeconds());p.LastTelemetry->Live=false;}catch (...) {}
-        p.Target.reset();p.Surface.reset();sg_shutdown();scope.reset();p.Bridge.reset();p.Initialized=false;p.Lease.Release();return Result<void>::Success();
+        p.Target.reset();p.ViewWidth=p.ViewHeight=0;p.Surface.reset();sg_shutdown();scope.reset();p.Bridge.reset();p.Initialized=false;p.Lease.Release();return Result<void>::Success();
     }catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
     return Result<void>::Success();
+#endif
+}
+Result<const void*> EmbeddedRenderer::GetMetalCommandQueue() const {
+    const auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<const void*>::Failure(ready.Error());}
+#if MINUVEX_EMBEDDED_GRAPHICS && defined(__APPLE__)
+    const void* queue=sg_mtl_command_queue();
+    if (queue) {return Result<const void*>::Success(queue);}
+    return Failure<const void*>(ErrorCode::Rendering,"The Metal command queue is unavailable.");
+#else
+    return Failure<const void*>(ErrorCode::UnsupportedFeature,"A borrowed Metal command queue is only available on the Metal backend.","D3D11 Host work uses its immediate context in submission order.");
 #endif
 }
 } // namespace lv

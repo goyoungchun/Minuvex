@@ -32,6 +32,13 @@ void Smoke(id<MTLDevice> device,id<MTLCommandQueue> queue,lv::EmbeddedRenderer& 
     Targets target;target.Offscreen(device,256,256);lv::EmbeddedFrameOptions frame;frame.ClearColor={0,0,0,1};frame.ForceRedraw=true;
     const auto before=scene.GetAnimation(object).Time();Require(renderer.Update(scene,.1));Require(scene.GetAnimation(object).Time() > before,"External update failed.");const auto advanced=scene.GetAnimation(object).Time();Require(renderer.Render(scene,target.Target(),frame));Require(renderer.WaitIdle());
     auto pixels=Pixels(device,queue,target);Require(std::count_if(pixels.begin(),pixels.end(),[](auto p){return (p&0x00FFFFFF) != 0;}) > 50,"No geometry in Host Metal texture.");Require(scene.GetAnimation(object).Time() == advanced,"Render advanced Host animation.");
+    // Host clear -> SDK -> Host readback all commit to the borrowed queue in order.
+    Targets panel;panel.Offscreen(device,96,64);auto clear=[MTLRenderPassDescriptor renderPassDescriptor];clear.colorAttachments[0].texture=panel.Color;clear.colorAttachments[0].loadAction=MTLLoadActionClear;clear.colorAttachments[0].storeAction=MTLStoreActionStore;clear.colorAttachments[0].clearColor=MTLClearColorMake(1,0,0,1);
+    clear.depthAttachment.texture=panel.Depth;clear.depthAttachment.loadAction=MTLLoadActionClear;clear.depthAttachment.storeAction=MTLStoreActionStore;clear.depthAttachment.clearDepth=.375;
+    auto command=[queue commandBuffer];auto encoder=[command renderCommandEncoderWithDescriptor:clear];[encoder endEncoding];[command commit];const auto background=Pixels(device,queue,panel);
+    lv::Scene empty;auto inset=frame;inset.ClearColor={.25f,.5f,.75f,1};inset.Viewport={13,9,48,32};inset.TargetLoad=lv::EmbeddedTargetLoad::Preserve;Require(renderer.Render(empty,panel.Target(),inset));const auto composed=Pixels(device,queue,panel);
+    for (int y=0;y<64;++y) {for (int x=0;x<96;++x) {const auto i=static_cast<std::size_t>(y)*96+x;const bool inside=x>=13 && x<61 && y>=9 && y<41;Require(inside ? composed[i] != background[i]:composed[i] == background[i],"Metal viewport changed Host pixels outside its area or left holes.");}}
+    panel.Depth=nil;const auto colorOnly=renderer.Render(empty,panel.Target(),inset);Require(colorOnly);Require(colorOnly.Value().RenderWidth == 48 && colorOnly.Value().RenderHeight == 32,"Metal color-only viewport extent failed.");
     lv::EmbeddedRenderer other;auto busy=other.Initialize(host);Require(!busy && busy.Error().Code == lv::ErrorCode::InvalidState,"Concurrent Metal session was accepted.");
     bool wrong=false;std::thread thread([&]{auto result=renderer.Shutdown();wrong=!result && result.Error().Code == lv::ErrorCode::WrongThread;});thread.join();Require(wrong,"Owner thread was not enforced.");
     auto mismatch=target.Target();++mismatch.Height;Require(!renderer.Render(scene,mismatch),"Mismatched Metal extent was accepted.");
@@ -52,16 +59,17 @@ int main(int argc,char** argv) {
             const bool smoke=argc > 1 && std::strcmp(argv[1],"--smoke-test") == 0;
             auto app=[NSApplication sharedApplication];[app setActivationPolicy:NSApplicationActivationPolicyRegular];[app finishLaunching];
             NSWindow* window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,800,600) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];[window setReleasedWhenClosed:NO];window.title=@"Minuvex Embedded Viewer - native Metal Host";
-            id<MTLDevice> device=MTLCreateSystemDefaultDevice();Require(device != nil,"No native Metal device.");id<MTLCommandQueue> queue=[device newCommandQueue];Require(queue != nil,"No Host Metal queue.");
+            id<MTLDevice> device=MTLCreateSystemDefaultDevice();Require(device != nil,"No native Metal device.");
             CAMetalLayer* layer=[CAMetalLayer layer];layer.device=device;layer.pixelFormat=MTLPixelFormatBGRA8Unorm_sRGB;layer.framebufferOnly=YES;window.contentView.wantsLayer=YES;window.contentView.layer=layer;[window makeKeyAndOrderFront:nil];
             lv::AssetRegistry assets;lv::Scene scene;const auto object=scene.AddModel(assets.LoadModel(!smoke && argc > 1 ? argv[1]:MINUVEX_EMBEDDED_SAMPLE));scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};if (!scene.GetObject(object).Model->Animations.empty()) {scene.GetAnimation(object).Play(0);}
-            lv::EmbeddedRenderer renderer;lv::HostGraphicsContext host{lv::GraphicsBackend::Metal,(__bridge const void*)device,nullptr,lv::EmbeddedColorFormat::Bgra8Srgb,lv::EmbeddedDepthFormat::Depth32Float};lv::EmbeddedOptions options;options.Quality.Overrides.TargetFps=0;Require(renderer.Initialize(host,options));if (smoke) {Smoke(device,queue,renderer,scene,object,host);}
+            lv::EmbeddedRenderer renderer;lv::HostGraphicsContext host{lv::GraphicsBackend::Metal,(__bridge const void*)device,nullptr,lv::EmbeddedColorFormat::Bgra8Srgb,lv::EmbeddedDepthFormat::Depth32Float};lv::EmbeddedOptions options;options.Quality.Overrides.TargetFps=0;Require(renderer.Initialize(host,options));
+            auto borrowed=renderer.GetMetalCommandQueue();Require(borrowed);id<MTLCommandQueue> queue=(__bridge id<MTLCommandQueue>)borrowed.Value();if (smoke) {Smoke(device,queue,renderer,scene,object,host);borrowed=renderer.GetMetalCommandQueue();Require(borrowed);queue=(__bridge id<MTLCommandQueue>)borrowed.Value();}
             auto previous=std::chrono::steady_clock::now();std::uint64_t frames=0;
             while (window.visible && (!smoke || frames < 3)) {@autoreleasepool {
                 for (;;) {auto event=[app nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast] inMode:NSDefaultRunLoopMode dequeue:YES];if (!event) {break;}[app sendEvent:event];}
                 [app updateWindows];const auto bounds=window.contentView.bounds;const CGFloat scale=window.backingScaleFactor;layer.contentsScale=scale;layer.drawableSize=CGSizeMake(std::max(1.0,bounds.size.width*scale),std::max(1.0,bounds.size.height*scale));
                 id<CAMetalDrawable> drawable=[layer nextDrawable];if (!drawable) {continue;}Targets target;target.Color=drawable.texture;target.CreateDepth(device,static_cast<int>(drawable.texture.width),static_cast<int>(drawable.texture.height));
-                const auto now=std::chrono::steady_clock::now();Require(renderer.Update(scene,std::chrono::duration<double>(now-previous).count()));previous=now;Require(renderer.Render(scene,target.Target()));Require(renderer.WaitIdle());
+                const auto now=std::chrono::steady_clock::now();Require(renderer.Update(scene,std::chrono::duration<double>(now-previous).count()));previous=now;Require(renderer.Render(scene,target.Target()));
                 auto command=[queue commandBuffer];[command presentDrawable:drawable];[command commit];++frames;
             }}
             Require(renderer.Shutdown());[window close];return 0;

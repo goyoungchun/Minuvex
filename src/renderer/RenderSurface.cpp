@@ -49,19 +49,20 @@ struct RenderSurface::ShadowTargets {
     ~ShadowTargets() {Destroy();}
 };
 struct RenderSurface::Presenter {
-    sg_shader Shader{};sg_pipeline Pipeline{};sg_sampler Sampler{};
+    sg_shader Shader{};sg_pipeline Pipeline{},ColorOnlyPipeline{};sg_sampler Sampler{};
     sg_shader PostShader{};sg_pipeline PostPipeline{};
     Presenter() {
         try {
             Shader=sg_make_shader(present_shader_desc(sg_query_backend()));Require(sg_query_shader_state(Shader) == SG_RESOURCESTATE_VALID,"Cannot create presentation shader.");
             sg_pipeline_desc pipeline{};pipeline.shader=Shader;pipeline.sample_count=1;pipeline.label="quality-present";Pipeline=sg_make_pipeline(pipeline);
+            pipeline.depth.pixel_format=SG_PIXELFORMAT_NONE;pipeline.label="quality-present-color-only";ColorOnlyPipeline=sg_make_pipeline(pipeline);
             sg_sampler_desc sampler{};sampler.min_filter=sampler.mag_filter=SG_FILTER_LINEAR;sampler.wrap_u=sampler.wrap_v=SG_WRAP_CLAMP_TO_EDGE;Sampler=sg_make_sampler(sampler);
             PostShader=sg_make_shader(post_shader_desc(sg_query_backend()));pipeline.shader=PostShader;pipeline.depth.pixel_format=SG_PIXELFORMAT_NONE;PostPipeline=sg_make_pipeline(pipeline);
             Require(sg_query_shader_state(PostShader) == SG_RESOURCESTATE_VALID && sg_query_pipeline_state(PostPipeline) == SG_RESOURCESTATE_VALID,"Cannot create HDR post-processing pipeline.");
-            Require(sg_query_pipeline_state(Pipeline) == SG_RESOURCESTATE_VALID && sg_query_sampler_state(Sampler) == SG_RESOURCESTATE_VALID,"Cannot create quality presentation resources.");
+            Require(sg_query_pipeline_state(Pipeline) == SG_RESOURCESTATE_VALID && sg_query_pipeline_state(ColorOnlyPipeline) == SG_RESOURCESTATE_VALID && sg_query_sampler_state(Sampler) == SG_RESOURCESTATE_VALID,"Cannot create quality presentation resources.");
         } catch (...) {Destroy();throw;}
     }
-    void Destroy() noexcept {if (PostPipeline.id) {sg_destroy_pipeline(PostPipeline);}if (PostShader.id) {sg_destroy_shader(PostShader);}if (Pipeline.id) {sg_destroy_pipeline(Pipeline);}if (Shader.id) {sg_destroy_shader(Shader);}if (Sampler.id) {sg_destroy_sampler(Sampler);}Pipeline=PostPipeline={};Shader=PostShader={};Sampler={};}
+    void Destroy() noexcept {if (PostPipeline.id) {sg_destroy_pipeline(PostPipeline);}if (PostShader.id) {sg_destroy_shader(PostShader);}if (Pipeline.id) {sg_destroy_pipeline(Pipeline);}if (ColorOnlyPipeline.id) {sg_destroy_pipeline(ColorOnlyPipeline);}if (Shader.id) {sg_destroy_shader(Shader);}if (Sampler.id) {sg_destroy_sampler(Sampler);}Pipeline=ColorOnlyPipeline=PostPipeline={};Shader=PostShader={};Sampler={};}
     ~Presenter() {Destroy();}
 };
 struct RenderSurface::DebugPreview {
@@ -144,9 +145,9 @@ bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::a
     frameMonitor_.Record(cpuEnd,(cpuEnd-cpuStart)*1000,(debug_.View == DebugView::ShadowMap ? 1:stats.LastDrawCalls+debugCalls_)+stats.LastShadowDrawCalls+(state_.Effective->PostProcessing ? 1:0),(debug_.View == DebugView::ShadowMap ? 1:stats.LastTriangles)+stats.LastShadowTriangles+(state_.Effective->PostProcessing ? 1:0));
     scheduler_.Submitted(now,signature);++frames_;return true;
 }
-void RenderSurface::Present() const {
+void RenderSurface::Present(bool hasDepth) const {
     if (!targets_ || !presenter_) {return;}sg_bindings bindings{};bindings.views[VIEW_rendered_texture]=Texture();bindings.samplers[SMP_rendered_sampler]=presenter_->Sampler;
-    sg_apply_pipeline(presenter_->Pipeline);sg_apply_bindings(bindings);sg_draw(0,3,1);
+    sg_apply_pipeline(hasDepth ? presenter_->Pipeline:presenter_->ColorOnlyPipeline);sg_apply_bindings(bindings);sg_draw(0,3,1);
 }
 TelemetrySnapshot RenderSurface::Telemetry(double now) {
     TelemetrySnapshot result;result.CapturedAtSeconds=now;result.Live=sg_isvalid();result.Quality=state_;
@@ -183,6 +184,6 @@ RenderDebugInfo RenderSurface::Inspect() const {
     if (targets_ && targets_->PostColor.id) {r.Passes.push_back({"Post", "post",debug_.View == DebugView::Lit ? "FXAA + Reinhard":"Diagnostic color copy",1,1});}
     if (renderer_) {renderer_->Inspect(r.Resources);}if (debugRenderer_) {debugRenderer_->Inspect(r.Resources);}if (debugPreview_) {InspectShader(r.Resources,debugPreview_->Shader,"Shadow preview");InspectPipeline(r.Resources,debugPreview_->Pipeline,"Shadow preview");}
     for (const auto& resource:r.Resources) {if (resource.Kind == DebugResourceKind::Buffer && (resource.Name == "Wireframe edge indices" || resource.Name == "Debug line stream")) {r.DebugBufferBytes+=resource.Bytes;}}
-    if (presenter_) {InspectShader(r.Resources,presenter_->Shader,"present");InspectPipeline(r.Resources,presenter_->Pipeline,"Host/swapchain present");InspectShader(r.Resources,presenter_->PostShader,"post");InspectPipeline(r.Resources,presenter_->PostPipeline,"Post output");}return r;
+    if (presenter_) {InspectShader(r.Resources,presenter_->Shader,"present");InspectPipeline(r.Resources,presenter_->Pipeline,"Host/swapchain present");InspectPipeline(r.Resources,presenter_->ColorOnlyPipeline,"Host color-only present");InspectShader(r.Resources,presenter_->PostShader,"post");InspectPipeline(r.Resources,presenter_->PostPipeline,"Post output");}return r;
 }
 }

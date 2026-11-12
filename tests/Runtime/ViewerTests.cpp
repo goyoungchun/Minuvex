@@ -236,6 +236,7 @@ int main() {
         lv::EmbeddedRenderer embedded;lv::Scene scene;
         Check(!embedded.IsInitialized() && embedded.Shutdown().HasValue(),"Embedded inactive shutdown is idempotent");
         ErrorIs(embedded.Render(scene,{}),lv::ErrorCode::InvalidState,"Embedded render requires initialization");
+        ErrorIs(embedded.GetMetalCommandQueue(),lv::ErrorCode::InvalidState,"Embedded queue requires initialization");
 #if MINUVEX_TEST_NO_GRAPHICS
         ErrorIs(embedded.Initialize({}),lv::ErrorCode::UnsupportedFeature,"CPU-only Embedded facade reports unavailable backend");
 #else
