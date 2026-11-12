@@ -1,6 +1,7 @@
 #pragma once
 #include <minuvex/SystemInfo.h>
 #include <minuvex/Scene.h>
+#include <minuvex/Optimization.h>
 
 namespace lv {
 struct FrameStatistics {
@@ -76,6 +77,7 @@ struct TelemetrySnapshot {
     std::optional<FrameStatistics> PreviousQualityFrames;
     std::string PreviousQualityName;
     std::string CpuScope = "Scene prepare/upload/draw submission; excludes pacing and presentation";
+    OptimizationStatistics Optimization;
 };
 enum class TelemetryFormat { Json, Csv };
 Result<void> SaveTelemetry(const TelemetrySnapshot& snapshot, const std::filesystem::path& path,

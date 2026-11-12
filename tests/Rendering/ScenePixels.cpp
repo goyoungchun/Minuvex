@@ -3,6 +3,7 @@
 #include "renderer/SceneRenderer.h"
 #include "renderer/RenderSurface.h"
 #include "renderer/TextureData.h"
+#include "OptimizationFixture.h"
 
 #include <sokol_gfx.h>
 #include <sokol_app.h>
@@ -247,7 +248,7 @@ void RunQuality() {
     surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Width() == 64 && surface.Height() == 32 && ReadImage(surface.ColorImage(),64,32)[16*64+32][0] > 100,"fixed render extent recreates target and still displays geometry");
     changed=profile;changed.Overrides.FrustumCulling=true;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot enable culling.");lv::Transform distant;distant.Position.X=100;scene.AddModel(triangle,distant);
     surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Stats().LastDrawCalls == 1 && surface.Stats().LastCulledParts == 1,"Frustum culling removes offscreen draw submissions");
-    changed.Overrides.FrustumCulling=false;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot disable culling.");surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Stats().LastDrawCalls == 2,"disabling culling restores draw submissions");
+    changed.Overrides.FrustumCulling=false;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot disable culling.");surface.Render(scene,now+=1,true,{0,0,0,1});sg_commit();Check(surface.Stats().LastDrawCalls == 1 && surface.Stats().Optimization.InstancedObjects == 2 && surface.Stats().LastCulledParts == 0,"disabling culling restores both objects in one static instance batch");
     changed=profile;changed.Overrides.OnDemand=lv::OnDemandMode::On;Require(bool(surface.ApplyQuality(changed,scene,Size,Size)),"Cannot enable on-demand rendering.");
     Check(surface.Render(scene,now+=1,false,{0,0,0,1}),"on-demand mode renders first frame");sg_commit();
     Check(!surface.Render(scene,now+=1,false,{0,0,0,1}),"static on-demand frame reuses previous texture");
@@ -339,6 +340,27 @@ void RunDebug() {
     set(lv::DebugView::BoneWeight);auto weights=render();std::size_t weighted=0;for (const auto& p:weights) {weighted+=p[0]>20 && (p[1]>20 || p[0]>240);}Check(weighted>20,"Bone Weight heatmap uses actual skinned vertex influences");
     set(lv::DebugView::Lit);const auto normalFrames=render();(void)normalFrames;Check(!surface.Telemetry(lv::detail::RenderClockSeconds()).Frames.DebugRendering,"returning to Lit starts normal performance evidence again");
 }
+void RunOptimization() {
+    lv::AssetRegistry assets;auto model=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("Sparse.gltf")));auto& primitive=model->Meshes[0].Primitives[0];primitive.Geometry=OptimizationGrid();primitive.Lods=lv::GenerateMeshLods(primitive.Geometry);model->ModelBounds={{-1,-1,0},{1,1,0}};model->Materials={lv::MaterialAsset{}};primitive.MaterialIndex=0;
+    lv::Scene scene;scene.MainCamera.Position={0,0,2};scene.MainCamera.Target={};scene.MainCamera.VerticalFovRadians=std::numbers::pi_v<float>/2;scene.MainCamera.FarPlane=100;scene.Sun.Intensity=0;scene.Sun.Ambient=1;
+    for (int i=0;i<1000;++i) {lv::Transform t;t.Position={((i%40)-19.5f)*.045f,((i/40)-12)*.045f,0};t.Scale={.02f,.02f,.02f};scene.AddModel(model,t);}
+    lv::detail::RenderSurface surface;auto profile=lv::MakeQualityProfile(lv::QualityPreset::Low);profile.Overrides.Lod=false;profile.Overrides.Instancing=false;profile.Overrides.Compression=lv::TextureCompression::None;profile.Overrides.FixedWidth=profile.Overrides.FixedHeight=Size;profile.Overrides.Resolution=lv::ResolutionMode::Fixed;profile.Overrides.TargetFps=0;
+    const auto apply=[&](const lv::Scene& s) {const auto applied=surface.ApplyQuality(profile,s,Size,Size);Require(bool(applied),applied ? "":applied.Error().Message.c_str());};double clock=1;
+    const auto render=[&](const lv::Scene& s) {Require(surface.Render(s,clock++,true,{0,0,0,1}),"Cannot render optimization fixture.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    apply(scene);const auto baseline=render(scene);const auto before=surface.Stats();profile.Overrides.Instancing=true;apply(scene);const auto instanced=render(scene);const auto after=surface.Stats();std::size_t difference=0;for (std::size_t i=0;i<baseline.size();++i) {difference+=baseline[i]!=instanced[i];}
+    Check(before.LastDrawCalls==1000 && after.LastDrawCalls==1 && after.LastTriangles==before.LastTriangles && after.Optimization.SavedDrawCalls==999 && difference<Size*Size/100,"1000 static instances reduce main draws to one while preserving rasterized geometry");
+    std::vector<lv::ObjectId> outside;for (int i=0;i<100;++i) {lv::Transform t;t.Position={1000.0f+i,0,0};outside.push_back(scene.AddModel(model,t));}(void)render(scene);Check(surface.Stats().LastDrawCalls==1 && surface.Stats().LastCulledParts==100,"frustum culling excludes offscreen instances before batching");for (auto id:outside) {scene.RemoveObject(id);}
+    profile.Overrides.Shadow=lv::ShadowMode::Basic;profile.Overrides.ShadowResolution=512;apply(scene);(void)render(scene);Check(surface.Stats().LastDrawCalls==1 && surface.Stats().LastShadowDrawCalls==1 && surface.Stats().Optimization.SavedDrawCalls==1998,"static instancing also reduces directional shadow submissions");
+    lv::Transform mirror;mirror.Scale={-.02f,.02f,.02f};scene.AddModel(model,mirror);(void)render(scene);Check(surface.Stats().LastDrawCalls==2 && surface.Stats().LastShadowDrawCalls==2,"mirrored static transforms retain separate winding groups");
+    lv::Scene lodScene;lodScene.MainCamera=scene.MainCamera;lodScene.MainCamera.Position.Z=30;lodScene.Sun=scene.Sun;lodScene.AddModel(model);profile.Overrides.Shadow=lv::ShadowMode::Off;profile.Overrides.Instancing=false;profile.Overrides.Lod=true;apply(lodScene);(void)render(lodScene);const auto lod=surface.Stats();Check(lod.Optimization.LodDraws[3]==1 && lod.LastTriangles<primitive.Geometry.Indices.size()/3/2,"distant grid selects actual reduced GPU LOD indices");
+    const auto lodEstimate=lv::EstimateQualityResources(profile,surface.Quality().Capabilities,lodScene,Size,Size);Check(lodEstimate && lodEstimate.Value().Cost.BufferBytes==surface.Stats().LogicalBufferBytes,"LOD index allocations are included in public resource costs");
+    lodScene.MainCamera.Position.Z=2;profile.Overrides.LodBias=-4;apply(lodScene);(void)render(lodScene);Check(surface.Stats().LastTriangles==primitive.Geometry.Indices.size()/3,"negative bias restores full detail without removing the generated LOD cache");
+    auto textured=std::make_shared<lv::ModelAsset>(*model);lv::ImageAsset image;image.Width=image.Height=256;image.Rgba.resize(256*256*4);for (std::size_t i=0;i<image.Rgba.size();i+=4) {image.Rgba[i]=128;image.Rgba[i+1]=64;image.Rgba[i+2]=192;image.Rgba[i+3]=255;}textured->Images={image};textured->Textures={lv::TextureAsset{}};textured->Materials[0].BaseColorTexture=0;lodScene.SetModel(lodScene.ObjectIds()[0],textured);profile.Overrides.Lod=false;apply(lodScene);const auto raw=render(lodScene);const auto rawBytes=surface.Stats().LogicalTextureBytes;
+    if (surface.Quality().Capabilities.Bc3Textures) {profile.Overrides.Compression=lv::TextureCompression::Bc3;apply(lodScene);const auto compressed=render(lodScene);const auto compressedBytes=surface.Stats().LogicalTextureBytes;unsigned maxError=0;for (std::size_t i=0;i<raw.size();++i) {for (int c=0;c<3;++c) {maxError=std::max(maxError,static_cast<unsigned>(std::abs(int(raw[i][c])-int(compressed[i][c]))));}}
+        const auto estimated=lv::EstimateQualityResources(profile,surface.Quality().Capabilities,lodScene,Size,Size);Check(compressedBytes<rawBytes/3 && maxError<=8 && estimated && estimated.Value().Cost.TextureBytes==compressedBytes && textured->Images[0].Rgba==image.Rgba,"BC3 keeps source pixels intact, reduces actual texture bytes and matches estimated cost");
+        std::printf("Optimization observed: main draws %zu -> %zu; distant triangles %zu -> %llu; texture bytes %llu -> %llu. Timing is not a controlled benchmark.\n",before.LastDrawCalls,after.LastDrawCalls,primitive.Geometry.Indices.size()/3,static_cast<unsigned long long>(lod.LastTriangles),static_cast<unsigned long long>(rawBytes),static_cast<unsigned long long>(compressedBytes));
+    }
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -362,7 +384,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }

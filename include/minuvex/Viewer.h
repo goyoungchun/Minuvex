@@ -5,6 +5,7 @@
 #include <minuvex/Quality.h>
 #include <minuvex/Telemetry.h>
 #include <minuvex/Debug.h>
+#include <minuvex/AssetLoading.h>
 
 #include <functional>
 #include <memory>
@@ -88,6 +89,13 @@ public:
     Result<ObjectId> AddModel(const std::filesystem::path& path, const ModelOptions& options = {});
     Result<void> RemoveModel(ObjectId id);
     Result<void> ReimportModel(ObjectId id); // Refresh the shared source asset across its Scene instances.
+    Result<AssetLoadId> AddModelAsync(const std::filesystem::path& path,const ModelOptions& options={});
+    Result<AssetLoadSnapshot> GetAssetLoad(AssetLoadId id) const;
+    Result<ObjectId> CommitModelLoad(AssetLoadId id); // Ready candidate only; owner-thread Scene publication/GPU upload next render.
+    Result<void> CancelModelLoad(AssetLoadId id); // Cancels/forgets this Viewer's pending AddModel request.
+    Result<void> SetHotReload(bool enabled);
+    Result<std::size_t> PollHotReload(double now); // Also pumped by the native loop before FPS/On-Demand checks.
+    Result<std::optional<Error>> GetAssetLoadError() const;
     Result<void> SetTransform(ObjectId id, const Transform& transform);
     Result<void> SetVisible(ObjectId id, bool visible);
     Result<void> SetCamera(const Camera& camera); // Disables automatic framing.

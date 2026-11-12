@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <thread>
 #if defined(_WIN32)
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -39,6 +40,8 @@ struct Application {
 };
 void Require(bool valid, const char* message) { if (!valid) { throw std::runtime_error(message); } }
 template<typename T> void Require(const lv::Result<T>& result) { if (!result) { throw std::runtime_error(result.Error().Message); } }
+void AwaitPreview(lv::editor::EditorUI& ui) {const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);while (ui.ImportPreviewPending() && std::chrono::steady_clock::now()<deadline) {ui.PollAssetJobs();std::this_thread::sleep_for(std::chrono::milliseconds(1));}Require(!ui.ImportPreviewPending(),"Background Import Preview timed out.");}
+bool ConfirmPreview(lv::editor::EditorUI& ui) {AwaitPreview(ui);return ui.ConfirmImportPreview();}
 #if defined(_WIN32)
 void CheckViewportPixels(const lv::editor::SceneViewport& viewport) {
     auto* device = static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));
@@ -98,13 +101,14 @@ void CheckEditorFileWorkflows() {
     Require(ui.Document.GetScene().Size() == 1 && !ui.Document.IsDirty(),"Open Scene did not restore the native Save As document.");
     ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Multiple,"Import Assets did not request a multiselect dialog.");return FilePickerResult::Success(std::vector<std::filesystem::path>{source,MINUVEX_EDITOR_ANIMATION_SAMPLE});});
     ui.ChooseFiles(EditorFileAction::ImportAssets);
+    AwaitPreview(ui);
     Require(ui.HasImportPreview() && ui.ImportPreviewModel() && ui.Document.Assets().size() == 1 && !ui.Document.IsDirty(),"Import Preview mutated the current document before approval.");
     ui.CancelImportPreview();Require(ui.Document.Assets().size() == 1 && !ui.Document.IsDirty(),"Cancelling Import Preview changed existing assets.");
     ui.ChooseFiles(EditorFileAction::ImportAssets);
-    while (ui.HasImportPreview()) {Require(ui.ConfirmImportPreview(),"Failed to confirm a file in the multi-file Import Preview.");}
+    while (ui.HasImportPreview()) {Require(ConfirmPreview(ui),"Failed to confirm a file in the multi-file Import Preview.");}
     Require(ui.Document.Assets().size() == 2 && ui.Document.GetScene().Size() == 1,"Multi-file import placed instances instead of registering assets.");
     ui.DropFiles({source},-10,-10);
-    Require(ui.HasImportPreview() && ui.Document.GetScene().Size() == 1,"Dropped model bypassed Import Preview.");Require(ui.ConfirmImportPreview(),"Dropped model preview could not commit.");
+    Require(ui.HasImportPreview() && ui.Document.GetScene().Size() == 1,"Dropped model bypassed Import Preview.");Require(ConfirmPreview(ui),"Dropped model preview could not commit.");
     Require(ui.Document.GetScene().Size() == 2,"Dropped model did not create a Scene instance.");
     ui.SetFilePicker([&](const FilePickerRequest&) {return FilePickerResult::Success(std::vector<std::filesystem::path>{source});});
     ui.ChooseFiles(EditorFileAction::NewProject);ui.ResolvePending(UnsavedChoice::Discard);
@@ -112,7 +116,7 @@ void CheckEditorFileWorkflows() {
     ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Folder,"New Project did not request a folder chooser.");return FilePickerResult::Success(std::vector<std::filesystem::path>{folder});});
     ui.ChooseFiles(EditorFileAction::NewProject);ui.ResolvePending(UnsavedChoice::Discard);
     Require(ui.Document.GetScene().Size() == 0 && std::filesystem::is_directory(folder/"assets") && std::filesystem::is_directory(folder/"scenes"),"Workspace creation failed.");
-    ui.Import(source,false);Require(ui.ConfirmImportPreview(),"Project resource copy did not commit.");
+    ui.Import(source,false);Require(ConfirmPreview(ui),"Project resource copy did not commit.");
     Require(ui.Document.Assets().front()->SourcePath!=source && ui.Document.GetScene().Size() == 0,"Project Import retained an external source or placed an unwanted instance.");
     for (int i=0;i<300;++i) {ui.Record(ConsoleLevel::Info,"bounded Console entry");}
     Require(ui.ConsoleEntries().size() == 256,"Console history was not bounded.");
@@ -187,11 +191,11 @@ void SmokeAfterDraw(Application& app) {
         const auto previousSelection=doc.Selection();const auto previousCount=doc.GetScene().Size();
         const auto source=doc.Assets().front()->SourcePath;
         ui.DropFiles({source},browser->Pos.x+20,browser->Pos.y+40);
-        Require(ui.HasImportPreview(),"Asset Browser drop did not show an Import Preview.");Require(ui.ConfirmImportPreview(),"Asset Browser import could not commit.");
+        Require(ui.HasImportPreview(),"Asset Browser drop did not show an Import Preview.");Require(ConfirmPreview(ui),"Asset Browser import could not commit.");
         Require(doc.GetScene().Size() == previousCount && doc.Assets().size() == 1,"Dropping on Asset Browser unexpectedly placed an instance.");
         const auto* viewport=ImGui::FindWindowByName("Viewport");
         ui.DropFiles({source},viewport->Pos.x+viewport->Size.x*.5f,viewport->Pos.y+viewport->Size.y*.5f);
-        Require(ui.ConfirmImportPreview(),"Viewport drop could not commit.");
+        Require(ConfirmPreview(ui),"Viewport drop could not commit.");
         Require(doc.GetScene().Size() == previousCount+1,"Dropping on Viewport failed to place an instance.");
         Require(doc.RemoveObject(doc.Selection()));Require(doc.Select(previousSelection));
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
@@ -275,6 +279,7 @@ void Frame(void* user) noexcept {
             app.UI->Viewport.Render(app.UI->Document.GetScene());
             app.UI->Viewport.Resize(0,0); Require(!app.UI->Viewport.Texture().id,"Suspended viewport retained its target.");
             app.UI->Import(std::filesystem::path(MINUVEX_EDITOR_ASSET_FIXTURES)/"Compatibility.obj",false);
+            AwaitPreview(*app.UI);
         }
         if (app.Smoke && app.Frames == 5) {ImGui::SetWindowFocus("Asset Inspector");}
         if (app.TelemetrySmoke && app.Frames == 1) {ImGui::SetWindowFocus("Performance");}

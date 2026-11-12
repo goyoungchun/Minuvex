@@ -56,19 +56,21 @@ void EditorUI::PersistPreferences() {
     if (!persistPreferences_) {return;}preferences_.Directory=directory_;const auto saved=preferences_.Save(preferencesPath_);if (!saved) {Record(ConsoleLevel::Warning,saved.Error().Message,preferencesPath_);}
 }
 void EditorUI::Remember(const std::filesystem::path& path,RecentKind kind) {try {preferences_.Touch(path,kind);directory_=preferences_.Directory;PersistPreferences();}catch (const std::exception& e) {Record(ConsoleLevel::Warning,e.what(),preferencesPath_);}}
-void EditorUI::Shutdown() noexcept {try {PersistPreferences();}catch (...) {}Viewport.Clear();}
+void EditorUI::Shutdown() noexcept {try {PersistPreferences();CancelImportPreview();loader_.reset();reloads_.clear();watcher_.Clear();}catch (...) {}Viewport.Clear();}
 void EditorUI::Import(const std::filesystem::path& path, bool place) {
     if (importQueue_.size()>=32) {ShowError({ErrorCode::InsufficientResource,"At most 32 files can be queued for Import Preview.","Finish or cancel the current import first.",path});return;}
     importQueue_.push_back({path,place});if (importQueue_.size() == 1) {importSettings_={};copyImport_=!projectRoot_.empty();RefreshImportPreview(importSettings_);}
 }
 void EditorUI::RefreshImportPreview(const ImportSettings& settings) {
     if (importQueue_.empty()) {return;}
-    importSettings_=settings;importCandidate_.reset();importError_.reset();
+    CancelPreviewJob();importSettings_=settings;importCandidate_.reset();importError_.reset();
+    if (backgroundImport_) {if (!loader_) {loader_=std::make_unique<AssetLoader>();}auto job=loader_->Submit(importQueue_.front().Path,settings);if (job) {previewJob_=job.Value();}else {importError_=job.Error();}return;}
     auto candidate=Document.PreviewModel(importQueue_.front().Path,settings);
     if (candidate) {importCandidate_=candidate.Value();}else {importError_=candidate.Error();Record(ConsoleLevel::Error,candidate.Error().Message,candidate.Error().SourcePath);}
 }
-void EditorUI::AdvanceImportPreview() {importCandidate_.reset();importError_.reset();if (!importQueue_.empty()) {importQueue_.erase(importQueue_.begin());}if (!importQueue_.empty()) {RefreshImportPreview(importSettings_);}}
-void EditorUI::CancelImportPreview() {importQueue_.clear();importCandidate_.reset();importError_.reset();status_="Import cancelled; Scene and assets retained.";}
+void EditorUI::CancelPreviewJob() {if (previewJob_ && loader_) {(void)loader_->Cancel(*previewJob_);(void)loader_->Forget(*previewJob_);}previewJob_.reset();}
+void EditorUI::AdvanceImportPreview() {CancelPreviewJob();importCandidate_.reset();importError_.reset();if (!importQueue_.empty()) {importQueue_.erase(importQueue_.begin());}if (!importQueue_.empty()) {RefreshImportPreview(importSettings_);}}
+void EditorUI::CancelImportPreview() {CancelPreviewJob();importQueue_.clear();importCandidate_.reset();importError_.reset();status_="Import cancelled; Scene and assets retained.";}
 bool EditorUI::ConfirmImportPreview() {
     if (!importCandidate_ || importQueue_.empty()) {return false;}
     auto model=importCandidate_;
@@ -459,9 +461,11 @@ void EditorUI::QualitySettings() {
             int shadow=static_cast<int>(s.Shadow);if (ImGui::Combo("Sun shadow",&shadow,"Off\0Basic\0PCF (3x3)\0PCSS (unavailable)\0")) {o.Shadow=static_cast<ShadowMode>(shadow);}
             int shadowSize=s.ShadowResolution == 512 ? 0:s.ShadowResolution == 1024 ? 1:s.ShadowResolution == 2048 ? 2:3;if (ImGui::Combo("Shadow size",&shadowSize,"512\0 1024\0 2048\0 4096\0")) {o.ShadowResolution=512<<shadowSize;}
             if (ImGui::Checkbox("HDR + FXAA + Reinhard",&s.PostProcessing)) {o.PostProcessing=s.PostProcessing;}
-            if (ImGui::Checkbox("LOD (unavailable)",&s.Lod)) {o.Lod=s.Lod;}
-            if (ImGui::SliderFloat("LOD bias (unavailable)",&s.LodBias,-4,4,"%.2f")) {o.LodBias=s.LodBias;}
-            ImGui::TextWrapped("PCSS and LOD are not implemented. Shadow applies to the sun only.");
+            if (ImGui::Checkbox("Automatic rigid LOD",&s.Lod)) {o.Lod=s.Lod;}
+            if (ImGui::SliderFloat("LOD bias",&s.LodBias,-4,4,"%.2f")) {o.LodBias=s.LodBias;}
+            if (ImGui::Checkbox("Static GPU instancing",&s.Instancing)) {o.Instancing=s.Instancing;}
+            int compression=static_cast<int>(s.Compression);if (ImGui::Combo("Texture compression",&compression,"None\0Auto\0BC3\0")) {o.Compression=static_cast<TextureCompression>(compression);}
+            ImGui::TextWrapped("LOD and instancing retain animated/skinned draw paths. PCSS remains unavailable.");
         } else {ImGui::TextWrapped("%s",expanded.Error().Message.c_str());}
         ImGui::Checkbox("Allow supported fallback",&qualityDraft_.AllowFallback);
         ImGui::TextUnformatted(qualityDraft_.IsCustom() ? "Custom overrides":"Preset defaults");
@@ -650,6 +654,7 @@ void EditorUI::Dialogs() {
     }
 }
 void EditorUI::Draw() {
+    PollAssetJobs();
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
     Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();RenderDebugger();AnimationDebugger();Console(); Welcome();ImportPreview(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {

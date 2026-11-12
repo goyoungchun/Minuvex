@@ -34,6 +34,7 @@ void EditorUI::RenderDebugger() {
         ImGui::Text("Submitted: %llu draws / %llu triangles",static_cast<unsigned long long>(t.Frames.DrawCalls),static_cast<unsigned long long>(t.Frames.Triangles));
         ImGui::Text("Debug lines: %llu | overlay draws: %llu",static_cast<unsigned long long>(info.LineCount),static_cast<unsigned long long>(info.LineDrawCalls));
         ImGui::Text("Debug buffers: %.2f MiB [Estimated, additional to Quality costs]",info.DebugBufferBytes/1048576.0);
+        ImGui::Text("Instancing saved draws: %llu | instance buffers: %.2f MiB",static_cast<unsigned long long>(info.Optimization.SavedDrawCalls),info.Optimization.InstanceBufferBytes/1048576.0);ImGui::Text("LOD instance draws: %llu / %llu / %llu / %llu",static_cast<unsigned long long>(info.Optimization.LodDraws[0]),static_cast<unsigned long long>(info.Optimization.LodDraws[1]),static_cast<unsigned long long>(info.Optimization.LodDraws[2]),static_cast<unsigned long long>(info.Optimization.LodDraws[3]));
         if (ImGui::CollapsingHeader("Render passes",ImGuiTreeNodeFlags_DefaultOpen)) {for (const auto& p:info.Passes) {ImGui::TextWrapped("%s: %llu draws / %llu triangles | %s | %s",p.Name.c_str(),static_cast<unsigned long long>(p.DrawCalls),static_cast<unsigned long long>(p.Triangles),p.Shader.c_str(),p.Pipeline.c_str());}}
         if (ImGui::CollapsingHeader("Render target inspection",ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Combo("Preview",&inspectedTarget_,"Final output\0Resolved scene color\0Shadow depth\0");

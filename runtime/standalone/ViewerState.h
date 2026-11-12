@@ -32,6 +32,12 @@ struct ViewerState {
     std::function<Result<void>(const DebugOptions&)> ApplyDebug;
     std::function<Result<void>(const DebugDraw&)> ApplyDebugDraw;
     std::function<RenderDebugInfo()> ReadDebug;
+    std::unique_ptr<AssetLoader> Loader;
+    std::unordered_map<AssetLoadId,ModelOptions> PendingModels;
+    bool HotReload=false;
+    AssetHotReload Watcher;
+    struct Reload {AssetLoadId Job;ModelHandle Before;bool Again=false;};std::vector<Reload> Reloads;
+    std::optional<Error> LastAssetError;
     float Aspect() const {
         return static_cast<float>(Width > 0 ? Width : Options.Width) / static_cast<float>(Height > 0 ? Height : Options.Height);
     }

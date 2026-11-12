@@ -1,4 +1,20 @@
 {
+  "meshoptimizer": {
+    "source": "https://github.com/zeux/meshoptimizer",
+    "version": "v1.3",
+    "revisionType": "vendored tag snapshot with per-file SHA-256",
+    "license": "MIT (meshoptimizer/LICENSE)",
+    "build": "CMakeLists.txt; selected CPU cache/fetch/simplification sources only",
+    "sha256": {
+      "allocator.cpp": "d2cc48691fe2f4c6d097bf7a766389cfb7f83ca14a5f747e3944332656d02254",
+      "indexgenerator.cpp": "f362cdcd8af10016333bf699347a9364335987f413f061e5b7e8cafe3b498948",
+      "meshoptimizer.h": "e3688ef553f603391747895a5c221ef1528574cc7f8173782417a96cb531f61b",
+      "simplifier.cpp": "719303b6970398631e30724e8eebc6cd2e7e08b67fe8ab7cbf7eecafdaa08616",
+      "vcacheoptimizer.cpp": "618429ef4db8ab9b16fde4e73dcf425d89452acbf103085478bc8b1761fa6689",
+      "vfetchoptimizer.cpp": "aa534bb8150ca27ae229c58a0dc51f85f9acccbc5d4214f4c82edd91fc08e478",
+      "LICENSE": "f03037ca7bad1e3eb7f4a63fa6084a8baabd5ba30d3c239a9a7f35705d873e26"
+    }
+  },
   "tinyobjloader": {
     "source": "https://github.com/tinyobjloader/tinyobjloader",
     "revision": "45636bdcef1a4fec140346b90c0b50bf0bc3e23b",

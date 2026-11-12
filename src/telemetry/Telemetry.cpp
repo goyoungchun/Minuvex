@@ -1,4 +1,5 @@
 #include <minuvex/Telemetry.h>
+#include <minuvex/Optimization.h>
 #include "ResourceSignature.h"
 #include <algorithm>
 #include <cmath>
@@ -27,6 +28,7 @@ ResourceCost Cost(const Scene& scene,const QualityState& quality,std::uint64_t& 
             for (const auto& primitive:asset.Meshes.at(part.MeshIndex).Primitives) {
                 const auto& geometry=primitive.Geometry;
                 cost.BufferBytes=Add(cost.BufferBytes,Add(Multiply(geometry.Vertices.size(),sizeof(Vertex)),Multiply(geometry.Indices.size(),sizeof(std::uint32_t))));
+                if (settings.Lod) {for (const auto& lod:primitive.Lods) {cost.BufferBytes=Add(cost.BufferBytes,Multiply(lod.Indices.size(),sizeof(std::uint32_t)));}}
                 cost.TextureBytes=Add(cost.TextureBytes,4); // Renderer owns a white fallback per primitive.
                 const auto& material=asset.Materials.at(primitive.MaterialIndex);
                 for (int role=0;role<2;++role) {
@@ -37,7 +39,7 @@ ResourceCost Cost(const Scene& scene,const QualityState& quality,std::uint64_t& 
                 const auto& image=asset.Images.at(imageIndex);int w=image.Width,h=image.Height;
                 if (w <= 0 || h <= 0 || w > 32768 || h > 32768 || Multiply(Multiply(w,h),4) != image.Rgba.size()) {throw std::invalid_argument("Invalid source image in resource estimate.");}
                 while (w > settings.MaxTextureSize || h > settings.MaxTextureSize) {w=std::max(1,w/2);h=std::max(1,h/2);}
-                for (;;) {cost.TextureBytes=Add(cost.TextureBytes,std::uint64_t(w)*h*4);if (w == 1 && h == 1) {break;}w=std::max(1,w/2);h=std::max(1,h/2);}
+                cost.TextureBytes=Add(cost.TextureBytes,TextureMipBytes(w,h,settings.Compression == TextureCompression::Bc3 && w>=4 && h>=4 && w%4==0 && h%4==0));
                 }
             }
         }
@@ -101,7 +103,7 @@ Result<QualityEstimate> EstimateQualityResources(const QualityProfile& p,const Q
             const auto shadowBytes=[](const RenderSettings& s) {return s.Shadow != ShadowMode::Off ? std::uint64_t(s.ShadowResolution)*s.ShadowResolution*8:0;};
             if (!suspended && old.Shadow != ShadowMode::Off && next.Shadow != ShadowMode::Off && old.ShadowResolution == next.ShadowResolution) {e.ReusedBytes=shadowBytes(next);}
             if (!suspended && old.MsaaSamples == next.MsaaSamples && old.PostProcessing == next.PostProcessing && current->Quality.RenderWidth == e.Quality.RenderWidth && current->Quality.RenderHeight == e.Quality.RenderHeight) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.RenderTargetBytes-shadowBytes(next),current->Cost.RenderTargetBytes-shadowBytes(old)));}
-            if (current->AssetSignature == e.AssetSignature && old.MsaaSamples == next.MsaaSamples && old.MaxTextureSize == next.MaxTextureSize && old.Anisotropy == next.Anisotropy && old.PostProcessing == next.PostProcessing && (old.Shadow != ShadowMode::Off) == (next.Shadow != ShadowMode::Off) && (old.Lighting == LightingMode::Advanced) == (next.Lighting == LightingMode::Advanced)) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.TextureBytes,current->Cost.TextureBytes));e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.BufferBytes,current->Cost.BufferBytes));}
+            if (current->AssetSignature == e.AssetSignature && old.MsaaSamples == next.MsaaSamples && old.MaxTextureSize == next.MaxTextureSize && old.Anisotropy == next.Anisotropy && old.PostProcessing == next.PostProcessing && old.Lod == next.Lod && old.Compression == next.Compression && (old.Shadow != ShadowMode::Off) == (next.Shadow != ShadowMode::Off) && (old.Lighting == LightingMode::Advanced) == (next.Lighting == LightingMode::Advanced)) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.TextureBytes,current->Cost.TextureBytes));e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.BufferBytes,current->Cost.BufferBytes));}
         }
         e.AdditionalBytes=e.Cost.TotalBytes-e.ReusedBytes;e.TemporaryPeakBytes=Add(current ? current->Cost.TotalBytes:0,e.AdditionalBytes);
         return Result<QualityEstimate>::Success(std::move(e));

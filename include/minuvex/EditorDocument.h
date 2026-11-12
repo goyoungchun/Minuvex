@@ -24,6 +24,7 @@ public:
     Result<void> Save(const std::filesystem::path& path); // Save As; protects source resources, path/dirty change only on success.
     Result<AssetId> ImportModel(const std::filesystem::path& path, const ImportSettings& settings = {});
     Result<void> ReimportModel(AssetId asset); // Atomically replace the library and all compatible instances.
+    Result<void> CommitReimport(AssetId asset,ModelHandle candidate); // Prepared same-source candidate; transactional Scene/library replacement.
     Result<ObjectId> PlaceModel(AssetId asset, const Transform& transform = {}, ObjectId parent = NoObject);
     Result<ObjectId> CreateObject(std::string name = "Object", ObjectId parent = NoObject);
     Result<void> Select(ObjectId object); // NoObject clears selection, does not mark dirty.

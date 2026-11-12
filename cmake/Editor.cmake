@@ -28,6 +28,7 @@ target_link_libraries(minuvex_imgui PRIVATE minuvex_sokol_headers)
 target_compile_features(minuvex_imgui PRIVATE cxx_std_20)
 
 add_library(minuvex_editor_ui STATIC editor/EditorUI.cpp editor/AssetPanels.cpp editor/PerformancePanel.cpp editor/DebugPanels.cpp editor/SceneViewport.cpp editor/NativeFiles.cpp editor/EditorPreferences.cpp)
+target_sources(minuvex_editor_ui PRIVATE editor/AssetJobs.cpp)
 target_include_directories(minuvex_editor_ui PUBLIC editor PRIVATE src runtime/standalone)
 target_link_libraries(minuvex_editor_ui PUBLIC minuvex_editor_document PRIVATE minuvex_renderer minuvex_imgui minuvex_camera minuvex_sokol_headers minuvex_json_io nfd::nfd)
 target_include_directories(minuvex_editor_ui SYSTEM PRIVATE third_party/json)

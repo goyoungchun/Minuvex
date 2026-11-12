@@ -16,7 +16,8 @@ AssetInspection InspectModel(const ModelAsset& model) {
     for (const auto& joint:model.Skeleton.Joints) {info.Bones+=joint.IsJoint;}
     for (const auto& image:model.Images) {info.ImageBytes+=image.Rgba.size();}
     for (const auto& clip:model.Animations) {for (const auto& track:clip.Tracks) {info.AnimationSamples+=track.Times.size();}}
-    info.GeometryBytes=info.Vertices*sizeof(Vertex)+info.Indices*sizeof(std::uint32_t);return info;
+    for (const auto& mesh:model.Meshes) {for (const auto& p:mesh.Primitives) {for (const auto& lod:p.Lods) {info.LodIndices+=lod.Indices.size();}}}
+    info.GeometryBytes=info.Vertices*sizeof(Vertex)+(info.Indices+info.LodIndices)*sizeof(std::uint32_t);return info;
 }
 void ValidateModel(const ModelAsset& model) {
     detail::ValidateImportSettings(model.Settings);
@@ -46,6 +47,7 @@ void ValidateModel(const ModelAsset& model) {
         for (const auto texture:{material.BaseColorTexture,material.NormalTexture}) {if (texture) {require(!model.Images.at(model.Textures[*texture].ImageIndex).Rgba.empty(),"Material references an undecoded image.");}}
     }
     for (const auto& mesh:model.Meshes) {require(!mesh.Primitives.empty(),"Empty mesh.");for (const auto& primitive:mesh.Primitives) {ValidateMesh(primitive.Geometry);require(primitive.MaterialIndex<model.Materials.size(),"Invalid primitive material.");}}
+    for (const auto& mesh:model.Meshes) {for (const auto& p:mesh.Primitives) {require(p.Lods.size()<=3 && (!p.HasSkinning || p.Lods.empty()),"Only rigid LOD1..3 are supported.");auto count=p.Geometry.Indices.size();for (const auto& lod:p.Lods) {require(!lod.Indices.empty() && lod.Indices.size()%3==0 && lod.Indices.size()<count && std::isfinite(lod.Error) && lod.Error>=0,"Invalid LOD topology/error.");count=lod.Indices.size();for (auto index:lod.Indices) {require(index<p.Geometry.Vertices.size(),"Invalid LOD vertex reference.");}}}}
     for (const auto& skin:model.Skins) {require(!skin.Joints.empty() && skin.Joints.size()<=MaxSkinJoints && skin.Joints.size() == skin.InverseBindMatrices.size(),"Invalid skin palette.");for (std::size_t i=0;i<skin.Joints.size();++i) {require(skin.Joints[i]<model.Nodes.size(),"Invalid skin joint.");(void)skin.InverseBindMatrices[i].NormalMatrix();}}
     for (const auto& part:model.Parts) {
         require(part.MeshIndex<model.Meshes.size() && (part.Node == NoJoint || part.Node<model.Nodes.size()) && (!part.SkinIndex || *part.SkinIndex<model.Skins.size()),"Invalid model part reference.");(void)part.Transform.NormalMatrix();

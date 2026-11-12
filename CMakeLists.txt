@@ -6,7 +6,7 @@ if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 endif()
-project(Minuvex VERSION 1.5.0 LANGUAGES CXX)
+project(Minuvex VERSION 1.6.0 LANGUAGES CXX)
 if(MSVC)
     if(POLICY CMP0141)
         # Reconfigured pre-CMP0141 build trees may retain /Zi in their cache.
@@ -55,6 +55,14 @@ target_compile_definitions(minuvex_core PRIVATE
     MINUVEX_BUILD_GRAPHICS=$<BOOL:${MINUVEX_BUILD_RENDERER}>)
 minuvex_configure_target(minuvex_core)
 
+add_library(minuvex_meshoptimizer STATIC third_party/meshoptimizer/allocator.cpp third_party/meshoptimizer/indexgenerator.cpp third_party/meshoptimizer/vcacheoptimizer.cpp third_party/meshoptimizer/vfetchoptimizer.cpp third_party/meshoptimizer/simplifier.cpp)
+target_include_directories(minuvex_meshoptimizer PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer>")
+target_compile_features(minuvex_meshoptimizer PRIVATE cxx_std_20)
+add_library(minuvex_optimization STATIC src/optimization/MeshOptimization.cpp)
+add_library(minuvex::optimization ALIAS minuvex_optimization)
+target_link_libraries(minuvex_optimization PUBLIC minuvex_core PRIVATE minuvex_meshoptimizer)
+minuvex_configure_target(minuvex_optimization)
+
 add_library(minuvex_json_io STATIC src/core/JsonFile.cpp)
 target_include_directories(minuvex_json_io SYSTEM PRIVATE third_party/json)
 target_compile_features(minuvex_json_io PRIVATE cxx_std_20)
@@ -80,8 +88,9 @@ target_link_libraries(minuvex_animation PUBLIC minuvex_core)
 minuvex_configure_target(minuvex_animation)
 
 add_library(minuvex_assets STATIC src/assets/AssetRegistry.cpp src/assets/ImportCommon.cpp src/assets/GltfImport.cpp src/assets/ObjImport.cpp src/assets/FbxImport.cpp src/assets/ProjectImport.cpp)
+target_sources(minuvex_assets PRIVATE src/assets/AssetLoading.cpp)
 add_library(minuvex::assets ALIAS minuvex_assets)
-target_link_libraries(minuvex_assets PUBLIC minuvex_animation PRIVATE minuvex_asset_codecs)
+target_link_libraries(minuvex_assets PUBLIC minuvex_animation minuvex_optimization PRIVATE minuvex_asset_codecs Threads::Threads)
 target_include_directories(minuvex_assets SYSTEM PRIVATE third_party/cgltf third_party/stb third_party/tinyobjloader third_party/ufbx)
 minuvex_configure_target(minuvex_assets)
 
@@ -292,7 +301,8 @@ if(BUILD_TESTING)
     add_test(NAME phase3.result COMMAND minuvex_result_tests)
 
     add_executable(minuvex_viewer_tests tests/Runtime/ViewerTests.cpp tests/Debug/DebugTests.cpp)
-    target_link_libraries(minuvex_viewer_tests PRIVATE minuvex::viewer minuvex::embedded)
+    target_sources(minuvex_viewer_tests PRIVATE tests/Optimization/OptimizationTests.cpp)
+    target_link_libraries(minuvex_viewer_tests PRIVATE minuvex::viewer minuvex::embedded minuvex::editor_document)
     target_include_directories(minuvex_viewer_tests PRIVATE tests)
     target_compile_definitions(minuvex_viewer_tests PRIVATE
         MINUVEX_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/Fixtures"

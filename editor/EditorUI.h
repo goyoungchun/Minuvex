@@ -4,6 +4,7 @@
 #include "NativeFiles.h"
 #include "EditorPreferences.h"
 #include <minuvex/EditorDocument.h>
+#include <minuvex/AssetLoading.h>
 
 namespace lv::editor {
 enum class ConsoleLevel { Info, Warning, Error };
@@ -30,6 +31,9 @@ public:
     void RefreshImportPreview(const ImportSettings& settings);
     bool ConfirmImportPreview();
     void CancelImportPreview();
+    void PollAssetJobs();
+    bool ImportPreviewPending() const noexcept {return previewJob_.has_value();}
+    void SetHotReload(bool enabled) noexcept {hotReload_=enabled;}
     void RequestOpen(const std::filesystem::path& path);
     void RequestNew();
     void RequestQuit();
@@ -76,6 +80,11 @@ private:
     ImportSettings importSettings_;
     ModelHandle importCandidate_;
     std::optional<Error> importError_;
+    std::unique_ptr<AssetLoader> loader_;
+    std::optional<AssetLoadId> previewJob_;
+    bool backgroundImport_=true,hotReload_=false;
+    AssetHotReload watcher_;
+    struct PendingReload {AssetLoadId Job;ModelHandle Before;bool Again=false;};std::vector<PendingReload> reloads_;
     QualityProfile qualityDraft_;
     std::optional<QualityProfile> pendingQuality_;
     QualityProfile analyzedProfile_;
@@ -115,6 +124,7 @@ private:
     void ImportPreview();
     void AdvanceImportPreview();
     void ReimportAsset(AssetId asset);
+    void CancelPreviewJob();
     void ViewportPanel();
     void Dialogs();
     template<typename T> bool Report(const Result<T>& result,ObjectId object=NoObject) {

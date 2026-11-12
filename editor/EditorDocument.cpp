@@ -120,6 +120,10 @@ Result<void> EditorDocument::ReimportModel(AssetId asset) {
 Result<ObjectId> EditorDocument::CreateObject(std::string name, ObjectId parent) {
     return Edit([&] { const auto id = world_.CreateObject(std::move(name),parent); selection_ = id; dirty_ = true; return id; });
 }
+Result<void> EditorDocument::CommitReimport(AssetId asset,ModelHandle candidate) {
+    const auto previous=registry_.Find(asset);if (!previous) {return Result<void>::Failure({ErrorCode::InvalidHandle,"Unknown imported asset.","Select an imported asset.",{}});}
+    return Edit([&] {auto registry=registry_;auto replacement=registry.ReplacePrepared(asset,std::move(candidate));auto library=library_;for (auto& model:library) {if (model == previous) {model=replacement;}}(void)world_.ReplaceModel(previous,replacement);registry_=std::move(registry);library_.swap(library);dirty_=true;});
+}
 Result<void> EditorDocument::Select(ObjectId object) {
     return Edit([&] { if (object) { (void)world_.GetObject(object); } selection_ = object; });
 }

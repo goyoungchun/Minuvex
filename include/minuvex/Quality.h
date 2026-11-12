@@ -14,6 +14,7 @@ enum class LightingMode { Unlit, Basic, Advanced };
 enum class ShadowMode { Off, Basic, Pcf, Pcss };
 enum class OnDemandMode { Off, On, Auto };
 enum class GraphicsBackend { None, D3D11, Metal };
+enum class TextureCompression { None, Auto, Bc3 };
 
 struct RenderSettings {
     ResolutionMode Resolution = ResolutionMode::Relative;
@@ -32,6 +33,8 @@ struct RenderSettings {
     bool Lod = false;
     float LodBias = 0;
     bool PostProcessing = false;
+    bool Instancing=true;
+    TextureCompression Compression=TextureCompression::Auto;
     bool operator==(const RenderSettings&) const = default;
 };
 
@@ -50,6 +53,8 @@ struct QualityOverrides {
     std::optional<bool> Lod;
     std::optional<float> LodBias;
     std::optional<bool> PostProcessing;
+    std::optional<bool> Instancing;
+    std::optional<TextureCompression> Compression;
     bool Empty() const noexcept;
     bool operator==(const QualityOverrides&) const = default;
 };
@@ -70,6 +75,7 @@ struct QualityCapabilities {
     std::uint32_t HdrSampleCounts = 1u << 1;
     // Host-configured attachment budget, not measured free VRAM (Phase 7).
     std::uint64_t RenderTargetBudgetBytes = 256ull * 1024 * 1024;
+    bool Bc3Textures=false;
 };
 struct QualityAdjustment { std::string Field, Reason; };
 struct QualityState {

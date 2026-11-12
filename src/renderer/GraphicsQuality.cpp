@@ -19,6 +19,7 @@ QualityCapabilities QueryQualityCapabilities() {
     const auto shadow=sg_query_pixelformat(SG_PIXELFORMAT_R32F),shadowDepth=sg_query_pixelformat(SG_PIXELFORMAT_DEPTH),hdr=sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
     caps.ShadowMapping=shadow.render && shadow.sample && shadowDepth.render;
     caps.HdrPostProcessing=hdr.render && hdr.sample && hdr.filter;
+    const auto bc3=sg_query_pixelformat(SG_PIXELFORMAT_BC3_RGBA),sbc3=sg_query_pixelformat(SG_PIXELFORMAT_BC3_SRGBA);caps.Bc3Textures=bc3.sample && bc3.filter && sbc3.sample && sbc3.filter;
 #if defined(_WIN32)
     caps.Backend=GraphicsBackend::D3D11;
     auto* device=static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));

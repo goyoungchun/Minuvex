@@ -59,6 +59,20 @@ void main() {
     if (skin_options.x < .5) {bone_weight=0.0;}
 }
 @end
+@vs instance_vs
+@include_block vertex_common
+in vec4 instance0;
+in vec4 instance1;
+in vec4 instance2;
+in vec4 instance3;
+void main() {
+    mat4 m=mat4(instance0,instance1,instance2,instance3);mat3 linear=mat3(m);
+    vec3 a=cross(linear[1],linear[2]),b=cross(linear[2],linear[0]),c=cross(linear[0],linear[1]);float d=dot(linear[0],a);
+    vec4 p=m*vec4(position,1);gl_Position=mvp*p;world_position=p.xyz;
+    world_normal=(mat3(a,b,c)*normal)/d;world_tangent=vec4(linear*tangent.xyz,tangent.w*sign(d));
+    shadow_position=shadow_matrix*p;color=color0;uv=texcoord0;bone_weight=0.0;
+}
+@end
 @fs mesh_fs
 layout(binding=1) uniform material_params {
     vec4 base_color;
@@ -138,6 +152,7 @@ void main() {
 @end
 @program mesh mesh_vs mesh_fs
 @program skin skin_vs mesh_fs
+@program mesh_instances instance_vs mesh_fs
 
 @vs shadow_vs
 layout(binding=0) uniform shadow_params {mat4 light_mvp;};
@@ -155,6 +170,13 @@ void main() {
     gl_Position=light_mvp*p;shadow_uv=texcoord0;shadow_alpha=color0.a;
 }
 @end
+@vs shadow_instance_vs
+layout(binding=0) uniform shadow_params {mat4 light_mvp;};
+in vec3 position;in vec4 color0;in vec2 texcoord0;
+in vec4 instance0;in vec4 instance1;in vec4 instance2;in vec4 instance3;
+out vec2 shadow_uv;out float shadow_alpha;
+void main() {gl_Position=light_mvp*mat4(instance0,instance1,instance2,instance3)*vec4(position,1);shadow_uv=texcoord0;shadow_alpha=color0.a;}
+@end
 @fs shadow_fs
 layout(binding=1) uniform shadow_material {vec4 shadow_mask;};
 layout(binding=0) uniform texture2D mask_texture;
@@ -165,3 +187,4 @@ void main() {if (shadow_mask.x >= 0.0 && texture(sampler2D(mask_texture,mask_sam
 @end
 @program shadow_mesh shadow_vs shadow_fs
 @program shadow_skin shadow_skin_vs shadow_fs
+@program shadow_instances shadow_instance_vs shadow_fs

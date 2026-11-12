@@ -28,6 +28,8 @@ int main(int argc, char** argv) {
         lv::DebugDraw debug;debug.DrawAxis(lv::Mat4::Identity());debug.DrawBoundingBox(preview.Value()->ModelBounds);
         if (!viewer.SetDebugDraw(debug) || !viewer.SetDebugView(lv::DebugView::Wireframe) || !viewer.SetShowSkeleton(true)) {return 1;}
         const auto influences=lv::InspectBoneInfluences(*preview.Value());(void)influences;
+        const auto optimized=lv::OptimizeMesh(lv::MakeCube());if (optimized.Geometry.Indices.size()!=36) {return 1;}
+        const auto async=viewer.AddModelAsync(argv[1]);if (!async || !viewer.CancelModelLoad(async.Value()) || !viewer.SetHotReload(true) || !viewer.PollHotReload(0) || !viewer.GetAssetLoadError()) {return 1;}
         lv::EmbeddedRenderer embedded;if (embedded.IsInitialized()) {return 1;}
         const auto hardware=lv::SystemInfo::QueryHardware();
         std::printf("Minuvex %.*s | %.*s | %.*s | %d bit | graphics=%d | %s\n",

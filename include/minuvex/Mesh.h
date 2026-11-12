@@ -22,6 +22,10 @@ struct MeshData {
     std::vector<Vertex> Vertices;
     std::vector<std::uint32_t> Indices;
 };
+struct MeshLod {
+    std::vector<std::uint32_t> Indices; // References MeshData::Vertices; LOD0 stays in MeshData.
+    float Error=0;
+};
 
 // Throws std::invalid_argument before any GPU upload if the mesh is malformed.
 void ValidateMesh(const MeshData& mesh);

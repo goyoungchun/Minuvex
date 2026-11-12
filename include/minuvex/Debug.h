@@ -1,6 +1,7 @@
 #pragma once
 #include <minuvex/Scene.h>
 #include <minuvex/Quality.h>
+#include <minuvex/Optimization.h>
 #include <span>
 
 namespace lv {
@@ -53,6 +54,7 @@ struct RenderDebugInfo {
     std::uint64_t RenderedFrames=0,LineCount=0,LineDrawCalls=0,DebugBufferBytes=0;
     std::vector<DebugPass> Passes;
     std::vector<DebugResource> Resources;
+    OptimizationStatistics Optimization;
 };
 struct BoneInfluenceStatistics {
     std::size_t SkinnedVertices=0,RigidVertices=0,UnweightedVertices=0;

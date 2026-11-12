@@ -98,6 +98,7 @@ void Frame(void* user) noexcept {
         runtime.State.Height = std::max(1,static_cast<int>(std::lround(static_cast<float>(height)/dpi)));
         (void)runtime.Surface.Resize(runtime.State.World,width,height);runtime.State.Quality=runtime.Surface.Quality();
         const auto now=RenderClockSeconds();
+        if (runtime.State.HotReload) {(void)runtime.Facade.PollHotReload(now);}
         if (!runtime.Surface.Due(now)) {std::this_thread::sleep_for(std::chrono::milliseconds(1));return;}
         const auto elapsed=now-runtime.LastUpdate;runtime.LastUpdate=now;
         const ViewerFrameInfo info{runtime.Frames,std::isfinite(elapsed) ? std::clamp(elapsed,0.0,0.25) : 0.0,width,height};

@@ -59,8 +59,9 @@ struct SceneRenderer::GpuModel {
             for (const auto& primitive : Asset->Meshes.at(part.MeshIndex).Primitives) {
                 const auto& material = Asset->Materials.at(primitive.MaterialIndex);
                 auto renderer = std::make_unique<MeshRenderer>();
-                renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow != ShadowMode::Off);
+                renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow != ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{});
                 BufferBytes+=primitive.Geometry.Vertices.size()*sizeof(Vertex)+primitive.Geometry.Indices.size()*sizeof(std::uint32_t);
+                if (settings.Lod) {for (const auto& level:primitive.Lods) {BufferBytes+=level.Indices.size()*sizeof(std::uint32_t);}}
                 TextureBytes+=4;
                 primitives.push_back(std::move(renderer));
                 for (int role=0;role<2;++role) {
@@ -71,12 +72,12 @@ struct SceneRenderer::GpuModel {
                 auto& gpuImage = Images.at(texture.ImageIndex+role*Asset->Images.size());
                 if (!gpuImage.Image.id) {
                     const auto& image = Asset->Images.at(texture.ImageIndex);
-                    const auto packed=PackTexture(image,std::min(settings.MaxTextureSize,sg_query_limits().max_image_size_2d),role == 0);
+                    const auto packed=PackTexture(image,std::min(settings.MaxTextureSize,sg_query_limits().max_image_size_2d),role == 0,settings.Compression == TextureCompression::Bc3);
                     TextureBytes+=packed.Pixels.size();
                     sg_image_desc desc{};
                     desc.width = packed.Width; desc.height = packed.Height;
                     desc.num_mipmaps = packed.Levels;
-                    desc.pixel_format = role == 0 ? SG_PIXELFORMAT_SRGB8A8:SG_PIXELFORMAT_RGBA8;
+                    desc.pixel_format = packed.Compressed ? (role == 0 ? SG_PIXELFORMAT_BC3_SRGBA:SG_PIXELFORMAT_BC3_RGBA):(role == 0 ? SG_PIXELFORMAT_SRGB8A8:SG_PIXELFORMAT_RGBA8);
                     desc.data = {packed.Pixels.data(), packed.Pixels.size()};
                     gpuImage.Size=std::max(packed.Width,packed.Height);
                     desc.label = "minuvex-base-color";
@@ -104,8 +105,34 @@ struct SceneRenderer::GpuModel {
     }
 };
 
+struct SceneRenderer::Batch {
+    std::vector<Mat4> Transforms;sg_buffer Buffer{};bool Drawn=false;
+    ~Batch() {if (Buffer.id && sg_isvalid()) {sg_destroy_buffer(Buffer);}}
+};
 SceneRenderer::SceneRenderer(RenderSettings settings) : settings_(settings) {}
 SceneRenderer::~SceneRenderer() = default;
+unsigned SceneRenderer::Lod(const Scene& scene,const Bounds& b,const Mat4& world,std::size_t levels) const {
+    if (!settings_.Lod || !levels || debug_.View == DebugView::Wireframe) {return 0;}
+    const Vec3 center=world.TransformPoint({(b.Min.X+b.Max.X)*.5f,(b.Min.Y+b.Max.Y)*.5f,(b.Min.Z+b.Max.Z)*.5f});const auto& e=world.Elements;
+    const float scale=std::sqrt(e[0]*e[0]+e[1]*e[1]+e[2]*e[2]+e[4]*e[4]+e[5]*e[5]+e[6]*e[6]+e[8]*e[8]+e[9]*e[9]+e[10]*e[10]); // Conservative upper bound, including hierarchy-induced shear.
+    const float radius=.5f*std::hypot(b.Max.X-b.Min.X,b.Max.Y-b.Min.Y,b.Max.Z-b.Min.Z)*scale;const auto& c=scene.MainCamera;
+    const float distance=std::max(c.NearPlane,std::hypot(center.X-c.Position.X,center.Y-c.Position.Y,center.Z-c.Position.Z)-radius);
+    const float pixels=radius*height_/(std::tan(c.VerticalFovRadians*.5f)*distance);return std::isfinite(pixels) ? SelectMeshLod(pixels,settings_.LodBias,levels):0;
+}
+void SceneRenderer::PrepareBatches(const Scene& scene) {
+    batches_.clear();stats_.Optimization={};if (!settings_.Instancing || debug_.View == DebugView::Wireframe || (!viewportKnown_ && settings_.FrustumCulling)) {return;}
+    const auto vp=scene.MainCamera.ViewProjection(aspect_);
+    for (const auto& item:scene.CollectRenderItems()) {if (item.Animation && item.Animation->NeedsEvaluation()) {continue;}auto& model=*models_.at(item.Model.get());
+        for (const auto& part:item.Model->Parts) {if (part.SkinIndex) {continue;}const auto transform=item.WorldTransform*part.Transform;(void)transform.NormalMatrix();const bool visible=!settings_.FrustumCulling || IntersectsFrustum(model.MeshBounds[part.MeshIndex],transform,vp);
+            for (std::size_t i=0;i<item.Model->Meshes[part.MeshIndex].Primitives.size();++i) {const auto& primitive=item.Model->Meshes[part.MeshIndex].Primitives[i];if (primitive.HasSkinning) {continue;}auto* mesh=model.Meshes[part.MeshIndex][i].get();
+                const auto append=[&](bool shadow,unsigned lod) {BatchKey key{mesh,lod,transform.LinearDeterminant()<0,shadow};auto& group=batches_[key];if (!group) {group=std::make_unique<Batch>();}group->Transforms.push_back(transform);};
+                if (visible && debug_.View != DebugView::ShadowMap) {append(false,Lod(scene,model.MeshBounds[part.MeshIndex],transform,primitive.Lods.size()));}if (settings_.Shadow != ShadowMode::Off) {append(true,0);}
+            }
+        }
+    }
+    std::erase_if(batches_,[](const auto& entry) {return entry.second->Transforms.size()<2;});
+    for (auto& [key,batch]:batches_) {key.Mesh->PrepareInstances();sg_buffer_desc b{};b.data={batch->Transforms.data(),batch->Transforms.size()*sizeof(Mat4)};b.label="static-instance-transforms";batch->Buffer=sg_make_buffer(b);if (sg_query_buffer_state(batch->Buffer) != SG_RESOURCESTATE_VALID) {throw std::runtime_error("Cannot upload static instance batch.");}stats_.Optimization.InstanceBufferBytes+=b.data.size;}
+}
 
 void SceneRenderer::Prepare(const Scene& scene) {
     scene.ValidateLighting();
@@ -133,6 +160,7 @@ void SceneRenderer::Prepare(const Scene& scene) {
         for (const auto& mesh : model->Meshes) { stats_.ResidentPrimitives += mesh.size(); }
         for (const auto& image : model->Images) { if (image.Image.id) { ++stats_.ResidentImages;stats_.MaxResidentTextureSize=std::max(stats_.MaxResidentTextureSize,image.Size); } }
     }
+    PrepareBatches(scene);
 }
 
 void SceneRenderer::Draw(const Scene& scene,float aspect,const ShadowSampling& shadow) {stats_.LastWireLines=0;DrawImpl(scene,scene.MainCamera.ViewProjection(aspect),false,shadow);}
@@ -184,17 +212,22 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                     texture = model.Images.at(item.Model->Textures.at(index).ImageIndex).View;
                     sampler = model.Samplers.at(index);
                 }
-                if (shadowPass) {model.Meshes.at(part.MeshIndex).at(i)->DrawShadow(transform,viewProjection,material,texture,sampler,palette);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3;}
+                if (shadowPass) {auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();MeshLighting instances;auto drawTransform=transform;std::size_t count=1;const auto group=batches_.find({renderer,0,transform.LinearDeterminant()<0,true});const bool eligible=!mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();instances.Instances=batch.Buffer;instances.InstanceCount=static_cast<int>(count);instances.Mirrored=transform.LinearDeterminant()<0;drawTransform=Mat4::Identity();++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}renderer->DrawShadow(drawTransform,viewProjection,material,texture,sampler,palette,instances);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;}
                 else {
                     MeshLighting lighting;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
                     lighting.Debug=debug_;lighting.NearPlane=scene.MainCamera.NearPlane;lighting.FarPlane=scene.MainCamera.FarPlane;
                     if (lighting.Advanced && material.NormalTexture) {const auto index=*material.NormalTexture;lighting.NormalTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.NormalSampler=model.Samplers.at(index);}
-                    model.Meshes.at(part.MeshIndex).at(i)->Draw(transform,viewProjection,scene.Sun,material,texture,sampler,palette,settings_.Lighting == LightingMode::Unlit,lighting);
-                    ++stats_.LastDrawCalls;if (debug_.View == DebugView::Wireframe) {stats_.LastWireLines+=mesh.Primitives[i].Geometry.Indices.size();}else {stats_.LastTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3;}
+                    auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();const auto level=part.SkinIndex ? 0:Lod(scene,model.MeshBounds[part.MeshIndex],transform,mesh.Primitives[i].Lods.size());lighting.Lod=level;
+                    const BatchKey key{renderer,level,transform.LinearDeterminant()<0,false};const auto group=batches_.find(key);const bool eligible=!mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());std::size_t count=1;Mat4 drawTransform=transform;
+                    if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();lighting.Instances=batch.Buffer;lighting.InstanceCount=static_cast<int>(count);lighting.Mirrored=key.Mirrored;drawTransform=Mat4::Identity();stats_.Optimization.InstancedObjects+=count;++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}
+                    renderer->Draw(drawTransform,viewProjection,scene.Sun,material,texture,sampler,palette,settings_.Lighting == LightingMode::Unlit,lighting);
+                    ++stats_.LastDrawCalls;stats_.Optimization.LodDraws[level]+=count;stats_.Optimization.SourceTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;
+                    if (debug_.View == DebugView::Wireframe) {stats_.LastWireLines+=mesh.Primitives[i].Geometry.Indices.size();}else {const auto triangles=renderer->TriangleCount(level)*count;stats_.LastTriangles+=triangles;stats_.Optimization.SubmittedTriangles+=triangles;}
                 }
             }
         }
     }
+    if (!shadowPass) {stats_.Optimization.CulledParts=stats_.LastCulledParts;}
 }
 
 Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene) const {
@@ -220,7 +253,7 @@ Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene) const {
     Mat4 projection=Mat4::Identity();projection.Elements[0]=2/(right-left);projection.Elements[5]=2/(top-bottom);projection.Elements[10]=1/(near-far);projection.Elements[12]=-(right+left)/(right-left);projection.Elements[13]=-(top+bottom)/(top-bottom);projection.Elements[14]=near/(near-far);
     return projection*view;
 }
-void SceneRenderer::Clear() noexcept { models_.clear(); stats_ = {}; }
-void SceneRenderer::Inspect(std::vector<DebugResource>& r) const {for (const auto& [key,model]:models_) {(void)key;for (const auto& mesh:model->Meshes) {for (const auto& p:mesh) {p->Inspect(r);}}for (const auto& image:model->Images) {InspectImage(r,image.Image,"Asset texture (base/normal)");}}}
+void SceneRenderer::Clear() noexcept {batches_.clear();models_.clear(); stats_ = {}; }
+void SceneRenderer::Inspect(std::vector<DebugResource>& r) const {for (const auto& [key,model]:models_) {(void)key;for (const auto& mesh:model->Meshes) {for (const auto& p:mesh) {p->Inspect(r);}}for (const auto& image:model->Images) {InspectImage(r,image.Image,"Asset texture (base/normal)");}}for (const auto& [key,batch]:batches_) {(void)key;InspectBuffer(r,batch->Buffer,"Static instance transforms");}}
 
 } // namespace lv::detail

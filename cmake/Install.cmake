@@ -5,8 +5,8 @@ foreach(_dir CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_DATADIR
     endif()
 endforeach()
 
-set(_sdk_public core animation assets scene scene_io quality telemetry debug editor_document viewer embedded)
-set(_sdk_internal json_io asset_codecs camera)
+set(_sdk_public core animation assets scene scene_io quality telemetry debug optimization editor_document viewer embedded)
+set(_sdk_internal json_io asset_codecs camera meshoptimizer)
 if(MINUVEX_BUILD_RENDERER)
     list(APPEND _sdk_internal renderer sokol_gfx sokol_app sokol_headers)
 endif()
@@ -49,6 +49,7 @@ install(FILES third_party/cgltf/LICENSE DESTINATION "${_sdk_share}/licenses" REN
 install(FILES third_party/json/LICENSE.MIT DESTINATION "${_sdk_share}/licenses" RENAME json-LICENSE.MIT)
 install(FILES third_party/tinyobjloader/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME tinyobjloader-LICENSE)
 install(FILES third_party/ufbx/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME ufbx-LICENSE)
+install(FILES third_party/meshoptimizer/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME meshoptimizer-LICENSE)
 # stb permits redistributing this header with its embedded license notice.
 install(FILES third_party/stb/stb_image.h DESTINATION "${_sdk_share}/licenses")
 if(MINUVEX_BUILD_RENDERER)

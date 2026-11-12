@@ -8,6 +8,7 @@
 
 using namespace test;
 void TestDebugContracts();
+void TestOptimizationContracts();
 namespace {
 template<typename T>
 void ErrorIs(const lv::Result<T>& result, lv::ErrorCode code, const char* message) {
@@ -231,6 +232,7 @@ int main() {
     try {
         TestFacade();TestFailures();TestInput();
         TestDebugContracts();
+        TestOptimizationContracts();
         lv::EmbeddedRenderer embedded;lv::Scene scene;
         Check(!embedded.IsInitialized() && embedded.Shutdown().HasValue(),"Embedded inactive shutdown is idempotent");
         ErrorIs(embedded.Render(scene,{}),lv::ErrorCode::InvalidState,"Embedded render requires initialization");

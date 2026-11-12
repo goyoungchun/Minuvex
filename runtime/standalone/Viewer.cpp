@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <exception>
+#include <algorithm>
 
 namespace lv::detail {
 
@@ -103,6 +104,28 @@ Result<void> Viewer::RemoveModel(ObjectId id) {
     if (!state_->World.GetObject(id).Model) { return Result<void>::Failure({ErrorCode::InvalidHandle, "Object has no model attached.", "Remove empty hierarchy groups through GetScene().RemoveObject().", {}}); }
     try { state_->World.RemoveObject(id); return Result<void>::Success(); }
     catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument, "Use a live model ID.")); }
+}
+Result<AssetLoadId> Viewer::AddModelAsync(const std::filesystem::path& path,const ModelOptions& options) {
+    auto ready=Ready(*state_);if (!ready) {return Result<AssetLoadId>::Failure(ready.Error());}try {(void)options.Transform.Matrix().NormalMatrix();if (!state_->Loader) {state_->Loader=std::make_unique<AssetLoader>();}auto submitted=state_->Loader->Submit(path,options.Import,state_->Assets.Importers());if (submitted) {try {state_->PendingModels.emplace(submitted.Value(),options);}catch (...) {(void)state_->Loader->Cancel(submitted.Value());(void)state_->Loader->Forget(submitted.Value());throw;}}return submitted;}catch (...) {return Result<AssetLoadId>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Check async import options."));}
+}
+Result<AssetLoadSnapshot> Viewer::GetAssetLoad(AssetLoadId id) const {auto ready=Ready(*state_);if (!ready) {return Result<AssetLoadSnapshot>::Failure(ready.Error());}if (!state_->Loader || !state_->PendingModels.contains(id)) {return Result<AssetLoadSnapshot>::Failure({ErrorCode::InvalidHandle,"Unknown Viewer asset request.","Use a pending AddModelAsync ID.",{}});}return state_->Loader->Poll(id);}
+Result<void> Viewer::CancelModelLoad(AssetLoadId id) {auto job=GetAssetLoad(id);if (!job) {return Result<void>::Failure(job.Error());}(void)state_->Loader->Cancel(id);(void)state_->Loader->Forget(id);state_->PendingModels.erase(id);return Result<void>::Success();}
+Result<ObjectId> Viewer::CommitModelLoad(AssetLoadId job) {
+    auto status=GetAssetLoad(job);if (!status) {return Result<ObjectId>::Failure(status.Error());}if (status.Value().Failure) {return Result<ObjectId>::Failure(*status.Value().Failure);}if (status.Value().State != AssetLoadState::Ready) {return Result<ObjectId>::Failure({ErrorCode::InvalidState,"Asset request is not ready.","Poll for Ready before committing.",{}});}
+    try {const auto& options=state_->PendingModels.at(job);auto registry=state_->Assets;const auto model=registry.AddPrepared(status.Value().Model);const auto object=state_->World.AddModel(model,options.Transform,options.Parent);if (state_->AutoFrame) {const auto fit=FrameScene();if (!fit) {state_->World.RemoveObject(object);return Result<ObjectId>::Failure(fit.Error());}}state_->Assets=std::move(registry);(void)state_->Loader->Forget(job);state_->PendingModels.erase(job);if (state_->Invalidate) {state_->Invalidate();}return Result<ObjectId>::Success(object);}catch (...) {return Result<ObjectId>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Cannot publish the prepared model; the request remains available."));}
+}
+Result<void> Viewer::SetHotReload(bool enabled) {auto ready=Ready(*state_);if (!ready) {return ready;}if (state_->HotReload == enabled) {return Result<void>::Success();}state_->HotReload=enabled;state_->Watcher.Clear();if (!enabled && state_->Loader) {for (const auto& r:state_->Reloads) {(void)state_->Loader->Cancel(r.Job);(void)state_->Loader->Forget(r.Job);}state_->Reloads.clear();}if (enabled) {state_->Watcher.Synchronize(state_->Assets.Models());}return Result<void>::Success();}
+Result<std::optional<Error>> Viewer::GetAssetLoadError() const {auto ready=Ready(*state_);if (!ready) {return Result<std::optional<Error>>::Failure(ready.Error());}return Result<std::optional<Error>>::Success(state_->LastAssetError);}
+Result<std::size_t> Viewer::PollHotReload(double now) {
+    auto ready=Ready(*state_);if (!ready) {return Result<std::size_t>::Failure(ready.Error());}std::size_t count=0;if (!state_->HotReload) {return Result<std::size_t>::Success(0);}
+    try {state_->Watcher.Synchronize(state_->Assets.Models());std::vector<ModelHandle> resubmit;
+        const auto submit=[&](ModelHandle model) {if (!state_->Loader) {state_->Loader=std::make_unique<AssetLoader>();}auto r=state_->Loader->Submit(model->SourcePath,model->Settings,state_->Assets.Importers());if (!r) {state_->LastAssetError=r.Error();return;}state_->Reloads.push_back({r.Value(),std::move(model)});};
+        for (auto id:state_->Watcher.Poll(now)) {auto it=std::find_if(state_->Reloads.begin(),state_->Reloads.end(),[&](const auto& r) {return r.Before->Id == id;});if (it != state_->Reloads.end()) {it->Again=true;}else {submit(state_->Assets.Find(id));}}
+        for (std::size_t i=0;i<state_->Reloads.size();) {auto r=state_->Reloads[i];const auto job=state_->Loader->Poll(r.Job);if (!job) {throw std::runtime_error(job.Error().Message);}if (job.Value().State == AssetLoadState::Queued || job.Value().State == AssetLoadState::Importing) {++i;continue;}
+            if (state_->Assets.Find(r.Before->Id) == r.Before) {if (job.Value().State == AssetLoadState::Ready) {try {auto registry=state_->Assets;const auto model=registry.ReplacePrepared(r.Before->Id,job.Value().Model);(void)state_->World.ReplaceModel(r.Before,model);state_->Assets=std::move(registry);++count;state_->LastAssetError.reset();if (state_->Invalidate) {state_->Invalidate();}}catch (...) {state_->LastAssetError=detail::CurrentException(ErrorCode::InvalidData,"Hot Reload retained the previous compatible asset.");}}else if (job.Value().Failure) {state_->LastAssetError=job.Value().Failure;}}
+            (void)state_->Loader->Forget(r.Job);state_->Reloads.erase(state_->Reloads.begin()+i);if (r.Again) {const auto current=state_->Assets.Find(r.Before->Id);if (current) {resubmit.push_back(current);}}
+        }for (auto& model:resubmit) {submit(model);}return Result<std::size_t>::Success(count);
+    }catch (...) {state_->LastAssetError=detail::CurrentException(ErrorCode::InvalidData,"Hot Reload retained previous assets.");return Result<std::size_t>::Failure(*state_->LastAssetError);}
 }
 
 Result<void> Viewer::ReimportModel(ObjectId id) {

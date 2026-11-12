@@ -75,6 +75,7 @@ struct MeshPrimitive {
     MeshData Geometry;
     std::size_t MaterialIndex = 0;
     bool HasSkinning = false;
+    std::vector<MeshLod> Lods; // Rigid LOD1..3; imported base vertex/index order is preserved.
 };
 
 struct MeshAsset {
@@ -128,6 +129,7 @@ struct AssetInspection {
     std::size_t Meshes=0, Primitives=0, Vertices=0, Indices=0, Materials=0, Images=0;
     std::size_t Nodes=0, Bones=0, Skins=0, Animations=0, AnimationSamples=0;
     std::size_t GeometryBytes=0, ImageBytes=0;
+    std::size_t LodIndices=0;
 };
 // CPU-only validation. Throws invalid_argument for malformed data, ImportError for budgets.
 void ValidateModel(const ModelAsset& model);
@@ -160,8 +162,10 @@ public:
     ModelHandle AddPrepared(ModelHandle model); // Validated immutable candidate, cache deduplication.
     ModelHandle LoadModel(const std::filesystem::path& path, const ImportSettings& settings = {});
     ModelHandle ReimportModel(AssetId id); // Stable ID, fresh immutable data; failure preserves the cache.
+    ModelHandle ReplacePrepared(AssetId id,ModelHandle candidate); // Same source/settings, stable ID; no file IO.
     ModelHandle Find(AssetId id) const noexcept;
     std::size_t Size() const noexcept { return models_.size(); }
+    const std::vector<ModelHandle>& Models() const noexcept {return models_;}
     void Clear() noexcept { models_.clear(); }
 
 private:

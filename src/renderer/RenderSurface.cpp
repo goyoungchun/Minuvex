@@ -86,7 +86,7 @@ Result<void> RenderSurface::ApplyQuality(const QualityProfile& profile,const Sce
     applying_=true;struct Reset {bool& Flag;~Reset(){Flag=false;}}reset{applying_};
     try {
         auto next=std::move(resolved).Value();const auto& settings=*next.Effective;
-        const bool rebuild=!renderer_ || !state_.Effective || settings.MsaaSamples != state_.Effective->MsaaSamples || settings.MaxTextureSize != state_.Effective->MaxTextureSize || settings.Anisotropy != state_.Effective->Anisotropy || settings.PostProcessing != state_.Effective->PostProcessing || (settings.Shadow != ShadowMode::Off) != (state_.Effective->Shadow != ShadowMode::Off) || (settings.Lighting == LightingMode::Advanced) != (state_.Effective->Lighting == LightingMode::Advanced);
+        const bool rebuild=!renderer_ || !state_.Effective || settings.MsaaSamples != state_.Effective->MsaaSamples || settings.MaxTextureSize != state_.Effective->MaxTextureSize || settings.Anisotropy != state_.Effective->Anisotropy || settings.PostProcessing != state_.Effective->PostProcessing || settings.Lod != state_.Effective->Lod || settings.Compression != state_.Effective->Compression || (settings.Shadow != ShadowMode::Off) != (state_.Effective->Shadow != ShadowMode::Off) || (settings.Lighting == LightingMode::Advanced) != (state_.Effective->Lighting == LightingMode::Advanced);
         std::unique_ptr<Targets> targets;
         const bool resize=!targets_ || next.RenderWidth != state_.RenderWidth || next.RenderHeight != state_.RenderHeight || !state_.Effective || settings.MsaaSamples != state_.Effective->MsaaSamples || settings.PostProcessing != state_.Effective->PostProcessing;
         if (resize && width > 0 && height > 0) {targets=std::make_unique<Targets>(next.RenderWidth,next.RenderHeight,settings.MsaaSamples,settings.PostProcessing);}
@@ -125,7 +125,7 @@ bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::a
     if (debug_.View == DebugView::ShadowMap && !debugPreview_) {debugPreview_=std::make_unique<DebugPreview>(*state_.Effective);}
     const auto cpuStart=RenderClockSeconds();telemetry_->BeginGpu(cpuStart,frameMonitor_);
     struct EndGpu {GraphicsTelemetry& Telemetry;~EndGpu() {Telemetry.EndGpu();}} gpuScope{*telemetry_};
-    renderer_->SetDebugOptions(debug_);renderer_->Prepare(scene);
+    renderer_->SetDebugOptions(debug_);renderer_->SetViewport(static_cast<float>(std::max(1,outputWidth_))/std::max(1,outputHeight_),state_.RenderHeight);renderer_->Prepare(scene);
     const auto assets=renderer_->GetStats().ResidentAssetSignature;
     if (monitoredAssets_ && *monitoredAssets_ != assets) {frameMonitor_.Reset();telemetry_->ResetGpu();}
     monitoredAssets_=assets;ShadowSampling shadow;
@@ -155,6 +155,7 @@ TelemetrySnapshot RenderSurface::Telemetry(double now) {
     result.Frames.DebugRendering=debug_ != DebugOptions{} || !debugDraw_.Lines().empty();
     if (telemetry_) {result.Frames.GpuFrameMs=telemetry_->GpuTime();if (!result.Frames.GpuSampleCount) {result.Frames.AverageGpuMs=result.Frames.P95GpuMs=result.Frames.GpuFrameMs;}}
     const auto stats=Stats();result.ResidentAssetSignature=stats.ResidentAssetSignature;result.Resident.TextureBytes=stats.LogicalTextureBytes;result.Resident.BufferBytes=stats.LogicalBufferBytes;
+    result.Optimization=stats.Optimization;
     if (targets_ && state_.Effective) {result.Resident.RenderTargetBytes=RenderTargetBytes(*state_.Effective,state_.RenderWidth,state_.RenderHeight);}
     result.Resident.TotalBytes=result.Resident.TextureBytes+result.Resident.BufferBytes+result.Resident.RenderTargetBytes;
     result.PreviousQualityFrames=previousFrames_;result.PreviousQualityName=previousName_;return result;
@@ -175,7 +176,7 @@ sg_view RenderSurface::InspectionTexture(int target) const noexcept {return targ
 sg_sampler RenderSurface::InspectionSampler(int target) const noexcept {return target == 2 ? (shadow_ ? shadow_->Sampler:sg_sampler{}):(presenter_ ? presenter_->Sampler:sg_sampler{});}
 RenderDebugInfo RenderSurface::Inspect() const {
     RenderDebugInfo r;r.Live=sg_isvalid();r.Options=debug_;r.RenderedFrames=frames_;r.LineCount=debugLines_+(debug_.View == DebugView::Wireframe ? Stats().LastWireLines:0);r.LineDrawCalls=debugCalls_;
-    if (!r.Live) {return r;}const auto stats=Stats();
+    if (!r.Live) {return r;}const auto stats=Stats();r.Optimization=stats.Optimization;
     if (shadow_) {r.Passes.push_back({"Sun shadow","shadow_mesh / shadow_skin","R32F + depth, masked triangles",stats.LastShadowDrawCalls,stats.LastShadowTriangles});InspectImage(r.Resources,shadow_->Color,"Shadow depth color",true);InspectImage(r.Resources,shadow_->Depth,"Shadow depth attachment",true);}
     if (targets_) {r.Passes.push_back({"Scene",debug_.View == DebugView::ShadowMap ? "debug_preview":"mesh / skin",DebugViewName(debug_.View),debug_.View == DebugView::ShadowMap ? 1:stats.LastDrawCalls,debug_.View == DebugView::ShadowMap ? 1:stats.LastTriangles});InspectImage(r.Resources,targets_->Color,"Resolved scene color",true);InspectImage(r.Resources,targets_->Msaa,"MSAA scene color",true);InspectImage(r.Resources,targets_->Depth,"Scene depth attachment",true);InspectImage(r.Resources,targets_->PostColor,"Final post output",true);}
     if (debugCalls_) {r.Passes.push_back({"Debug overlay","debug_lines",debug_.DepthTest ? "Depth-tested lines":"Always-visible lines",debugCalls_,0});}

@@ -1,4 +1,5 @@
 #include <minuvex/Asset.h>
+#include <minuvex/Optimization.h>
 
 #include "ImportCommon.h"
 
@@ -38,6 +39,9 @@ ModelHandle ImporterRegistry::Import(const std::filesystem::path& path,const Imp
         const auto normalized=NormalizeSettings(settings);
         auto model=std::make_shared<ModelAsset>(selected->Importer(canonical,normalized));model->SourcePath=canonical;model->Settings=normalized;model->Format=selected->Format;
         if (std::find(model->Dependencies.begin(),model->Dependencies.end(),canonical) == model->Dependencies.end()) {model->Dependencies.insert(model->Dependencies.begin(),canonical);}
+        ValidateModel(*model);
+        auto info=InspectModel(*model);std::size_t remaining=normalized.MaxResourceBytes-info.GeometryBytes-info.ImageBytes;
+        for (auto& mesh:model->Meshes) {for (auto& primitive:mesh.Primitives) {if (primitive.HasSkinning || !primitive.Lods.empty()) {continue;}auto levels=GenerateMeshLods(primitive.Geometry);std::size_t bytes=0;for (const auto& level:levels) {bytes+=level.Indices.size()*sizeof(std::uint32_t);}if (bytes<=remaining) {remaining-=bytes;primitive.Lods=std::move(levels);}else {model->Warnings.push_back("LOD generation exceeds the remaining resource budget; retained LOD0.");}}}
         ValidateModel(*model);model->Status=model->Warnings.empty() ? AssetImportStatus::Ready:AssetImportStatus::ReadyWithWarnings;
         model->Id=nextAssetId.fetch_add(1);return model;
     } catch (const std::invalid_argument& e) {throw ImportError(ImportErrorCode::InvalidData,e.what());}
@@ -73,6 +77,10 @@ ModelHandle AssetRegistry::LoadModel(const std::filesystem::path& path, const Im
 ModelHandle AssetRegistry::Find(AssetId id) const noexcept {
     for (const auto& model : models_) { if (model->Id == id) { return model; } }
     return {};
+}
+ModelHandle AssetRegistry::ReplacePrepared(AssetId id,ModelHandle candidate) {
+    if (!candidate) {throw std::invalid_argument("Missing replacement candidate.");}ValidateModel(*candidate);
+    for (auto& current:models_) {if (current->Id != id) {continue;}std::error_code error;if (current->Settings != candidate->Settings || (current->SourcePath != candidate->SourcePath && (!std::filesystem::equivalent(current->SourcePath,candidate->SourcePath,error) || error))) {throw std::invalid_argument("Replacement source/settings do not match the original asset.");}auto replacement=std::make_shared<ModelAsset>(*candidate);replacement->Id=id;current=std::move(replacement);return current;}throw std::invalid_argument("Unknown replacement asset.");
 }
 
 ModelHandle AssetRegistry::ReimportModel(AssetId id) {

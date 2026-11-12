@@ -5,6 +5,7 @@
 #include <minuvex/Scene.h>
 #include <minuvex/Quality.h>
 #include <minuvex/Debug.h>
+#include <minuvex/Optimization.h>
 
 #include <sokol_gfx.h>
 #include <span>
@@ -26,6 +27,7 @@ struct MeshLighting {
     bool Advanced=false;
     DebugOptions Debug;
     float NearPlane=.1f,FarPlane=1000;
+    sg_buffer Instances{};int InstanceCount=0;unsigned Lod=0;bool Mirrored=false;
 };
 
 // Internal mesh renderer. The caller owns the graphics context and pass.
@@ -37,13 +39,15 @@ public:
     MeshRenderer(const MeshRenderer&) = delete;
     MeshRenderer& operator=(const MeshRenderer&) = delete;
 
-    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false, int samples = 1, sg_pixel_format colorFormat=SG_PIXELFORMAT_NONE, bool shadow=false);
+    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false, int samples = 1, sg_pixel_format colorFormat=SG_PIXELFORMAT_NONE, bool shadow=false,std::span<const MeshLod> lods={});
     void Draw(const Mat4& model, const Mat4& viewProjection, const DirectionalLight& light = {},
               const MaterialAsset& material = {}, sg_view texture = {}, sg_sampler sampler = {}, std::span<const Mat4> palette = {}, bool forceUnlit = false, const MeshLighting& lighting={}) const;
-    void DrawShadow(const Mat4& model,const Mat4& lightViewProjection,const MaterialAsset& material,sg_view texture,sg_sampler sampler,std::span<const Mat4> palette) const;
+    void DrawShadow(const Mat4& model,const Mat4& lightViewProjection,const MaterialAsset& material,sg_view texture,sg_sampler sampler,std::span<const Mat4> palette,const MeshLighting& instances={}) const;
     void Shutdown() noexcept;
     void PrepareWireframe(const MeshData& mesh);
     void Inspect(std::vector<DebugResource>& resources) const;
+    void PrepareInstances();
+    std::size_t TriangleCount(unsigned lod=0) const noexcept {return (lod && lod<=lodCounts_.size() ? lodCounts_[lod-1]:indexCount_)/3;}
 
 private:
     sg_buffer vertices_{};
@@ -60,6 +64,9 @@ private:
     sg_buffer edges_{};
     sg_pipeline wirePipelines_[2]{};
     int edgeIndexCount_=0;
+    std::vector<sg_buffer> lodBuffers_;std::vector<int> lodCounts_;
+    sg_shader instanceShader_{};sg_pipeline instancePipelines_[2]{};
+    sg_shader shadowInstanceShader_{};sg_pipeline shadowInstancePipelines_[2]{};
 };
 
 } // namespace lv::detail

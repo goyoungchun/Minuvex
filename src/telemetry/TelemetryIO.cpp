@@ -32,6 +32,9 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
         for (const auto t:{f.LastCpuSampleAtSeconds,f.LastGpuSampleAtSeconds}) {if (t && (!std::isfinite(*t) || *t < 0 || *t > f.CapturedAtSeconds)) {throw std::invalid_argument("Invalid frame sample timestamp.");}}
         add("frame","drawCalls",Metric<std::uint64_t>{f.DrawCalls,f.SampleCount ? MetricStatus::Measured:MetricStatus::Estimated,"Latest submitted scene draw count"},"count");
         add("frame","triangles",Metric<std::uint64_t>{f.Triangles,f.SampleCount ? MetricStatus::Measured:MetricStatus::Estimated,"Latest submitted indexed triangles"},"count");
+        const auto counter=[&](const char* key,std::uint64_t n) {add("optimization",key,Metric<std::uint64_t>{n,f.SampleCount ? MetricStatus::Measured:MetricStatus::Estimated,"Latest scene submission counters"},"count");};
+        counter("instancedObjects",s.Optimization.InstancedObjects);counter("instanceDraws",s.Optimization.InstanceDraws);counter("savedDrawCalls",s.Optimization.SavedDrawCalls);counter("sourceTriangles",s.Optimization.SourceTriangles);counter("submittedTriangles",s.Optimization.SubmittedTriangles);counter("culledParts",s.Optimization.CulledParts);
+        add("optimization","instanceBuffers",Metric<std::uint64_t>{s.Optimization.InstanceBufferBytes,MetricStatus::Estimated,"Transient instance transforms excluded from base Quality costs"},"bytes");
         const char* logical="Engine logical allocation estimate; excludes GUI/swapchain/driver overhead and deferred deletion";
         add("resident","renderTargets",Metric<std::uint64_t>{s.Resident.RenderTargetBytes,MetricStatus::Estimated,logical},"bytes");
         add("resident","textures",Metric<std::uint64_t>{s.Resident.TextureBytes,MetricStatus::Estimated,logical},"bytes");
@@ -47,11 +50,14 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
         root["hardware"]["gpuVendor"]=h.GpuVendor;root["hardware"]["gpuVendorId"]=h.GpuVendorId;root["hardware"]["gpuDeviceId"]=h.GpuDeviceId;
         root["hardware"]["capabilities"]={{"graphicsAvailable",h.Capabilities.GraphicsAvailable},{"sampleCounts",h.Capabilities.SampleCounts},{"maxRenderSize",h.Capabilities.MaxRenderSize},{"maxTextureSize",h.Capabilities.MaxTextureSize},{"maxAnisotropy",h.Capabilities.MaxAnisotropy}};
         root["hardware"]["capabilities"]["shadowMapping"]=h.Capabilities.ShadowMapping;root["hardware"]["capabilities"]["hdrPostProcessing"]=h.Capabilities.HdrPostProcessing;root["hardware"]["capabilities"]["hdrSampleCounts"]=h.Capabilities.HdrSampleCounts;
+        root["hardware"]["capabilities"]["bc3Textures"]=h.Capabilities.Bc3Textures;
         root["hardware"]["formats"]=Json::array();for (const auto& formatInfo:h.Formats) {root["hardware"]["formats"].push_back({{"name",formatInfo.Name},{"sampled",formatInfo.Sampled},{"filtered",formatInfo.Filtered},{"renderTarget",formatInfo.RenderTarget},{"msaa",formatInfo.Msaa}});}
         root["quality"]["effective"]=nullptr;
         const auto settings=[](const RenderSettings& e) {if (!std::isfinite(e.ResolutionScale) || !std::isfinite(e.LodBias)) {throw std::invalid_argument("Quality telemetry settings must be finite.");}return Json{{"resolution",static_cast<int>(e.Resolution)},{"resolutionScale",e.ResolutionScale},{"fixedWidth",e.FixedWidth},{"fixedHeight",e.FixedHeight},{"maxRenderHeight",e.MaxRenderHeight},{"msaaSamples",e.MsaaSamples},{"textures",static_cast<int>(e.Textures)},{"maxTextureSize",e.MaxTextureSize},{"anisotropy",e.Anisotropy},{"targetFps",e.TargetFps},{"onDemand",static_cast<int>(e.OnDemand)},{"lighting",static_cast<int>(e.Lighting)},{"frustumCulling",e.FrustumCulling},{"shadow",static_cast<int>(e.Shadow)},{"shadowResolution",e.ShadowResolution},{"lod",e.Lod},{"lodBias",e.LodBias},{"postProcessing",e.PostProcessing}};};
         root["quality"]["requested"]=settings(s.Quality.RequestedSettings);
         if (s.Quality.Effective) {root["quality"]["effective"]=settings(*s.Quality.Effective);}
+        root["quality"]["requested"]["instancing"]=s.Quality.RequestedSettings.Instancing;root["quality"]["requested"]["textureCompression"]=static_cast<int>(s.Quality.RequestedSettings.Compression);
+        if (s.Quality.Effective) {root["quality"]["effective"]["instancing"]=s.Quality.Effective->Instancing;root["quality"]["effective"]["textureCompression"]=static_cast<int>(s.Quality.Effective->Compression);}
         root["quality"]["custom"]=s.Quality.Requested.IsCustom();root["quality"]["allowFallback"]=s.Quality.Requested.AllowFallback;
         root["quality"]["adjustments"]=Json::array();for (const auto& a:s.Quality.Adjustments) {root["quality"]["adjustments"].push_back({{"field",a.Field},{"reason",a.Reason}});}
         const auto validated=root.dump(2); // Validate UTF-8 before any destination modification.

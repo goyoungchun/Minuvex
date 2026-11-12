@@ -11,6 +11,7 @@ void Summary(const ModelAsset& model) {
     const auto info=InspectModel(model);
     ImGui::Text("Format: %s | Meshes: %zu | Primitives: %zu",AssetFormatName(model.Format),info.Meshes,info.Primitives);
     ImGui::Text("Vertices: %zu | Triangles: %zu | Materials: %zu",info.Vertices,info.Indices/3,info.Materials);
+    ImGui::Text("Reduced LOD indices: %zu",info.LodIndices);
     ImGui::Text("Nodes: %zu | Bones: %zu | Skins: %zu | Clips: %zu",info.Nodes,info.Bones,info.Skins,info.Animations);
     ImGui::Text("Geometry: %.2f MiB | Pixels: %.2f MiB | Animation keys: %zu",info.GeometryBytes/1048576.0,info.ImageBytes/1048576.0,info.AnimationSamples);
     ImGui::Text("Bounds: (%.3g, %.3g, %.3g) - (%.3g, %.3g, %.3g)",model.ModelBounds.Min.X,model.ModelBounds.Min.Y,model.ModelBounds.Min.Z,model.ModelBounds.Max.X,model.ModelBounds.Max.Y,model.ModelBounds.Max.Z);
@@ -27,6 +28,7 @@ void EditorUI::ImportPreview() {
         ImGui::Text("%zu file(s) remaining",importQueue_.size());ImGui::TextWrapped("%s",Text(importQueue_.front().Path).c_str());
         ImGui::TextDisabled("Preview is CPU-only. The Scene/library changes only after Import.");
         bool changed=ImGui::Checkbox("Import Animation",&importSettings_.ImportAnimations);ImGui::SameLine();changed=ImGui::Checkbox("Import Material",&importSettings_.ImportMaterials)||changed;
+        if (ImGui::Checkbox("Background parsing",&backgroundImport_)) {CancelPreviewJob();importCandidate_.reset();}
         changed=ImGui::Checkbox("Generate Missing Normals",&importSettings_.GenerateMissingNormals)||changed;
         float rate=static_cast<float>(importSettings_.AnimationBakeRate);ImGui::SetNextItemWidth(170);
         if (ImGui::SliderFloat("FBX bake rate (Hz)",&rate,1,240,"%.0f")) {importSettings_.AnimationBakeRate=rate;changed=true;}
@@ -37,13 +39,14 @@ void EditorUI::ImportPreview() {
             const auto picked=picker_ ? picker_(request):nativeFiles_.Choose(request);
             if (!picked) {importError_=picked.Error();}else if (picked.Value() && !picked.Value()->empty()) {importSettings_.TextureDirectory=picked.Value()->front();changed=true;}
         }
-        if (changed) {importCandidate_.reset();importError_.reset();}
+        if (changed) {CancelPreviewJob();importCandidate_.reset();importError_.reset();}
         if (ImGui::Button("Refresh Preview")) {RefreshImportPreview(importSettings_);}
         if (!projectRoot_.empty()) {ImGui::Checkbox("Copy source + dependencies into project assets",&copyImport_);if (!copyImport_) {ImGui::TextDisabled("External references: moving the project also requires moving source files.");}}
         else {ImGui::TextDisabled("External references (no project workspace). Quick Open also preserves the originals.");}
         ImGui::Separator();
         ImGui::BeginChild("Import result",{0,-45},ImGuiChildFlags_Borders);
-        if (importError_) {ImGui::TextColored({1,.4f,.35f,1},"Import failed");ImGui::TextWrapped("%s\n%s",importError_->Message.c_str(),importError_->Hint.c_str());}
+        if (previewJob_) {ImGui::TextWrapped("Importing on the CPU worker... Parsing has no reliable percentage. Cancel discards publication; an active parser finishes privately.");}
+        else if (importError_) {ImGui::TextColored({1,.4f,.35f,1},"Import failed");ImGui::TextWrapped("%s\n%s",importError_->Message.c_str(),importError_->Hint.c_str());}
         else if (importCandidate_) {Summary(*importCandidate_);Diagnostics(*importCandidate_);}
         else {ImGui::TextWrapped("Settings changed. Refresh Preview before importing.");}
         ImGui::EndChild();
@@ -58,6 +61,7 @@ void EditorUI::ImportPreview() {
 void EditorUI::AssetInspector() {
     if (!assetInspector_) {return;}
     if (ImGui::Begin("Asset Inspector",&assetInspector_)) {
+        ImGui::Checkbox("Hot Reload source/dependencies",&hotReload_);
         ModelHandle selected;
         for (const auto& model:Document.Assets()) {if (model->Id == selectedAsset_) {selected=model;break;}}
         if (!selected && Document.Selection()) {selected=Document.GetScene().GetObject(Document.Selection()).Model;}
