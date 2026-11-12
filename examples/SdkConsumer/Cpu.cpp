@@ -10,10 +10,10 @@ int main(int argc, char** argv) {
         const auto& info=lv::GetBuildInfo();
         if (info.Version != lv::Version || info.PointerBits != sizeof(void*)*8) {return 1;}
         const auto output=std::filesystem::path(argv[2]);std::filesystem::create_directories(output);
-        lv::EditorDocument doc;const auto asset=doc.ImportModel(argv[1]);
-        if (!asset) {std::fprintf(stderr,"%s\n",asset.Error().Message.c_str());return 1;}
-        if (!doc.PlaceModel(asset.Value()) || !doc.SetLocalLights({{{0,2,0},{1,1,1},1,5}}, {})) {return 1;}
-        if (!doc.ReimportModel(asset.Value())) {return 1;}
+        lv::EditorDocument doc;const auto opened=doc.OpenModel(argv[1]);
+        if (!opened) {std::fprintf(stderr,"%s\n",opened.Error().Message.c_str());return 1;}
+        if (!doc.SetLocalLights({{{0,2,0},{1,1,1},1,5}}, {})) {return 1;}
+        if (!doc.ReimportModel(doc.GetScene().GetObject(opened.Value()).Model->Id)) {return 1;}
         const auto file=output/"Example.mvxscene.json";
         if (!doc.Save(file)) {return 1;}
         lv::EditorDocument reopened;if (!reopened.Open(file) || reopened.GetScene().Size() != 1 || reopened.GetScene().PointLights.size() != 1) {return 1;}

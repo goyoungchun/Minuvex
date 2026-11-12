@@ -6,7 +6,7 @@
 namespace lv {
 
 // CPU editing model used by the Editor UI; no window, ImGui or graphics dependency.
-// Single caller thread, references remain valid until New/Open or mutation.
+// Single caller thread, references remain valid until New/Open/OpenModel or mutation.
 class EditorDocument final {
 public:
     const Scene& GetScene() const noexcept { return world_; }
@@ -16,7 +16,9 @@ public:
     bool IsDirty() const noexcept { return dirty_; }
     void New(); // Caller handles unsaved-change confirmation.
     Result<void> Open(const std::filesystem::path& path); // Transactional replacement.
-    Result<void> Save(const std::filesystem::path& path); // Save As; path/dirty change only on success.
+    Result<ObjectId> OpenModel(const std::filesystem::path& path, const ImportSettings& settings = {}, float aspect = 1);
+    // Quick Open: one model in an unsaved Scene with fitted camera. Failure preserves the document.
+    Result<void> Save(const std::filesystem::path& path); // Save As; protects source resources, path/dirty change only on success.
     Result<AssetId> ImportModel(const std::filesystem::path& path, const ImportSettings& settings = {});
     Result<void> ReimportModel(AssetId asset); // Atomically replace the library and all compatible instances.
     Result<ObjectId> PlaceModel(AssetId asset, const Transform& transform = {}, ObjectId parent = NoObject);

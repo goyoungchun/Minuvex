@@ -1,5 +1,7 @@
 #include <minuvex/EditorDocument.h>
 #include "TestHarness.h"
+#include "EditorPreferences.h"
+#include "CameraController.h"
 #include <json.hpp>
 
 #include <limits>
@@ -123,9 +125,58 @@ void InvalidArchives() {
     const auto savedPath = doc.Path();
     Check(!doc.Open(file) && doc.GetScene().Size() == 1 && doc.Selection() == placed.Value() && doc.Assets().size() == 1 && doc.Path() == savedPath && doc.IsDirty(),"partial asset-load failure preserves Scene, library, selection, path and dirty state");
 }
+void QuickOpenAndPreferences() {
+    TemporaryDirectory temp;
+    const auto source = temp.Path/std::filesystem::path(L"한글 model.glb");
+    std::filesystem::copy_file(Fixture("SharedBox.glb"),source);
+    const auto bytes = Read(source);
+    lv::EditorDocument doc;
+    auto opened = doc.OpenModel(source,{},1.5f);
+    Check(opened && doc.GetScene().Size() == 1 && doc.Assets().size() == 1 && doc.Selection() == opened.Value() && doc.IsDirty() && doc.Path().empty(),"Quick Open creates a selected, unsaved one-model Scene without a project");
+    Check(lv::detail::PickSceneObject(doc.GetScene(),1.5f,0,0) == opened.Value(),"Quick Open fits the camera onto the model");
+    const auto scene = temp.File("view.mvxscene.json");
+    Check(bool(doc.Save(scene)),"Quick Open can be saved as a Scene");
+    const auto preserved = doc.Selection();
+    Write(temp.File("bad.gltf"),"{}");
+    for (const auto& file : {temp.File("missing.glb"),temp.File("bad.gltf"),temp.File("unsupported.obj")}) {
+        auto failed = doc.OpenModel(file);
+        Check(!failed && failed.Error().SourcePath == file && doc.Selection() == preserved && doc.GetScene().Size() == 1 && doc.Assets().size() == 1 && doc.Path() == scene && !doc.IsDirty(),"failed Quick Open preserves the entire document");
+    }
+    Check(!doc.OpenModel(source,{},0) && doc.Selection() == preserved && doc.Path() == scene && !doc.IsDirty(),"camera-fit failure also preserves the previous document");
+    Check(!doc.Save(source) && Read(source) == bytes && doc.Path() == scene && !doc.IsDirty(),"Scene Save cannot overwrite the referenced original model");
+    // Focus and picking account for hierarchy, visibility and nearest geometry.
+    lv::Scene world; const auto group = world.CreateObject("group");
+    lv::Transform t; t.Position.X=-2; const auto left=world.AddModel(doc.Assets().front(),t,group);
+    t.Position.X=2; const auto right=world.AddModel(doc.Assets().front(),t);
+    world.MainCamera.Position={0,0,6}; world.MainCamera.Target={};
+    Check(lv::detail::PickSceneObject(world,1,-.58f,0) == left && lv::detail::PickSceneObject(world,1,.58f,0) == right && !lv::detail::PickSceneObject(world,1,0,.95f),"viewport picking selects independent instances and clears on empty space");
+    world.SetVisible(group,false);
+    Check(!lv::detail::PickSceneObject(world,1,-.58f,0),"hidden ancestors exclude their models from picking");
+    const auto& bounds=doc.Assets().front()->ModelBounds;
+    const auto center=(bounds.Min.X+bounds.Max.X)*.5f;
+    Check(Near(lv::detail::FitSceneCamera(world,1,right).Target.X,2+center),"focus frames only the selected object");
+    Rejects([&] {(void)lv::detail::FitSceneCamera(world,1,group);},"focus on an invisible subtree is rejected");
+    world.SetVisible(group,true);
+    Check(Near(lv::detail::FitSceneCamera(world,1,group).Target.X,-2+center),"focus frames the selected subtree");
+    t.Position={2,0,1}; const auto nearer=world.AddModel(doc.Assets().front(),t);
+    Check(lv::detail::PickSceneObject(world,1,.58f,0) == nearer,"nearest visible bounds win overlapping picks");
+    Rejects([&] {(void)lv::detail::PickSceneObject(world,1,2,0);},"invalid pick coordinates rejected");
+    using namespace lv::editor;
+    EditorPreferences preferences;
+    preferences.Touch(source,RecentKind::Model);preferences.Touch(scene,RecentKind::Scene);preferences.Touch(source,RecentKind::Model);
+    Check(preferences.Recent.size() == 2 && preferences.Recent.front().Path == source,"recents deduplicate and put the latest file first");
+    const auto settings=temp.File("preferences.json");Check(bool(preferences.Save(settings)),"preferences save UTF-8 paths atomically");
+    EditorPreferences loaded;Check(bool(loaded.Load(settings)) && loaded.Recent.size() == 2 && loaded.Recent.front().Path == source && loaded.Recent.back().Kind == RecentKind::Scene && loaded.Directory == source.parent_path(),"recent kind and Unicode paths round trip");
+    const auto valid=Read(settings);Write(settings,"{");
+    Check(!loaded.Load(settings) && loaded.Recent.size() == 2 && loaded.Recent.front().Path == source,"corrupt preferences retain prior session state");
+    Write(settings,valid);loaded.Directory.clear();
+    Check(!loaded.Save(settings) && Read(settings) == valid,"invalid preferences cannot replace an existing settings file");
+    for (int i=0;i<15;++i) {preferences.Touch(temp.File(("missing-"+std::to_string(i)+".glb").c_str()),RecentKind::Model);}
+    Check(preferences.Recent.size() == 12 && preferences.Save(settings) && loaded.Load(settings) && loaded.Recent.size() == 12,"recent history is bounded and missing files remain reopenable entries");
+}
 }
 int main() {
-    try { RoundTrip(); InvalidArchives(); }
+    try { RoundTrip(); InvalidArchives(); QuickOpenAndPreferences(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

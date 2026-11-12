@@ -1,4 +1,12 @@
 {
+  "nativefiledialog_extended": {
+    "source": "https://github.com/btzy/nativefiledialog-extended",
+    "version": "v1.4.1",
+    "revision": "65b2f070a0fcfee0d453a64e770a217ab0b6ff4f",
+    "archiveSha256": "4a01eafa921169f009f3e83bea8e287d9e5d0b94ca9064cf7f0a546652d7c884",
+    "license": "zlib (fetched source LICENSE)",
+    "build": "cmake/Editor.cmake (Editor only; not part of SDK binaries)"
+  },
   "sokol": {
     "source": "https://github.com/floooh/sokol",
     "revision": "f3a42297dfe64edb390deaa5883728a558499eb5",

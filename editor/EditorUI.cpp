@@ -42,42 +42,98 @@ bool RotationInput(Quaternion& value) {
     return true;
 }
 }
-void EditorUI::ShowError(const Error& error) { error_ = error.Message + "\n" + error.Hint + (error.SourcePath.empty() ? "" : "\n"+Text(error.SourcePath)); }
+void EditorUI::Record(ConsoleLevel level,std::string message,std::filesystem::path source,ObjectId object) {
+    if (message.size() > 8192) {std::size_t end=8192;while (end && (static_cast<unsigned char>(message[end])&0xC0) == 0x80) {--end;}message.resize(end);}
+    if (consoleEntries_.size() == 256) {consoleEntries_.erase(consoleEntries_.begin());}
+    consoleEntries_.push_back({level,detail::RenderClockSeconds(),std::move(message),std::move(source),object});
+}
+void EditorUI::ShowError(const Error& error,ObjectId object) { error_ = error.Message + "\n" + error.Hint + (error.SourcePath.empty() ? "" : "\n"+Text(error.SourcePath));Record(ConsoleLevel::Error,error.Message+"\n"+error.Hint,error.SourcePath,object); }
+void EditorUI::InitializeSession(std::filesystem::path preferences,std::filesystem::path sample,std::filesystem::path documentation,bool persist) {
+    preferencesPath_=std::move(preferences);samplePath_=std::move(sample);documentationPath_=std::move(documentation);persistPreferences_=persist;
+    if (persist) {auto loaded=preferences_.Load(preferencesPath_);if (!loaded) {Record(ConsoleLevel::Warning,loaded.Error().Message,preferencesPath_);}else {std::error_code ec;if (std::filesystem::is_directory(preferences_.Directory,ec)) {directory_=preferences_.Directory;}}}
+}
+void EditorUI::PersistPreferences() {
+    if (!persistPreferences_) {return;}preferences_.Directory=directory_;const auto saved=preferences_.Save(preferencesPath_);if (!saved) {Record(ConsoleLevel::Warning,saved.Error().Message,preferencesPath_);}
+}
+void EditorUI::Remember(const std::filesystem::path& path,RecentKind kind) {try {preferences_.Touch(path,kind);directory_=preferences_.Directory;PersistPreferences();}catch (const std::exception& e) {Record(ConsoleLevel::Warning,e.what(),preferencesPath_);}}
+void EditorUI::Shutdown() noexcept {try {PersistPreferences();}catch (...) {}Viewport.Clear();}
 void EditorUI::Import(const std::filesystem::path& path, bool place) {
+    if (!ModelFile(path)) {ShowError({ErrorCode::UnsupportedFeature,"This stage opens glTF/GLB models; OBJ/FBX arrive in Phase 6.","Choose a .gltf or .glb file.",path});return;}
     auto imported = Document.ImportModel(path);
     if (!Report(imported)) { return; }
     selectedAsset_ = imported.Value();
     if (place && Report(Document.PlaceModel(selectedAsset_))) { FrameScene(); }
     status_ = "Imported " + Text(path.filename());
+    welcome_=false;Remember(path,RecentKind::Model);Record(ConsoleLevel::Info,status_,path);
+    for (const auto& model:Document.Assets()) {if (model->Id == selectedAsset_) {for (const auto& warning:model->Warnings) {Record(ConsoleLevel::Warning,warning,path);}}}
 }
 void EditorUI::FrameScene() {
     try {
         const float aspect = Viewport.Aspect();
-        Report(Document.SetCamera(detail::FitSceneCamera(Document.GetScene(),aspect)));
+        Report(Document.SetCamera(detail::FitSceneCamera(Document.GetScene(),aspect,Document.Selection())),Document.Selection());
     } catch (const std::exception& e) { ShowError({ErrorCode::InvalidState,e.what(),"Place a visible model in the Scene first.",{}}); }
 }
 void EditorUI::Ask(Action action) { pending_ = action; if (!Document.IsDirty()) { ApplyPending(); } }
 void EditorUI::RequestOpen(const std::filesystem::path& path) { openPath_ = path; Ask(Action::Open); }
+void EditorUI::RequestQuickOpen(const std::filesystem::path& path) {openPath_=path;Ask(Action::QuickOpen);}
 void EditorUI::RequestNew() { Ask(Action::New); }
 void EditorUI::RequestQuit() { Ask(Action::Quit); }
 void EditorUI::ApplyPending() {
     switch (pending_) {
-    case Action::New: Document.New(); selectedAsset_ = 0; controls_.Reset(); status_ = "New Scene"; break;
+    case Action::New: Document.New(); selectedAsset_ = 0; controls_.Reset();welcome_=false; status_ = "New Scene"; break;
     case Action::Open:
-        if (Report(Document.Open(openPath_))) { selectedAsset_ = 0; controls_.Reset(); status_ = "Opened " + Text(openPath_); }
+        if (Report(Document.Open(openPath_))) { selectedAsset_ = 0; controls_.Reset();welcome_=false;projectRoot_.clear(); status_ = "Opened " + Text(openPath_);Remember(openPath_,RecentKind::Scene);Record(ConsoleLevel::Info,status_,openPath_); }
         break;
+    case Action::QuickOpen: {
+        if (!ModelFile(openPath_)) {ShowError({ErrorCode::UnsupportedFeature,"This stage opens glTF/GLB models; OBJ/FBX arrive in Phase 6.","Choose a .gltf or .glb file.",openPath_});break;}
+        const auto opened=Document.OpenModel(openPath_,{},Viewport.Aspect());
+        if (Report(opened)) {selectedAsset_=Document.GetScene().GetObject(opened.Value()).Model->Id;controls_.Reset();welcome_=false;projectRoot_.clear();status_="Quick Open: "+Text(openPath_.filename());Remember(openPath_,RecentKind::Model);Record(ConsoleLevel::Info,status_,openPath_,opened.Value());for (const auto& warning:Document.Assets().front()->Warnings) {Record(ConsoleLevel::Warning,warning,openPath_);}}
+        break;
+    }
+    case Action::Project: {
+        std::filesystem::path root,assets;
+        try {
+            root=std::filesystem::absolute(openPath_).lexically_normal();assets=root/"assets";
+            if (!std::filesystem::is_directory(root)) {throw std::invalid_argument("Choose an existing workspace folder.");}
+            std::filesystem::create_directories(assets);std::filesystem::create_directories(root/"scenes");
+        } catch (const std::exception& e) {
+            ShowError({ErrorCode::SceneIo,e.what(),"Choose a writable project folder; the previous Scene was retained.",openPath_});break;
+        }
+        Document.New();selectedAsset_=0;controls_.Reset();welcome_=false;
+        projectRoot_=std::move(root);directory_=std::move(assets);PersistPreferences();
+        status_="Workspace: "+Text(projectRoot_);Record(ConsoleLevel::Info,status_,projectRoot_);
+        break;
+    }
     case Action::Quit: quit_ = true; break;
     default: break;
     }
     pending_ = Action::None;
 }
 void EditorUI::FileDialog(Dialog type) {
-    dialog_ = type;
-    pathInput_ = type == Dialog::Save ? (Document.Path().empty() ? Text(directory_/"Scene.mvxscene.json") : Text(Document.Path())) : Text(directory_) + "/";
-    if (type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad) { poseObject_ = Document.Selection(); pathInput_ = Text(directory_/"Pose.mvxpose.json"); }
-    if (type == Dialog::QualitySave || type == Dialog::QualityLoad) {pathInput_=Text(directory_/"Profile.mvxquality.json");}
-    if (type == Dialog::TelemetryJson || type == Dialog::TelemetryCsv) {pathInput_=Text(directory_/(type == Dialog::TelemetryJson ? "Telemetry.json":"Telemetry.csv"));}
+    controls_.Reset();cameraDrag_=false;dialog_=type;
+    FilePickerRequest request;request.Directory=directory_;
+    request.Title=type == Dialog::QuickOpen ? "Open Model":type == Dialog::Import ? "Import Assets":type == Dialog::Open ? "Open Scene":type == Dialog::Save ? "Save Scene As":type == Dialog::Project ? "Choose a project workspace folder":"Minuvex";
+    const bool save=type == Dialog::Save || type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::QualitySave || type == Dialog::TelemetryJson || type == Dialog::TelemetryCsv;
+    request.Mode=save ? FilePickerMode::Save:type == Dialog::Import ? FilePickerMode::Multiple:type == Dialog::Project ? FilePickerMode::Folder:FilePickerMode::Open;
+    request.Filter=(type == Dialog::QuickOpen || type == Dialog::Import) ? FilePickerFilter::Model:type == Dialog::Open || type == Dialog::Save ? FilePickerFilter::Scene:type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad ? FilePickerFilter::Pose:type == Dialog::QualitySave || type == Dialog::QualityLoad ? FilePickerFilter::Quality:type == Dialog::TelemetryCsv ? FilePickerFilter::Csv:FilePickerFilter::Json;
+    request.Name=type == Dialog::Save ? (Document.Path().empty() ? "Scene.mvxscene.json":Text(Document.Path().filename())):type == Dialog::QualitySave ? "Profile.mvxquality.json":type == Dialog::TelemetryCsv ? "Telemetry.csv":type == Dialog::TelemetryJson ? "Telemetry.json":"Pose.mvxpose.json";
+    if (type == Dialog::Save && !Document.Path().empty()) {request.Directory=Document.Path().parent_path();}
+    else if (type == Dialog::Save && !projectRoot_.empty()) {request.Directory=projectRoot_/"scenes";}
+    if (type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad) {poseObject_=Document.Selection();}
+    const auto selected=picker_ ? picker_(request):nativeFiles_.Choose(request);dialog_=Dialog::None;controls_.Reset();
+    if (!Report(selected)) {return;}
+    if (!selected.Value()) {if (save) {pending_=Action::None;}return;}
+    const auto paths=*selected.Value();if (paths.empty()) {return;}
+    if (save) {if (SaveDialog(type,paths.front()) && type != Dialog::Save) {directory_=paths.front().parent_path();PersistPreferences();}return;}
+    if (type == Dialog::QuickOpen) {RequestQuickOpen(paths.front());}
+    else if (type == Dialog::Open) {RequestOpen(paths.front());}
+    else if (type == Dialog::Project) {openPath_=paths.front();Ask(Action::Project);}
+    else if (type == Dialog::PoseLoad) {Report(Document.LoadPoseFile(poseObject_,paths.front()),poseObject_);}
+    else if (type == Dialog::QualityLoad) {LoadQualityProfile(paths.front());}
+    else {for (const auto& path:paths) {Import(path,false);}}
 }
+void EditorUI::ChooseFiles(EditorFileAction action) {FileDialog(action == EditorFileAction::OpenModel ? Dialog::QuickOpen:action == EditorFileAction::OpenScene ? Dialog::Open:action == EditorFileAction::ImportAssets ? Dialog::Import:action == EditorFileAction::NewProject ? Dialog::Project:Dialog::Save);}
+void EditorUI::ResolvePending(UnsavedChoice choice) {if (choice == UnsavedChoice::Cancel) {pending_=Action::None;}else if (choice == UnsavedChoice::Discard) {ApplyPending();}else if (Document.Path().empty()) {FileDialog(Dialog::Save);}else {Save(Document.Path());}}
 bool EditorUI::SaveDialog(Dialog type, const std::filesystem::path& path) {
     if (type == Dialog::Save) { return Save(path); }
     if (type == Dialog::QualitySave) {return Report(SaveQuality(qualityDraft_,path));}
@@ -94,18 +150,28 @@ Result<void> EditorUI::ApplyQualityProfile(const QualityProfile& profile) {
 bool EditorUI::Save(const std::filesystem::path& path) {
     if (!Report(Document.Save(path))) { return false; }
     status_ = "Saved " + Text(Document.Path());
+    Remember(Document.Path(),RecentKind::Scene);Record(ConsoleLevel::Info,status_,Document.Path());
     if (pending_ != Action::None) { ApplyPending(); }
     return true;
 }
 void EditorUI::Menu() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Open Model...","Ctrl+O")) { FileDialog(Dialog::QuickOpen); }
+            if (ImGui::MenuItem("Open Scene...","Ctrl+Shift+O")) { FileDialog(Dialog::Open); }
+            if (ImGui::MenuItem("Import Assets...")) { FileDialog(Dialog::Import); }
+            ImGui::Separator();
             if (ImGui::MenuItem("New Scene","Ctrl+N")) { RequestNew(); }
-            if (ImGui::MenuItem("Open Scene...","Ctrl+O")) { FileDialog(Dialog::Open); }
+            if (ImGui::MenuItem("New Project (workspace)...")) {FileDialog(Dialog::Project);}
             if (ImGui::MenuItem("Save","Ctrl+S")) { if (Document.Path().empty()) { FileDialog(Dialog::Save); } else { Save(Document.Path()); } }
             if (ImGui::MenuItem("Save As...","Ctrl+Shift+S")) { FileDialog(Dialog::Save); }
             ImGui::Separator();
-            if (ImGui::MenuItem("Import glTF / GLB...")) { FileDialog(Dialog::Import); }
+            if (ImGui::BeginMenu("Recent Files",!preferences_.Recent.empty())) {
+                std::optional<RecentFile> open;
+                for (std::size_t i=0;i<preferences_.Recent.size();++i) {const auto& recent=preferences_.Recent[i];ImGui::PushID(static_cast<int>(i));if (ImGui::MenuItem(Text(recent.Path).c_str())) {open=recent;}ImGui::PopID();}
+                ImGui::EndMenu();
+                if (open) {if (open->Kind == RecentKind::Model) {RequestQuickOpen(open->Path);}else {RequestOpen(open->Path);}}
+            }
             if (ImGui::MenuItem("Quit")) { RequestQuit(); }
             ImGui::EndMenu();
         }
@@ -115,7 +181,9 @@ void EditorUI::Menu() {
             ImGui::MenuItem("Bone Inspector",nullptr,&bones_); ImGui::MenuItem("Animation Controls",nullptr,&animation_);
             ImGui::MenuItem("Quality Settings",nullptr,&quality_);
             ImGui::MenuItem("Performance",nullptr,&performance_);
-            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = performance_ = true; }
+            ImGui::MenuItem("Console",nullptr,&console_);
+            ImGui::MenuItem("Welcome",nullptr,&welcome_);
+            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = performance_ = console_ = true; }
             ImGui::EndMenu();
         }
         ImGui::Separator();
@@ -124,11 +192,11 @@ void EditorUI::Menu() {
         ImGui::EndMainMenuBar();
     }
     const auto& io = ImGui::GetIO();
-    if ((io.KeyCtrl || io.KeySuper) && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)) {
+    if ((io.KeyCtrl || io.KeySuper) && !io.WantTextInput && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)) {
         if (ImGui::IsKeyPressed(ImGuiKey_S,false)) {
             if (io.KeyShift || Document.Path().empty()) { FileDialog(Dialog::Save); } else { Save(Document.Path()); }
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_O,false)) { FileDialog(Dialog::Open); }
+        if (ImGui::IsKeyPressed(ImGuiKey_O,false)) { FileDialog(io.KeyShift ? Dialog::Open:Dialog::QuickOpen); }
         if (ImGui::IsKeyPressed(ImGuiKey_N,false)) { RequestNew(); }
     }
 }
@@ -148,12 +216,13 @@ void EditorUI::Dockspace() {
         ImGui::DockBuilderDockWindow("Hierarchy",left); ImGui::DockBuilderDockWindow("Inspector",right);
         ImGui::DockBuilderDockWindow("Asset Browser",bottom); ImGui::DockBuilderDockWindow("Viewport",center);
         ImGui::DockBuilderDockWindow("Bone Inspector",right); ImGui::DockBuilderDockWindow("Animation Controls",bottom);
+        ImGui::DockBuilderDockWindow("Console",bottom);
         ImGui::DockBuilderDockWindow("Quality Settings",right);
         ImGui::DockBuilderDockWindow("Performance",right);
         ImGui::DockBuilderFinish(dock);
     }
     // Add Phase 5 panels to a saved Phase 4 layout without resetting user splits.
-    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"}}) {
+    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"},std::pair{"Console","Asset Browser"}}) {
         if (!ImGui::FindWindowSettingsByID(ImHashStr(panel.first))) {
             const auto* anchor = ImGui::FindWindowSettingsByID(ImHashStr(panel.second));
             ImGui::DockBuilderDockWindow(panel.first,anchor && anchor->DockId ? anchor->DockId : dock);
@@ -215,7 +284,7 @@ void EditorUI::Inspector() {
             bool changed = VecInput("Position",t.Position); changed = RotationInput(t.Rotation) || changed; changed = VecInput("Scale",t.Scale,0.01f) || changed;
             if (changed) { Report(Document.SetTransform(id,t)); }
             ImGui::TextWrapped("%s",object.Model ? Text(object.Model->SourcePath.filename()).c_str() : "Empty object");
-            if (ImGui::Button("Delete subtree")) { Report(Document.RemoveObject(id)); }
+            if (ImGui::Button("Delete subtree...")) { deleteObject_=id; }
             ImGui::Separator();
         } else { ImGui::TextUnformatted("Select an object in Hierarchy."); }
         if (ImGui::CollapsingHeader("Camera")) {
@@ -226,7 +295,7 @@ void EditorUI::Inspector() {
             if (ImGui::DragFloat("FOV (deg)",&fov,0.2f,1,175)) { camera.VerticalFovRadians = fov*std::numbers::pi_v<float>/180; changed = true; }
             changed = ImGui::DragFloat("Near",&camera.NearPlane,0.01f) || changed; changed = ImGui::DragFloat("Far",&camera.FarPlane,1) || changed;
             if (changed) { Report(Document.SetCamera(camera)); }
-            if (ImGui::Button("Frame Scene")) { FrameScene(); }
+            if (ImGui::Button("Focus selected")) { FrameScene(); }
         }
         if (ImGui::CollapsingHeader("Directional Light")) {
             auto light = Document.GetScene().Sun;
@@ -376,9 +445,11 @@ void EditorUI::QualitySettings() {
     }ImGui::End();
 }
 void EditorUI::AssetBrowser() {
+    std::fill(std::begin(assetRect_),std::end(assetRect_),0.0f);
     if (!assets_) { return; }
     if (ImGui::Begin("Asset Browser",&assets_)) {
-        if (ImGui::Button("Import path...")) { FileDialog(Dialog::Import); }
+        const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();assetRect_[0]=pos.x;assetRect_[1]=pos.y;assetRect_[2]=pos.x+size.x;assetRect_[3]=pos.y+size.y;
+        if (ImGui::Button("Import Assets...")) { FileDialog(Dialog::Import); }
         ImGui::SameLine(); if (ImGui::Button("Up")) { directory_ = directory_.parent_path(); }
         ImGui::SameLine(); ImGui::TextUnformatted(Text(directory_).c_str());
         ImGui::SetNextItemWidth(200); ImGui::InputTextWithHint("##filter","Filter files",&filter_);
@@ -433,12 +504,13 @@ void EditorUI::AssetBrowser() {
 void EditorUI::ViewportPanel() {
     if (!viewport_) { controls_.Reset(); cameraDrag_ = false; Viewport.Resize(0,0); return; }
     if (ImGui::Begin("Viewport",&viewport_)) {
-        if (ImGui::Button("Frame (F)")) { FrameScene(); }
-        ImGui::SameLine(); ImGui::TextUnformatted("Left: Orbit  |  Right/Middle: Pan  |  Wheel: Zoom");
+        if (ImGui::Button("Focus selected (F)")) { FrameScene(); }
+        ImGui::SameLine(); ImGui::TextUnformatted("Left: Select  |  Right: Orbit  |  Middle: Pan  |  Wheel: Zoom");
         const auto available = ImGui::GetContentRegionAvail(); const auto& io = ImGui::GetIO();
         if (available.x > 1 && available.y > 1) {
             Viewport.Resize(static_cast<int>(std::min(65536.0f,available.x*sapp_dpi_scale())),static_cast<int>(std::min(65536.0f,available.y*sapp_dpi_scale())));
             ImGui::Image(simgui_imtextureid(Viewport.Texture()),available);
+            const auto imageMin=ImGui::GetItemRectMin();
             const bool hovered = ImGui::IsItemHovered();
             if (ImGui::BeginDragDropTarget()) {
                 if (const auto* p = ImGui::AcceptDragDropPayload("MVX_ASSET")) { if (Report(Document.PlaceModel(*static_cast<const AssetId*>(p->Data)))) { FrameScene(); } }
@@ -451,8 +523,8 @@ void EditorUI::ViewportPanel() {
                 auto camera = Document.GetScene().MainCamera;
                 ViewerInputEvent event; event.Shift = io.KeyShift;
                 bool changed = false;
-                for (int button = 0; button < 3; ++button) {
-                    event.Button = button == 0 ? ViewerMouseButton::Left : button == 1 ? ViewerMouseButton::Right : ViewerMouseButton::Middle;
+                for (int button = 1; button < 3; ++button) {
+                    event.Button = button == 1 ? ViewerMouseButton::Left : ViewerMouseButton::Middle;
                     if (hovered && ImGui::IsMouseClicked(button)) { event.Type = ViewerInputType::MouseDown; controls_.Process(camera,event,{},static_cast<int>(available.y)); cameraDrag_ = true; }
                     if (ImGui::IsMouseReleased(button)) { event.Type = ViewerInputType::MouseUp; controls_.Process(camera,event,{},static_cast<int>(available.y)); }
                 }
@@ -460,56 +532,71 @@ void EditorUI::ViewportPanel() {
                 if (!io.MouseDown[0] && !io.MouseDown[1] && !io.MouseDown[2]) { cameraDrag_ = false; }
                 if (hovered && io.MouseWheel != 0) { event.Type = ViewerInputType::Scroll; event.ScrollY = io.MouseWheel; changed = controls_.Process(camera,event,{},static_cast<int>(available.y)) || changed; }
                 if (changed) { Report(Document.SetCamera(camera)); }
-                if (hovered && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_F,false)) { FrameScene(); }
+                if (hovered && !io.WantTextInput && ImGui::IsMouseClicked(0)) {try {Report(Document.Select(detail::PickSceneObject(Document.GetScene(),Viewport.Aspect(),(io.MousePos.x-imageMin.x)/available.x*2-1,1-(io.MousePos.y-imageMin.y)/available.y*2)));ImGui::SetWindowFocus();}catch (const std::exception& e) {ShowError({ErrorCode::InvalidArgument,e.what(),"Check the camera and visible model bounds.",{}});}}
+                if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput) {if (ImGui::IsKeyPressed(ImGuiKey_F,false)) {FrameScene();}if (ImGui::IsKeyPressed(ImGuiKey_Delete,false) && Document.Selection()) {deleteObject_=Document.Selection();}if (ImGui::IsKeyPressed(ImGuiKey_Escape,false)) {Report(Document.Select(NoObject));controls_.Reset();cameraDrag_=false;}}
             }
         } else { Viewport.Resize(0,0); }
     } else { controls_.Reset(); cameraDrag_ = false; Viewport.Resize(0,0); }
     ImGui::End();
 }
+void EditorUI::DropFiles(const std::vector<std::filesystem::path>& paths,float x,float y) {
+    if (dialog_ != Dialog::None || pending_ != Action::None) {Record(ConsoleLevel::Warning,"Finish the current operation before dropping files.");return;}
+    const bool library=assets_ && x >= assetRect_[0] && y >= assetRect_[1] && x < assetRect_[2] && y < assetRect_[3];
+    for (const auto& path:paths) {
+        auto name=Text(path.filename());std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c) {return static_cast<char>(std::tolower(c));});
+        if (name.ends_with(".mvxquality.json")) {LoadQualityProfile(path);break;}
+        if (name.ends_with(".mvxpose.json")) {Report(Document.LoadPoseFile(Document.Selection(),path),Document.Selection());break;}
+        if (name.ends_with(".json")) {RequestOpen(path);break;}
+        Import(path,!library);
+    }
+}
+void EditorUI::Welcome() {
+    if (!welcome_ || Document.GetScene().Size() || !Document.Assets().empty()) {return;}
+    const auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos({viewport->WorkPos.x+viewport->WorkSize.x*.5f,viewport->WorkPos.y+viewport->WorkSize.y*.45f},ImGuiCond_Appearing,{.5f,.5f});
+    ImGui::SetNextWindowSize({560,0},ImGuiCond_Always);
+    if (ImGui::Begin("Welcome to Minuvex",&welcome_,ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("MINUVEX");ImGui::TextWrapped("Open a model and start inspecting. No project is required.");ImGui::Spacing();
+        if (ImGui::Button("Open Model",{520,40})) {FileDialog(Dialog::QuickOpen);}
+        if (ImGui::Button("Open Scene",{255,32})) {FileDialog(Dialog::Open);}ImGui::SameLine();if (ImGui::Button("New Project",{255,32})) {FileDialog(Dialog::Project);}
+        ImGui::TextDisabled("Supported now: glTF / GLB. OBJ / FBX: Phase 6.");ImGui::Separator();ImGui::TextUnformatted("Recent Files");
+        std::optional<RecentFile> open;
+        if (preferences_.Recent.empty()) {ImGui::TextDisabled("Your opened models and saved Scenes will appear here.");}
+        for (std::size_t i=0;i<preferences_.Recent.size();++i) {const auto& entry=preferences_.Recent[i];std::error_code ec;const bool exists=std::filesystem::is_regular_file(entry.Path,ec);ImGui::PushID(static_cast<int>(i));const auto label=(exists ? "":"[missing] ")+Text(entry.Path.filename());if (ImGui::Selectable(label.c_str())) {open=entry;}if (ImGui::IsItemHovered()) {ImGui::SetTooltip("%s",Text(entry.Path).c_str());}ImGui::PopID();}
+        if (open) {if (open->Kind == RecentKind::Model) {RequestQuickOpen(open->Path);}else {RequestOpen(open->Path);}}
+        ImGui::Separator();if (ImGui::Button("Sample Scene")) {RequestQuickOpen(samplePath_);}ImGui::SameLine();if (ImGui::Button("Documentation")) {Report(NativeFiles::OpenPath(documentationPath_));}ImGui::SameLine();if (ImGui::Button("Clear Recent")) {preferences_.Recent.clear();PersistPreferences();}
+    }ImGui::End();
+}
+void EditorUI::Console() {
+    if (!console_) {return;}
+    if (ImGui::Begin("Console",&console_)) {
+        ImGui::Checkbox("Info",&consoleInfo_);ImGui::SameLine();ImGui::Checkbox("Warnings",&consoleWarnings_);ImGui::SameLine();ImGui::Checkbox("Errors",&consoleErrors_);ImGui::SameLine();if (ImGui::Button("Clear")) {consoleEntries_.clear();}
+        ImGui::InputTextWithHint("##console-filter","Filter messages",&consoleFilter_);ImGui::Separator();
+        std::filesystem::path reveal;ObjectId select=NoObject;
+        for (std::size_t i=0;i<consoleEntries_.size();++i) {
+            const auto& entry=consoleEntries_[i];if ((entry.Level == ConsoleLevel::Info && !consoleInfo_) || (entry.Level == ConsoleLevel::Warning && !consoleWarnings_) || (entry.Level == ConsoleLevel::Error && !consoleErrors_) || (!consoleFilter_.empty() && entry.Message.find(consoleFilter_) == std::string::npos)) {continue;}
+            ImGui::PushID(static_cast<int>(i));const auto color=entry.Level == ConsoleLevel::Error ? ImVec4{1,.4f,.35f,1}:entry.Level == ConsoleLevel::Warning ? ImVec4{1,.78f,.3f,1}:ImVec4{.75f,.82f,.9f,1};
+            ImGui::TextColored(color,"%s",entry.Level == ConsoleLevel::Error ? "ERROR":entry.Level == ConsoleLevel::Warning ? "WARNING":"INFO");ImGui::SameLine();ImGui::TextWrapped("%s",entry.Message.c_str());
+            if (!entry.Source.empty()) {ImGui::TextDisabled("%s",Text(entry.Source).c_str());if (ImGui::SmallButton("Open folder")) {reveal=entry.Source.parent_path();}}
+            if (entry.Object && Document.GetScene().Contains(entry.Object)) {ImGui::SameLine();if (ImGui::SmallButton("Select object")) {select=entry.Object;}}
+            ImGui::Separator();ImGui::PopID();
+        }
+        if (select) {Report(Document.Select(select));}if (!reveal.empty()) {Report(NativeFiles::OpenPath(reveal));}
+    }ImGui::End();
+}
 void EditorUI::Dialogs() {
-    if (pending_ != Action::None && Document.IsDirty() && dialog_ == Dialog::None && overwritePath_.empty() && error_.empty()) { ImGui::OpenPopup("Unsaved changes"); }
+    if (pending_ != Action::None && Document.IsDirty() && dialog_ == Dialog::None && error_.empty()) { ImGui::OpenPopup("Unsaved changes"); }
     if (ImGui::BeginPopupModal("Unsaved changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted("Save changes before continuing?");
         if (ImGui::Button("Save")) {
-            if (Document.Path().empty()) { FileDialog(Dialog::Save); ImGui::CloseCurrentPopup(); }
-            else if (Save(Document.Path())) { ImGui::CloseCurrentPopup(); }
+            ResolvePending(UnsavedChoice::Save);ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine(); if (ImGui::Button("Discard")) { ApplyPending(); ImGui::CloseCurrentPopup(); }
-        ImGui::SameLine(); if (ImGui::Button("Cancel")) { pending_ = Action::None; ImGui::CloseCurrentPopup(); }
+        ImGui::SameLine(); if (ImGui::Button("Discard")) { ResolvePending(UnsavedChoice::Discard); ImGui::CloseCurrentPopup(); }
+        ImGui::SameLine(); if (ImGui::Button("Cancel")) { ResolvePending(UnsavedChoice::Cancel); ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }
-    if (dialog_ != Dialog::None) { ImGui::OpenPopup("File path"); }
-    if (ImGui::BeginPopupModal("File path",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(dialog_ == Dialog::Save ? "Save Scene (.mvxscene.json)" : dialog_ == Dialog::Open ? "Open Scene (.mvxscene.json)" : dialog_ == Dialog::Import ? "Import model (.gltf / .glb)" : dialog_ == Dialog::QualitySave || dialog_ == Dialog::QualityLoad ? "Quality profile (.mvxquality.json)":dialog_ == Dialog::TelemetryJson || dialog_ == Dialog::TelemetryCsv ? "Export telemetry snapshot (.json / .csv)":"Pose file (.mvxpose.json)");
-        ImGui::SetNextItemWidth(620);
-        if (ImGui::IsWindowAppearing()) { ImGui::SetKeyboardFocusHere(); }
-        const bool enter = ImGui::InputText("Path",&pathInput_,ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-        if (ImGui::Button("OK") || enter) {
-            const auto path = detail::PathFromUtf8(pathInput_);
-            bool close = true;
-            if (dialog_ == Dialog::Save || dialog_ == Dialog::PoseFull || dialog_ == Dialog::PosePartial || dialog_ == Dialog::QualitySave || dialog_ == Dialog::TelemetryJson || dialog_ == Dialog::TelemetryCsv) {
-                std::error_code error;
-                if (std::filesystem::is_regular_file(path,error)) { overwritePath_ = path; overwriteDialog_ = dialog_; }
-                else { close = SaveDialog(dialog_,path); }
-            }
-            else if (dialog_ == Dialog::Open) { RequestOpen(path); }
-            else if (dialog_ == Dialog::PoseLoad) { close = Report(Document.LoadPoseFile(poseObject_,path)); }
-            else if (dialog_ == Dialog::QualityLoad) {auto profile=LoadQuality(path);close=Report(profile);if (close) {qualityDraft_=std::move(profile).Value();}}
-            else { Import(path,false); }
-            if (close) { dialog_ = Dialog::None; ImGui::CloseCurrentPopup(); }
-        }
-        ImGui::SameLine(); if (ImGui::Button("Cancel")) { dialog_ = Dialog::None; pending_ = Action::None; ImGui::CloseCurrentPopup(); }
-        ImGui::EndPopup();
-    }
-    if (!overwritePath_.empty()) { ImGui::OpenPopup("Replace file?"); }
-    if (ImGui::BeginPopupModal("Replace file?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("A file with this name already exists. Replace it?");
-        if (ImGui::Button("Replace")) {
-            if (SaveDialog(overwriteDialog_,overwritePath_)) { overwritePath_.clear(); ImGui::CloseCurrentPopup(); }
-        }
-        ImGui::SameLine(); if (ImGui::Button("Cancel")) { overwritePath_.clear(); pending_ = Action::None; ImGui::CloseCurrentPopup(); }
-        ImGui::EndPopup();
-    }
+    if (deleteObject_ && !Document.GetScene().Contains(deleteObject_)) {deleteObject_=NoObject;}
+    if (deleteObject_) {ImGui::OpenPopup("Delete subtree?");}
+    if (ImGui::BeginPopupModal("Delete subtree?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::TextUnformatted("Delete the selected object and its children?");ImGui::TextUnformatted("Imported assets remain in the library.");if (ImGui::Button("Delete")) {Report(Document.RemoveObject(deleteObject_),deleteObject_);deleteObject_=NoObject;ImGui::CloseCurrentPopup();}ImGui::SameLine();if (ImGui::Button("Cancel")) {deleteObject_=NoObject;ImGui::CloseCurrentPopup();}ImGui::EndPopup();}
     if (!error_.empty()) { ImGui::OpenPopup("Operation failed"); }
     if (ImGui::BeginPopupModal("Operation failed",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize()*65); ImGui::TextUnformatted(error_.c_str()); ImGui::PopTextWrapPos();
@@ -518,7 +605,7 @@ void EditorUI::Dialogs() {
 }
 void EditorUI::Draw() {
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
-    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel(); Dialogs();
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();Console(); Welcome(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());

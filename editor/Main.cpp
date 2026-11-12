@@ -24,6 +24,8 @@ namespace {
 struct Application {
     std::unique_ptr<lv::editor::EditorUI> UI;
     std::filesystem::path Initial, Directory = std::filesystem::current_path();
+    std::filesystem::path Preferences = std::filesystem::current_path()/".minuvex-editor.json";
+    bool DirectoryExplicit = false;
     std::uint64_t Frames = 0, Limit = 0;
     bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, TelemetrySmoke = false, Gui = false, Failed = false;
     std::optional<lv::QualityProfile> InitialQuality;
@@ -62,8 +64,52 @@ void CheckViewportPixels(const lv::editor::SceneViewport& viewport) {
 #endif
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message, std::uint32_t line, const char* file, void* user) noexcept {
     auto& app=*static_cast<Application*>(user);
+    if (app.UI && level <= 2) {try {app.UI->Record(level <= 1 ? lv::editor::ConsoleLevel::Error:lv::editor::ConsoleLevel::Warning,message ? message:tag);}catch (...) {}}
     if (level <= 1 && !(app.UI && app.UI->Viewport.ApplyingQuality())) { app.Fail(message ? message : "Editor graphics backend failure."); }
     slog_func(tag,level,item,message,line,file,nullptr);
+}
+void CheckEditorFileWorkflows() {
+    using namespace lv::editor;
+    const auto folder=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/"file-workflows";
+    std::filesystem::create_directories(folder);
+    const auto source=folder/std::filesystem::path(L"한글 sample.glb");
+    std::filesystem::copy_file(MINUVEX_EDITOR_SAMPLE,source,std::filesystem::copy_options::overwrite_existing);
+    EditorUI ui;ui.InitializeSession({},MINUVEX_EDITOR_SAMPLE,MINUVEX_EDITOR_DOCUMENTATION,false);
+    ui.SetFilePicker([](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Open && request.Filter == FilePickerFilter::Model,"Open Model picker request is incorrect.");return FilePickerResult::Success(std::nullopt);});
+    ui.ChooseFiles(EditorFileAction::OpenModel);
+    Require(ui.Document.GetScene().Size() == 0 && ui.ConsoleEntries().empty(),"File chooser cancellation changed the Scene or logged an error.");
+    ui.SetFilePicker([&](const FilePickerRequest&) {return FilePickerResult::Success(std::vector<std::filesystem::path>{source});});
+    ui.ChooseFiles(EditorFileAction::OpenModel);
+    Require(ui.Document.GetScene().Size() == 1 && ui.Document.Selection() && ui.Document.Path().empty() && ui.Document.IsDirty(),"Native picker selection did not Quick Open an unsaved model.");
+    const auto selected=ui.Document.Selection();
+    ui.RequestQuickOpen(folder/"missing.glb");ui.ResolvePending(UnsavedChoice::Cancel);
+    Require(ui.Document.Selection() == selected,"Cancelled dirty-document switch changed the model.");
+    ui.RequestQuickOpen(folder/"missing.glb");ui.ResolvePending(UnsavedChoice::Discard);
+    Require(ui.Document.Selection() == selected && ui.ConsoleEntries().back().Level == ConsoleLevel::Error && !ui.ConsoleEntries().back().Source.empty(),"Failed model replacement lost the Scene or error context.");
+    ui.SetFilePicker([](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Save && request.Name == "Scene.mvxscene.json","Unsaved Scene picker defaults are incorrect.");return FilePickerResult::Success(std::nullopt);});
+    ui.RequestQuit();ui.ResolvePending(UnsavedChoice::Save);
+    Require(!ui.QuitRequested() && ui.Document.IsDirty(),"Cancelling Save before Exit did not cancel Exit.");
+    const auto saved=folder/"saved.mvxscene.json";
+    ui.SetFilePicker([&](const FilePickerRequest&) {return FilePickerResult::Success(std::vector<std::filesystem::path>{saved});});
+    ui.ChooseFiles(EditorFileAction::SaveAs);
+    Require(!ui.Document.IsDirty() && ui.Document.Path() == saved,"Save As failed or resumed a cancelled Exit.");
+    Require(!ui.QuitRequested(),"Cancelled Exit was unexpectedly resumed by Save As.");
+    ui.RequestNew();ui.RequestOpen(saved);
+    Require(ui.Document.GetScene().Size() == 1 && !ui.Document.IsDirty(),"Open Scene did not restore the native Save As document.");
+    ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Multiple,"Import Assets did not request a multiselect dialog.");return FilePickerResult::Success(std::vector<std::filesystem::path>{source,MINUVEX_EDITOR_ANIMATION_SAMPLE});});
+    ui.ChooseFiles(EditorFileAction::ImportAssets);
+    Require(ui.Document.Assets().size() == 2 && ui.Document.GetScene().Size() == 1,"Multi-file import placed instances instead of registering assets.");
+    ui.DropFiles({source},-10,-10);
+    Require(ui.Document.GetScene().Size() == 2,"Dropped model did not create a Scene instance.");
+    ui.SetFilePicker([&](const FilePickerRequest&) {return FilePickerResult::Success(std::vector<std::filesystem::path>{source});});
+    ui.ChooseFiles(EditorFileAction::NewProject);ui.ResolvePending(UnsavedChoice::Discard);
+    Require(ui.Document.GetScene().Size() == 2,"Failed workspace creation lost the previous Scene.");
+    ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Folder,"New Project did not request a folder chooser.");return FilePickerResult::Success(std::vector<std::filesystem::path>{folder});});
+    ui.ChooseFiles(EditorFileAction::NewProject);ui.ResolvePending(UnsavedChoice::Discard);
+    Require(ui.Document.GetScene().Size() == 0 && std::filesystem::is_directory(folder/"assets") && std::filesystem::is_directory(folder/"scenes"),"Workspace creation failed.");
+    for (int i=0;i<300;++i) {ui.Record(ConsoleLevel::Info,"bounded Console entry");}
+    Require(ui.ConsoleEntries().size() == 256,"Console history was not bounded.");
+    ui.Shutdown();
 }
 void Init(void* user) noexcept {
     auto& app = *static_cast<Application*>(user);
@@ -82,10 +128,13 @@ void Init(void* user) noexcept {
 #endif
         if (std::filesystem::exists(font)) { io.FontDefault = io.Fonts->AddFontFromFileTTF(font,17); }
         ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding = 3; ImGui::GetStyle().FrameRounding = 3;
-        app.UI = std::make_unique<lv::editor::EditorUI>(); app.UI->SetDirectory(app.Directory);
+        app.UI = std::make_unique<lv::editor::EditorUI>();
+        app.UI->InitializeSession(app.Preferences,MINUVEX_EDITOR_SAMPLE,MINUVEX_EDITOR_DOCUMENTATION,!app.Smoke);
+        if (app.Smoke) {CheckEditorFileWorkflows();}
+        if (app.DirectoryExplicit) {app.UI->SetDirectory(app.Directory);}
         if (!app.Initial.empty()) {
             if (app.Initial.extension() == ".json") { app.UI->RequestOpen(app.Initial); }
-            else { app.UI->Import(app.Initial,true); }
+            else { app.UI->RequestQuickOpen(app.Initial); }
         }
         if (app.Smoke) {
             auto& doc = app.UI->Document;
@@ -109,7 +158,7 @@ void SmokeAfterDraw(Application& app) {
     auto& ui = *app.UI; auto& doc = ui.Document;
     if (app.Frames == 1) {
         if (app.QualitySmoke) {const auto* panel=ImGui::FindWindowByName("Quality Settings");Require(panel && panel->DockId,"Quality Settings panel was not docked.");Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::Low && ui.Viewport.Quality().Applied,"Initial Low quality was not applied.");}
-        for (const auto* name : {"Viewport","Hierarchy","Inspector","Asset Browser"}) {
+        for (const auto* name : {"Viewport","Hierarchy","Inspector","Asset Browser","Console"}) {
             const auto* window = ImGui::FindWindowByName(name);
             Require(window && window->Active && window->DockId,"Editor panel is missing from the docking layout.");
         }
@@ -127,6 +176,15 @@ void SmokeAfterDraw(Application& app) {
 #if defined(_WIN32)
         CheckViewportPixels(ui.Viewport);
 #endif
+        const auto* browser=ImGui::FindWindowByName("Asset Browser");
+        const auto previousSelection=doc.Selection();const auto previousCount=doc.GetScene().Size();
+        const auto source=doc.Assets().front()->SourcePath;
+        ui.DropFiles({source},browser->Pos.x+20,browser->Pos.y+40);
+        Require(doc.GetScene().Size() == previousCount && doc.Assets().size() == 1,"Dropping on Asset Browser unexpectedly placed an instance.");
+        const auto* viewport=ImGui::FindWindowByName("Viewport");
+        ui.DropFiles({source},viewport->Pos.x+viewport->Size.x*.5f,viewport->Pos.y+viewport->Size.y*.5f);
+        Require(doc.GetScene().Size() == previousCount+1,"Dropping on Viewport failed to place an instance.");
+        Require(doc.RemoveObject(doc.Selection()));Require(doc.Select(previousSelection));
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
         const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.TelemetrySmoke ? "telemetry-smoke.mvxscene.json":app.QualitySmoke ? "quality-smoke.mvxscene.json":app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
         std::filesystem::create_directories(output.parent_path()); Require(doc.Save(output));
@@ -214,16 +272,11 @@ void Event(const sapp_event* event, void* user) noexcept {
         if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) { sapp_cancel_quit(); app.UI->RequestQuit(); return; }
         if (app.Gui) { simgui_handle_event(event); }
         if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+            std::vector<std::filesystem::path> paths;
             for (int i = 0; i < sapp_get_num_dropped_files(); ++i) {
-                const auto path = lv::detail::PathFromUtf8(sapp_get_dropped_file_path(i));
-                if (path.filename().generic_u8string().ends_with(u8".mvxquality.json")) {app.UI->LoadQualityProfile(path);break;}
-                if (path.filename().generic_u8string().ends_with(u8".mvxpose.json")) {
-                    const auto loaded = app.UI->Document.LoadPoseFile(app.UI->Document.Selection(),path);
-                    if (!loaded) { app.UI->ShowError(loaded.Error()); } break;
-                }
-                if (path.extension() == ".json") { app.UI->RequestOpen(path); break; }
-                app.UI->Import(path,true);
+                paths.push_back(lv::detail::PathFromUtf8(sapp_get_dropped_file_path(i)));
             }
+            app.UI->DropFiles(paths,event->mouse_x/std::max(1.0f,sapp_dpi_scale()),event->mouse_y/std::max(1.0f,sapp_dpi_scale()));
         }
     } catch (const std::exception& e) { app.Fail(e.what()); }
     catch (...) { app.Fail("Editor input threw an unknown exception."); }
@@ -247,9 +300,10 @@ int Run(const std::vector<std::string>& args) {
             else if (args[i] == "--frames" && i+1 < args.size()) {
                 const auto& value = args[++i]; auto [end,error] = std::from_chars(value.data(),value.data()+value.size(),app.Limit);
                 Require(error == std::errc{} && end == value.data()+value.size() && app.Limit > 0,"--frames requires a positive integer.");
-            } else if (args[i] == "--assets" && i+1 < args.size()) { app.Directory = std::filesystem::absolute(lv::detail::PathFromUtf8(args[++i])); }
+            } else if (args[i] == "--assets" && i+1 < args.size()) { app.Directory = std::filesystem::absolute(lv::detail::PathFromUtf8(args[++i]));app.DirectoryExplicit=true; }
+            else if (args[i] == "--preferences" && i+1 < args.size()) {app.Preferences=std::filesystem::absolute(lv::detail::PathFromUtf8(args[++i]));}
             else if (!args[i].starts_with("--") && app.Initial.empty()) { app.Initial = lv::detail::PathFromUtf8(args[i]); }
-            else { throw std::invalid_argument("Usage: minuvex_editor [model.glb | scene.mvxscene.json] [--assets directory] [--frames N] [--smoke-test]"); }
+            else { throw std::invalid_argument("Usage: minuvex_editor [model.glb | scene.mvxscene.json] [--assets directory] [--preferences file.json] [--frames N] [--smoke-test]"); }
         }
         Require(lv::detail::StandaloneMainThread() && lv::detail::StandaloneApplicationAvailable(),"Editor requires a standalone main-thread application.");
         sapp_desc desc{}; desc.user_data = &app; desc.init_userdata_cb = Init; desc.frame_userdata_cb = Frame;

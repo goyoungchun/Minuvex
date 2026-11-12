@@ -5,6 +5,7 @@
 .DS_Store
 *.user
 /.minuvex-editor.ini
+/.minuvex-editor.json
 
 # Keep Markdown documentation and local agent notes untracked until finalized.
 # Remove this rule when the documentation is ready to be published.

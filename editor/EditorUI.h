@@ -1,31 +1,55 @@
 #pragma once
 #include "SceneViewport.h"
 #include "CameraController.h"
+#include "NativeFiles.h"
+#include "EditorPreferences.h"
 #include <minuvex/EditorDocument.h>
 
 namespace lv::editor {
+enum class ConsoleLevel { Info, Warning, Error };
+struct ConsoleEntry {ConsoleLevel Level;double Time;std::string Message;std::filesystem::path Source;ObjectId Object=NoObject;};
+enum class EditorFileAction { OpenModel, OpenScene, ImportAssets, SaveAs, NewProject };
+enum class UnsavedChoice { Save, Discard, Cancel };
 class EditorUI final {
 public:
     EditorDocument Document;
     SceneViewport Viewport;
     void Draw(); // Inside an ImGui frame, outside graphics passes.
-    void Shutdown() noexcept { Viewport.Clear(); }
+    void Shutdown() noexcept;
+    void InitializeSession(std::filesystem::path preferences,std::filesystem::path sample,std::filesystem::path documentation,bool persist=true);
+    void SetFilePicker(FilePicker picker) {picker_=std::move(picker);}
+    void ChooseFiles(EditorFileAction action);
+    void ResolvePending(UnsavedChoice choice);
+    void RequestQuickOpen(const std::filesystem::path& path);
+    void DropFiles(const std::vector<std::filesystem::path>& paths,float x,float y);
+    void Record(ConsoleLevel level,std::string message,std::filesystem::path source={},ObjectId object=NoObject);
+    const std::vector<ConsoleEntry>& ConsoleEntries() const noexcept {return consoleEntries_;}
     void Import(const std::filesystem::path& path, bool place);
     void RequestOpen(const std::filesystem::path& path);
     void RequestNew();
     void RequestQuit();
     bool QuitRequested() const noexcept { return quit_; }
     void SetDirectory(std::filesystem::path path) { directory_ = std::move(path); }
-    void ShowError(const Error& error);
+    void ShowError(const Error& error,ObjectId object=NoObject);
     void LoadQualityProfile(const std::filesystem::path& path);
     Result<void> ApplyQualityProfile(const QualityProfile& profile);
     // Queue from UI actions after Image commands exist; commit at the next Draw entry.
     void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
-    enum class Action { None, New, Open, Quit } pending_ = Action::None;
-    enum class Dialog { None, Import, Open, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad, TelemetryJson, TelemetryCsv } dialog_ = Dialog::None, overwriteDialog_ = Dialog::None;
-    std::filesystem::path directory_ = std::filesystem::current_path(), openPath_, overwritePath_;
-    std::string pathInput_, error_, status_ = "Import a glTF/GLB to begin.";
+    enum class Action { None, New, Open, QuickOpen, Project, Quit } pending_ = Action::None;
+    enum class Dialog { None, Import, Open, QuickOpen, Project, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad, TelemetryJson, TelemetryCsv } dialog_ = Dialog::None;
+    std::filesystem::path directory_ = std::filesystem::current_path(), openPath_;
+    std::string error_, status_ = "Open a model to begin.";
+    NativeFiles nativeFiles_;
+    FilePicker picker_;
+    EditorPreferences preferences_;
+    std::filesystem::path preferencesPath_,samplePath_,documentationPath_,projectRoot_;
+    bool persistPreferences_=false,welcome_=true,console_=true;
+    bool consoleInfo_=true,consoleWarnings_=true,consoleErrors_=true;
+    std::vector<ConsoleEntry> consoleEntries_;
+    std::string consoleFilter_;
+    float assetRect_[4]{};
+    ObjectId deleteObject_=NoObject;
     std::string filter_;
     AssetId selectedAsset_ = 0;
     bool quit_ = false, resetLayout_ = false, cameraDrag_ = false;
@@ -46,6 +70,10 @@ private:
     void ApplyPending();
     void Ask(Action action);
     void FileDialog(Dialog type);
+    void PersistPreferences();
+    void Remember(const std::filesystem::path& path,RecentKind kind);
+    void Welcome();
+    void Console();
     bool Save(const std::filesystem::path& path);
     bool SaveDialog(Dialog type, const std::filesystem::path& path);
     void FrameScene();
@@ -60,8 +88,8 @@ private:
     void AssetBrowser();
     void ViewportPanel();
     void Dialogs();
-    template<typename T> bool Report(const Result<T>& result) {
-        if (!result) { ShowError(result.Error()); return false; } return true;
+    template<typename T> bool Report(const Result<T>& result,ObjectId object=NoObject) {
+        if (!result) { ShowError(result.Error(),object); return false; } return true;
     }
 };
 } // namespace lv::editor

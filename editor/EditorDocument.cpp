@@ -1,4 +1,5 @@
 #include <minuvex/EditorDocument.h>
+#include "CameraController.h"
 
 #include <algorithm>
 
@@ -43,9 +44,32 @@ Result<void> EditorDocument::Open(const std::filesystem::path& path) {
 Result<void> EditorDocument::Save(const std::filesystem::path& path) {
     auto absolute = Edit([&] { return std::filesystem::absolute(path).lexically_normal(); });
     if (!absolute) { return Result<void>::Failure(absolute.Error()); }
+    for (const auto& model:library_) {
+        for (const auto& source:model->Dependencies) {
+            std::error_code error;
+            if (absolute.Value() == source.lexically_normal() || std::filesystem::equivalent(absolute.Value(),source,error)) {
+                return Result<void>::Failure({ErrorCode::InvalidArgument,"A Scene cannot overwrite one of its source assets/resources.","Choose a different Scene file name.",absolute.Value()});
+            }
+        }
+    }
     auto saved = SaveScene(world_,path,library_);
     if (saved) { path_ = std::move(absolute).Value(); dirty_ = false; }
     return saved;
+}
+Result<ObjectId> EditorDocument::OpenModel(const std::filesystem::path& path,const ImportSettings& settings,float aspect) {
+    static_assert(std::is_nothrow_move_assignable_v<EditorDocument>);
+    auto result = Edit([&] {
+        EditorDocument next;
+        const auto model = next.registry_.LoadModel(path,settings);
+        next.library_.push_back(model);
+        const auto id = next.world_.AddModel(model);
+        next.world_.MainCamera = detail::FitSceneCamera(next.world_,aspect);
+        next.selection_ = id; next.dirty_ = true;
+        *this = std::move(next);
+        return id;
+    });
+    if (!result) {auto error=result.Error();error.SourcePath=path;return Result<ObjectId>::Failure(std::move(error));}
+    return result;
 }
 Result<AssetId> EditorDocument::ImportModel(const std::filesystem::path& path, const ImportSettings& settings) {
     auto result = Edit([&] {

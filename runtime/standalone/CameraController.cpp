@@ -56,14 +56,16 @@ void ValidateViewerOptions(const ViewerOptions& options) {
     }
 }
 
-Camera FitSceneCamera(const Scene& scene, float aspect) {
+Camera FitSceneCamera(const Scene& scene, float aspect,ObjectId focus) {
     auto camera = scene.MainCamera;
     (void)camera.ViewProjection(aspect);
     const auto items = scene.CollectRenderItems();
     if (items.empty()) { throw std::invalid_argument("There are no visible models to frame."); }
     double low[3]{}, high[3]{};
     bool first = true;
+    if (focus) {(void)scene.GetObject(focus);}
     for (const auto& item : items) {
+        if (focus) {auto ancestor=item.Object;while (ancestor && ancestor != focus) {ancestor=scene.GetObject(ancestor).Parent;}if (!ancestor) {continue;}}
         (void)item.WorldTransform.NormalMatrix();
         const auto bounds = item.Animation ? item.Animation->GetBounds() : item.Model->ModelBounds;
         for (unsigned mask = 0; mask < 8; ++mask) {
@@ -78,6 +80,7 @@ Camera FitSceneCamera(const Scene& scene, float aspect) {
             first = false;
         }
     }
+    if (first) {throw std::invalid_argument("The selected object/subtree has no visible models to focus.");}
     const double radius = std::max(std::hypot(high[0]-low[0], high[1]-low[1], high[2]-low[2]) * 0.5, 0.0001);
     const double vertical = camera.VerticalFovRadians * 0.5;
     const double horizontal = std::atan(std::tan(vertical) * aspect);
@@ -89,6 +92,23 @@ Camera FitSceneCamera(const Scene& scene, float aspect) {
     camera.FarPlane = static_cast<float>(distance + radius*2);
     (void)camera.ViewProjection(aspect);
     return camera;
+}
+
+ObjectId PickSceneObject(const Scene& scene,float aspect,float x,float y) {
+    const auto& camera=scene.MainCamera;(void)camera.ViewProjection(aspect);
+    if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 1 || std::abs(y) > 1) {throw std::invalid_argument("Picking coordinates must be in [-1,1].");}
+    const auto forward=Normalize(Subtract(camera.Target,camera.Position));const auto right=Normalize(Cross(forward,camera.Up));const auto up=Cross(right,forward);const double tangent=std::tan(camera.VerticalFovRadians*.5);
+    const auto ray=Normalize(Add(forward,Add(Scale(right,x*tangent*aspect),Scale(up,y*tangent))));
+    const double cosine=Dot(ray,forward),origin[]{camera.Position.X,camera.Position.Y,camera.Position.Z},direction[]{ray.X,ray.Y,ray.Z};
+    double nearest=camera.FarPlane/cosine;ObjectId selected=NoObject;
+    for (const auto& item:scene.CollectRenderItems()) {
+        const auto bounds=item.Animation ? item.Animation->GetBounds():item.Model->ModelBounds;double low[]{INFINITY,INFINITY,INFINITY},high[]{-INFINITY,-INFINITY,-INFINITY};
+        for (unsigned mask=0;mask<8;++mask) {const auto point=item.WorldTransform.TransformPoint({mask&1 ? bounds.Max.X:bounds.Min.X,mask&2 ? bounds.Max.Y:bounds.Min.Y,mask&4 ? bounds.Max.Z:bounds.Min.Z});const double p[]{point.X,point.Y,point.Z};for (int i=0;i<3;++i) {if (!std::isfinite(p[i])) {throw std::invalid_argument("Pick bounds exceed numeric range.");}low[i]=std::min(low[i],p[i]);high[i]=std::max(high[i],p[i]);}}
+        double near=camera.NearPlane/cosine,far=nearest;bool hit=true;
+        for (int axis=0;axis<3;++axis) {if (std::abs(direction[axis]) < 1e-12) {if (origin[axis] < low[axis] || origin[axis] > high[axis]) {hit=false;break;}}else {double a=(low[axis]-origin[axis])/direction[axis],b=(high[axis]-origin[axis])/direction[axis];if (a>b) {std::swap(a,b);}near=std::max(near,a);far=std::min(far,b);if (near>far) {hit=false;break;}}}
+        if (hit && near < nearest) {nearest=near;selected=item.Object;}
+    }
+    return selected;
 }
 
 bool CameraController::Process(Camera& camera, const ViewerInputEvent& event, const CameraControlOptions& options, int height) {

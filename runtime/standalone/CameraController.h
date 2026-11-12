@@ -5,7 +5,8 @@
 namespace lv::detail {
 
 void ValidateViewerOptions(const ViewerOptions& options);
-Camera FitSceneCamera(const Scene& scene, float aspect);
+Camera FitSceneCamera(const Scene& scene, float aspect, ObjectId focus = NoObject);
+ObjectId PickSceneObject(const Scene& scene,float aspect,float ndcX,float ndcY); // Conservative world-AABB picking.
 
 class CameraController {
 public:
