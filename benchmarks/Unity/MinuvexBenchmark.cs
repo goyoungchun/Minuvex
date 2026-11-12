@@ -93,8 +93,9 @@ public sealed class MinuvexBenchmark : MonoBehaviour
             string gpuMs = "null";
             if (FrameTimingManager.GetLatestTimings(1, timing) != 0 && timing[0].gpuFrameTime > 0) gpuMs = timing[0].gpuFrameTime.ToString("R", CultureInfo.InvariantCulture);
             string backend = SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D11 ? "d3d11" : SystemInfo.graphicsDeviceType == GraphicsDeviceType.Metal ? "metal" : SystemInfo.graphicsDeviceType.ToString();
-            string json = "{\"format\":\"MinuvexBenchmark\",\"version\":1,\"engine\":\"Unity\",\"engineVersion\":" + Q(Application.unityVersion)
-                + ",\"scenario\":\"shared-cubes-v1\",\"objects\":" + objects + ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" + warmup + ",\"measuredFrames\":" + frames
+            string json = "{\"format\":\"MinuvexBenchmark\",\"version\":2,\"engine\":\"Unity\",\"engineVersion\":" + Q(Application.unityVersion)
+                + ",\"scenario\":\"shared-cubes-v2-unbatched\",\"objects\":" + objects + ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" + warmup + ",\"measuredFrames\":" + frames
+                + ",\"lod\":false,\"instancing\":false,\"frustumCulling\":true,\"postProcessing\":false,\"compression\":\"none\""
                 + ",\"backend\":" + Q(backend) + ",\"gpu\":" + Q(SystemInfo.graphicsDeviceName)
                 + ",\"sceneBuildMs\":" + sceneBuildMs.ToString("R", CultureInfo.InvariantCulture)
                 + ",\"runtimeInitMs\":null,\"modelLoadMs\":null,\"cadenceMeanMs\":" + (sum / frames).ToString("R", CultureInfo.InvariantCulture)

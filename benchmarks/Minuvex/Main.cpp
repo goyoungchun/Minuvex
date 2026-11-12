@@ -35,7 +35,8 @@ int main(int argc,char** argv) {
         }
         const auto start=Clock::now();lv::ViewerOptions options;options.Width=1280;options.Height=720;options.Title="Minuvex SDK benchmark";
         options.VSync=false;options.HighDpi=false;options.AutoFrame=false;options.EnableDefaultInput=false;options.ClearColor={.035f,.045f,.065f,1};
-        options.Quality=lv::MakeQualityProfile(lv::QualityPreset::Low);options.Quality.Overrides.TargetFps=0;options.Quality.Overrides.OnDemand=lv::OnDemandMode::Off;options.Quality.Overrides.FrustumCulling=false;
+        options.Quality=lv::MakeQualityProfile(lv::QualityPreset::Low);options.Quality.Overrides.TargetFps=0;options.Quality.Overrides.OnDemand=lv::OnDemandMode::Off;options.Quality.Overrides.FrustumCulling=true;
+        options.Quality.Overrides.Lod=false;options.Quality.Overrides.Instancing=false;options.Quality.Overrides.Compression=lv::TextureCompression::None;
         lv::Viewer viewer(options);auto model=std::make_shared<lv::ModelAsset>();model->Meshes.push_back({"Shared cube",{{lv::MakeCube(),0,false}}});model->Materials.push_back({});model->Parts.push_back({0});model->ModelBounds={{-.5f,-.5f,-.5f},{.5f,.5f,.5f}};
         auto& scene=viewer.GetScene();const int side=int(std::ceil(std::cbrt(objects)));const float center=float(side-1);
         for (int i=0;i<objects;++i) {lv::Transform t;t.Position={float(i%side)*2-center,float((i/side)%side)*2-center,float(i/(side*side))*2-center};scene.AddModel(model,t);}
@@ -48,8 +49,9 @@ int main(int argc,char** argv) {
         const auto telemetry=viewer.GetTelemetry();if (!telemetry || intervals.size() != std::size_t(frames)) {throw std::runtime_error("Incomplete benchmark samples.");}
         const auto& snapshot=telemetry.Value();const auto saved=lv::SaveTelemetry(snapshot,output.string()+".telemetry.json");if (!saved) {throw std::runtime_error(saved.Error().Message);}
         std::ofstream file(output,std::ios::binary);file << std::setprecision(12);
-        file << "{\n  \"format\":\"MinuvexBenchmark\",\"version\":1,\"engine\":\"Minuvex\",\"engineVersion\":" << Quote(lv::Version)
-             << ",\n  \"scenario\":\"shared-cubes-v1\",\"objects\":" << objects << ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" << warmup << ",\"measuredFrames\":" << frames
+        file << "{\n  \"format\":\"MinuvexBenchmark\",\"version\":2,\"engine\":\"Minuvex\",\"engineVersion\":" << Quote(lv::Version)
+             << ",\n  \"scenario\":\"shared-cubes-v2-unbatched\",\"objects\":" << objects << ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" << warmup << ",\"measuredFrames\":" << frames
+             << ",\n  \"lod\":false,\"instancing\":false,\"frustumCulling\":true,\"postProcessing\":false,\"compression\":\"none\""
              << ",\n  \"backend\":" << Quote(snapshot.Hardware.Backend == lv::GraphicsBackend::D3D11 ? "d3d11":"metal") << ",\"gpu\":" << Quote(snapshot.Hardware.GpuName)
              << ",\n  \"sceneBuildMs\":" << Milliseconds(built-start) << ",\"runtimeInitMs\":" << initMs << ",\"cadenceMeanMs\":" << std::accumulate(intervals.begin(),intervals.end(),0.0)/intervals.size() << ",\"cadenceP95Ms\":" << P95(intervals)
              << ",\n  \"cpuSubmissionMeanMs\":";

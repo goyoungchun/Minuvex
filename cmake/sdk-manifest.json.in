@@ -6,6 +6,12 @@
   "processor": "@CMAKE_SYSTEM_PROCESSOR@",
   "compiler": "@CMAKE_CXX_COMPILER_ID@-@CMAKE_CXX_COMPILER_VERSION@",
   "pointerBytes": @CMAKE_SIZEOF_VOID_P@,
+  "configuration": "$<CONFIG>",
+  "runtime": "@MINUVEX_SDK_RUNTIME@",
+  "sceneVersion": 4,
+  "poseVersion": 1,
+  "qualityVersion": 1,
+  "importVersion": 4,
   "linkage": "static",
   "abiPolicy": "Rebuild consumers with the same compiler toolset, architecture, configuration and C++ runtime.",
   "publication": "local artifact; documentation drafts excluded by default"

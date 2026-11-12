@@ -23,20 +23,21 @@ jobs:
         run: cmake --build out/ci --config ${{ matrix.configuration }} --parallel
       - name: CPU regression tests (desktop smoke is opt-in)
         run: ctest --test-dir out/ci --build-config ${{ matrix.configuration }} --output-on-failure
-      - name: Install, relocate and verify an independent SDK consumer
+      - name: Install, relocate and verify an independent SDK consumer (Debug)
+        if: matrix.configuration == 'Debug'
         run: cmake -DBUILD_DIR=out/ci -DCONFIG=${{ matrix.configuration }} -P cmake/VerifySdk.cmake
-      - name: Build platform SDK archive (Release only)
+      - name: Package, checksum, extract and verify the actual SDK archive (Release)
         if: matrix.configuration == 'Release'
-        run: cpack --config out/ci/CPackConfig.cmake -C Release
+        run: cmake -DBUILD_DIR=out/ci -DCONFIG=Release -DPACKAGE=ON -P cmake/VerifySdk.cmake
       - name: Retain SDK archives and checksums (Release only)
         if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v4
         with:
           name: Minuvex-SDK-${{ runner.os }}-${{ runner.arch }}
           path: |
-            out/ci/packages/*.zip
-            out/ci/packages/*.tar.gz
-            out/ci/packages/*.sha256
+            out/ci/sdk-check-*/packages/*.zip
+            out/ci/sdk-check-*/packages/*.tar.gz
+            out/ci/sdk-check-*/packages/*.sha256
           if-no-files-found: error
       - name: Validate benchmark and AI evaluation tools (Windows Release only)
         if: runner.os == 'Windows' && matrix.configuration == 'Release'
