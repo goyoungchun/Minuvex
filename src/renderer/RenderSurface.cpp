@@ -102,10 +102,10 @@ Result<void> RenderSurface::Resize(const Scene& scene,int width,int height) {
     auto result=ApplyQuality(state_.Requested,scene,width,height);if (!result) {failedWidth_=width;failedHeight_=height;outputWidth_=width;outputHeight_=height;scheduler_.Invalidate();}return result;
 }
 bool RenderSurface::Due(double now) const {return scheduler_.Due(now,state_.Effective ? state_.Effective->TargetFps:0);}
-bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::array<float,4>& clear) {
-    if (!targets_ || !renderer_ || !state_.Effective || !Due(now)) {return false;}
+bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::array<float,4>& clear,bool bypassPacing) {
+    if (!targets_ || !renderer_ || !state_.Effective || (!bypassPacing && !Due(now))) {return false;}
     auto signature=SceneRenderSignature(scene);for (float value:clear) {signature^=std::bit_cast<std::uint32_t>(value);signature*=1099511628211ull;}
-    if (!scheduler_.NeedsRender(state_.Effective->OnDemand,signature,force || SceneHasActiveAnimation(scene))) {return false;}
+    if (!scheduler_.NeedsRender(state_.Effective->OnDemand,signature,force || bypassPacing || SceneHasActiveAnimation(scene))) {return false;}
     const auto cpuStart=RenderClockSeconds();telemetry_->BeginGpu();
     struct EndGpu {GraphicsTelemetry& Telemetry;~EndGpu() {Telemetry.EndGpu();}} gpuScope{*telemetry_};
     renderer_->Prepare(scene);ShadowSampling shadow;

@@ -385,6 +385,7 @@ void EditorUI::AssetBrowser() {
         if (ImGui::BeginTabBar("Assets")) {
             if (ImGui::BeginTabItem("Imported")) {
                 ImGui::TextUnformatted("Drag an asset to Viewport, or select and Place.");
+                AssetId reimport = 0;
                 for (const auto& model : Document.Assets()) {
                     Id(model->Id);
                     if (ImGui::Selectable(Text(model->SourcePath.filename()).c_str(),selectedAsset_ == model->Id,ImGuiSelectableFlags_AllowDoubleClick)) {
@@ -397,10 +398,12 @@ void EditorUI::AssetBrowser() {
                     if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s",Text(model->SourcePath).c_str()); }
                     if (selectedAsset_ == model->Id) {
                         if (ImGui::SmallButton("Place instance")) { if (Report(Document.PlaceModel(selectedAsset_))) { FrameScene(); } }
+                        ImGui::SameLine();if (ImGui::SmallButton("Reimport")) {reimport = model->Id;}
                         for (const auto& warning : model->Warnings) { ImGui::TextWrapped("%s",warning.c_str()); }
                     }
                     ImGui::PopID();
                 }
+                if (reimport) {Report(Document.ReimportModel(reimport));}
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Files")) {

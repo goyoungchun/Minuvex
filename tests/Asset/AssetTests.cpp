@@ -146,6 +146,13 @@ void TestLargeIndices() {
 int main() {
     try {
         TestImports();TestFailuresAndLimits();TestLargeIndices();
+        {
+            TemporaryDirectory temp;const auto file=temp.File("reimport.gltf");const auto source=Read(Fixture("SharedBox.gltf"));Write(file,source);
+            lv::AssetRegistry registry;const auto old=registry.LoadModel(file);Write(file,source+"\n");const auto fresh=registry.ReimportModel(old->Id);
+            Check(fresh != old && fresh->Id == old->Id && fresh->ContentHash != old->ContentHash && registry.LoadModel(file) == fresh && registry.Size() == 1,"explicit reimport preserves ID and replaces cache without mutating retained handles");
+            Write(file,"{broken}");ImportRejects([&]{registry.ReimportModel(old->Id);},lv::ImportErrorCode::InvalidData,"malformed reimport fails recoverably");
+            Check(registry.Find(old->Id) == fresh && old->Meshes.size() == fresh->Meshes.size(),"failed reimport retains cached and previous immutable data");
+        }
         TemporaryDirectory temp;auto source=Replace(Read(Fixture("SharedBox.gltf")),"\"name\": \"Checker\",","\"name\": \"Checker\", \"normalTexture\": {\"index\":0,\"scale\":0.4},");Write(temp.File("normal.gltf"),source);lv::AssetRegistry registry;auto model=registry.LoadModel(temp.File("normal.gltf"));
         Check(model->Materials[0].NormalTexture == 0 && Near(model->Materials[0].NormalScale,.4f) && model->Images[0].Width == 2,"normal texture import retains UV0 binding, scale and decoded linear source pixels");
         Write(temp.File("bad-normal.gltf"),Replace(source,"\"scale\":0.4","\"scale\":0.4,\"texCoord\":1"));ImportRejects([&]{registry.LoadModel(temp.File("bad-normal.gltf"));},lv::ImportErrorCode::UnsupportedFeature,"unsupported normal-map UV set is rejected explicitly");

@@ -123,6 +123,26 @@ void AnimationPlayer::Bind(ModelHandle model) {
     overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
 }
 bool AnimationPlayer::NeedsEvaluation() const noexcept { return model_ && (clip_.has_value() || !overrides_.Joints.empty() || !model_->Skins.empty()); }
+void AnimationPlayer::Rebind(ModelHandle model) {
+    Require(bool(model),"Rebind requires a nonempty replacement model.");
+    AnimationPlayer next; next.Bind(std::move(model));
+    next.speed_ = speed_; next.loop_ = loop_;
+    if (clip_ || !overrides_.Joints.empty()) {
+        Require(model_ && SkeletonSignature(model_->Skeleton) == SkeletonSignature(next.model_->Skeleton),
+            "Reimport changed a skeleton/reference hierarchy used by animation or pose overrides.");
+    }
+    if (clip_) {
+        Require(*clip_ < next.model_->Animations.size() && next.model_->Animations[*clip_].Name == model_->Animations.at(*clip_).Name,
+            "Reimport changed the selected animation clip identity.");
+        ValidateAnimation(next.model_->Skeleton,next.model_->Animations[*clip_]);
+        Require(time_ <= next.model_->Animations[*clip_].Duration,"Reimport shortened the clip below the current playhead.");
+        next.clip_ = clip_; next.time_ = time_; next.state_ = state_;
+    }
+    if (!overrides_.Joints.empty()) {next.ApplyPose(overrides_);}
+    else {next.overrides_.Name = overrides_.Name;}
+    (void)next.Evaluate();
+    *this = std::move(next);
+}
 void AnimationPlayer::Play(std::size_t clip, bool restart) {
     Require(model_ && clip < model_->Animations.size(),"Animation clip does not belong to the bound model.");
     ValidateAnimation(model_->Skeleton,model_->Animations[clip]);

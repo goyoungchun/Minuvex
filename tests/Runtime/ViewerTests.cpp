@@ -36,6 +36,12 @@ void CheckFramed(const lv::Viewer& viewer, float aspect) {
 }
 
 void TestFacade() {
+    {
+        TemporaryDirectory temp;const auto file=temp.File("reimport.glb");Write(file,Read(Fixture("SharedBox.glb")));
+        lv::Viewer v;const auto a=v.AddModel(file).Value(),b=v.AddModel(file).Value();const auto old=v.GetScene().GetObject(a).Model;
+        Check(bool(v.ReimportModel(a)) && v.GetScene().GetObject(a).Model != old && v.GetScene().GetObject(a).Model == v.GetScene().GetObject(b).Model && v.GetScene().GetObject(a).Model->Id == old->Id,"Viewer reimports the shared source without changing instance IDs");
+        const auto current=v.GetScene().GetObject(a).Model;Write(file,"broken");Check(!v.ReimportModel(b) && v.GetScene().GetObject(a).Model == current,"failed Viewer reimport preserves current instances");
+    }
     lv::Viewer viewer;
     Check(!viewer.IsRunning(),"construction does not open a graphics window");
     viewer.RequestClose();

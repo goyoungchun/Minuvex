@@ -6,10 +6,22 @@ param(
 $ErrorActionPreference = 'Stop'
 $a = Get-Content -Raw -LiteralPath $Minuvex | ConvertFrom-Json
 $b = Get-Content -Raw -LiteralPath $Unity | ConvertFrom-Json
+function RequireNumber($value, [double]$minimum, [double]$maximum, [bool]$integer, [string]$field) {
+    if ($null -eq $value -or $value -isnot [ValueType] -or $value -is [bool]) { throw "Invalid numeric field: $field" }
+    $number = [double]$value
+    if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt $minimum -or $number -gt $maximum -or ($integer -and [math]::Truncate($number) -ne $number)) { throw "Invalid numeric field: $field" }
+}
 foreach ($report in @($a,$b)) {
-    if ($report.format -ne 'MinuvexBenchmark' -or $report.version -ne 1) { throw 'Unsupported benchmark report.' }
+    if ($report.format -isnot [string] -or $report.format -cne 'MinuvexBenchmark') { throw 'Unsupported benchmark report.' }
+    RequireNumber $report.version 1 1 $true 'version'
+    foreach ($field in @('engine','engineVersion','scenario','backend','gpu')) {
+        if ($report.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($report.$field)) { throw "Missing $field" }
+    }
+    foreach ($field in @('objects','width','height','warmupFrames','measuredFrames')) { RequireNumber $report.$field 1 100000 $true $field }
+    RequireNumber $report.msaa 1 8 $true 'msaa'
+    if ($report.msaa -notin @(1,2,4,8) -or $report.vsync -isnot [bool] -or $report.shadows -isnot [bool]) { throw 'Invalid sample count or boolean setting.' }
     foreach ($field in @('cadenceMeanMs','cadenceP95Ms')) {
-        if ($null -eq $report.$field -or $report.$field -is [string] -or -not ([double]$report.$field -gt 0) -or [double]::IsInfinity([double]$report.$field)) { throw "Invalid $field" }
+        RequireNumber $report.$field ([double]::Epsilon) ([double]::MaxValue) $false $field
     }
 }
 if ($a.engine -ne 'Minuvex' -or $b.engine -ne 'Unity') { throw 'Expected actual Minuvex and Unity reports.' }

@@ -268,7 +268,11 @@ void RunQuality() {
     Check(surface.Stats().MaxResidentTextureSize == 1024 && surface.Quality().Effective->Anisotropy > 1,"High restores texture resolution and creates anisotropic sampler");
     lv::ImageAsset checker;checker.Width=checker.Height=2;checker.Rgba={0,0,0,255,255,255,255,255,0,0,0,255,255,255,255,255};const auto packed=lv::detail::PackTexture(checker,1);
     Check(packed.Width == 1 && packed.Height == 1 && packed.Levels == 1 && packed.Pixels[0] >= 187 && packed.Pixels[0] <= 188,"texture reduction averages in linear space before sRGB encoding");
-    Require(bool(surface.Resize(textured,0,0)),"Cannot suspend quality surface.");Check(!surface.Texture().id && !surface.Quality().Applied,"zero-sized viewport releases targets");Require(bool(surface.Resize(textured,Size,Size)),"Cannot resume quality surface.");
+    Require(bool(surface.Resize(textured,0,0)),"Cannot suspend quality surface.");Check(!surface.Texture().id && !surface.Quality().Applied,"zero-sized viewport releases targets");
+    auto suspended=surface.Telemetry(lv::detail::RenderClockSeconds());lv::QualityEstimate current;current.Quality=suspended.Quality;current.Cost=suspended.Resident;current.AssetSignature=suspended.ResidentAssetSignature;
+    auto resume=lv::EstimateQualityResources(high,suspended.Quality.Capabilities,textured,Size,Size,&current);
+    Check(resume && resume.Value().AdditionalBytes == resume.Value().Cost.RenderTargetBytes,"real suspended HDR/shadow telemetry cannot reuse released attachments");
+    Require(bool(surface.Resize(textured,Size,Size)),"Cannot resume quality surface.");
     Check(surface.Texture().id && surface.Quality().Applied,"viewport resumes with latest requested quality");
 }
 

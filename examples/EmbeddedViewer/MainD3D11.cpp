@@ -86,6 +86,9 @@ struct Application {
         ComPtr<ID3D11Device> otherDevice;ComPtr<ID3D11DeviceContext> otherContext;Require(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&otherDevice,nullptr,&otherContext),"Cannot create second Host test device.");Targets foreign;foreign.Offscreen(otherDevice.Get(),800,600);Require(!Renderer.Render(Scene,foreign.Target()),"Foreign-device texture was accepted.");
         const auto quality=Renderer.GetQuality().Value();auto invalid=quality.Requested;invalid.Overrides.Shadow=lv::ShadowMode::Pcss;
         Require(!Renderer.SetQuality(invalid,Scene) && Renderer.GetQuality().Value().Requested == quality.Requested,"Rejected quality changed the active Embedded profile.");
+        auto paced=quality.Requested;paced.Overrides.TargetFps=1;Require(Renderer.SetQuality(paced,Scene));
+        Require(Renderer.Render(Scene,original,draw).Value().SceneRendered && Renderer.Render(Scene,original,draw).Value().SceneRendered,"ForceRedraw did not bypass the FPS limiter.");
+        auto normal=draw;normal.ForceRedraw=false;Require(!Renderer.Render(Scene,original,normal).Value().SceneRendered,"Normal rendering bypassed the FPS limiter.");
         auto demand=quality.Requested;demand.Overrides.OnDemand=lv::OnDemandMode::On;Scene.GetAnimation(Object).Pause();Require(Renderer.SetQuality(demand,Scene));draw.ForceRedraw=false;
         auto changed=Renderer.Render(Scene,original,draw);Require(changed);Targets alternate;alternate.Offscreen(Device.Get(),800,600);auto reused=Renderer.Render(Scene,alternate.Target(),draw);Require(reused);
         Require(changed.Value().SceneRendered && !reused.Value().SceneRendered && reused.Value().Presented && Pixels(Device.Get(),Context.Get(),alternate) == Pixels(Device.Get(),Context.Get(),Target),"On-demand cached scene did not reach the replacement Host target.");

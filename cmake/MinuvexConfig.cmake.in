@@ -1,4 +1,6 @@
 @PACKAGE_INIT@
+set(Minuvex_FOUND TRUE)
+unset(Minuvex_NOT_FOUND_MESSAGE)
 include(CMakeFindDependencyMacro)
 find_dependency(Threads)
 set(Minuvex_VERSION "@PROJECT_VERSION@")
@@ -13,6 +15,14 @@ endforeach()
 # viewer/embedded are also available as CPU stubs. Request graphics explicitly
 # when the application requires a native runtime rather than just CPU APIs.
 set(Minuvex_graphics_FOUND ${Minuvex_GRAPHICS_AVAILABLE})
+foreach(_component IN LISTS Minuvex_FIND_COMPONENTS)
+    if(NOT _component IN_LIST _Minuvex_components AND NOT _component STREQUAL "graphics")
+        set(Minuvex_${_component}_FOUND FALSE)
+        set(Minuvex_NOT_FOUND_MESSAGE "Unknown Minuvex component: ${_component}")
+    elseif(_component STREQUAL "graphics" AND NOT Minuvex_GRAPHICS_AVAILABLE)
+        set(Minuvex_NOT_FOUND_MESSAGE "This is a CPU-only SDK; install a native SDK to request graphics.")
+    endif()
+endforeach()
 check_required_components(Minuvex)
 unset(_component)
 unset(_Minuvex_components)

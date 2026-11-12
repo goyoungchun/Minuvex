@@ -1,4 +1,9 @@
 include(CMakePackageConfigHelpers)
+foreach(_dir CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_DATADIR)
+    if(IS_ABSOLUTE "${${_dir}}" OR "${${_dir}}" MATCHES "(^|[/\\\\])\\.\\.([/\\\\]|$)")
+        message(FATAL_ERROR "Relocatable SDK requires ${_dir} to be relative and inside the install prefix.")
+    endif()
+endforeach()
 
 set(_sdk_public core animation assets scene scene_io quality telemetry editor_document viewer embedded)
 set(_sdk_internal json_io asset_codecs camera)

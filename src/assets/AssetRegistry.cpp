@@ -29,4 +29,15 @@ ModelHandle AssetRegistry::Find(AssetId id) const noexcept {
     return {};
 }
 
+ModelHandle AssetRegistry::ReimportModel(AssetId id) {
+    for (auto& current : models_) {
+        if (current->Id != id) { continue; }
+        auto replacement = detail::ImportGltf(current->SourcePath, current->Settings);
+        replacement->Id = id;
+        current = std::move(replacement);
+        return current;
+    }
+    throw std::invalid_argument("Asset ID does not belong to this registry.");
+}
+
 } // namespace lv

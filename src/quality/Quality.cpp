@@ -105,7 +105,7 @@ Result<QualityState> ResolveQuality(const QualityProfile& p,const QualityCapabil
 }
 std::uint64_t RenderTargetBytes(const RenderSettings& s,int width,int height) {
     Require(width > 0 && height > 0 && width <= 65536 && height <= 65536 && (s.MsaaSamples == 1 || s.MsaaSamples == 2 || s.MsaaSamples == 4 || s.MsaaSamples == 8),"Invalid render target extent/sample count.");
-    Require(s.Shadow == ShadowMode::Off || ((s.Shadow == ShadowMode::Basic || s.Shadow == ShadowMode::Pcf) && s.ShadowResolution >= 512 && s.ShadowResolution <= 4096),"Invalid shadow target settings.");
+    Require(s.Shadow == ShadowMode::Off || ((s.Shadow == ShadowMode::Basic || s.Shadow == ShadowMode::Pcf) && (s.ShadowResolution == 512 || s.ShadowResolution == 1024 || s.ShadowResolution == 2048 || s.ShadowResolution == 4096)),"Invalid shadow target settings.");
     const std::uint64_t color=s.PostProcessing ? 8:4;
     return std::uint64_t(width)*height*((color+4)*s.MsaaSamples+(s.MsaaSamples > 1 ? color:0)+(s.PostProcessing ? 4:0))+(s.Shadow != ShadowMode::Off ? std::uint64_t(s.ShadowResolution)*s.ShadowResolution*8:0);
 }

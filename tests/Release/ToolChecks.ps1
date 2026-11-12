@@ -15,6 +15,13 @@ $b | ConvertTo-Json | Set-Content $fb -Encoding UTF8
 Assert ((Get-Content -Raw $result | ConvertFrom-Json).cadenceMeanRatioMinuvexToUnity -eq .5) 'Comparison ratio failed.'
 $b.width=1920; $b | ConvertTo-Json | Set-Content $fb -Encoding UTF8
 Rejects { & (Join-Path $scripts 'Compare.ps1') -Minuvex $fa -Unity $fb -Output $result }
+$b.cadenceMeanMs=$true;$b | ConvertTo-Json | Set-Content $fb -Encoding UTF8
+Rejects { & (Join-Path $scripts 'Compare.ps1') -Minuvex $fa -Unity $fb -Output $result }
+$b.cadenceMeanMs=4;$b.objects=0;$a.objects=0
+$a | ConvertTo-Json | Set-Content $fa -Encoding UTF8
+$b | ConvertTo-Json | Set-Content $fb -Encoding UTF8
+Rejects { & (Join-Path $scripts 'Compare.ps1') -Minuvex $fa -Unity $fb -Output $result }
+$a.objects=10;$b.objects=10;$a | ConvertTo-Json | Set-Content $fa -Encoding UTF8
 $b.width=1280;$b.cadenceMeanMs=0; $b | ConvertTo-Json | Set-Content $fb -Encoding UTF8
 Rejects { & (Join-Path $scripts 'Compare.ps1') -Minuvex $fa -Unity $fb -Output $result }
 $runs = @(

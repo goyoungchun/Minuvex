@@ -12,7 +12,7 @@ public:
     ~RenderSurface();
     Result<void> ApplyQuality(const QualityProfile& profile,const Scene& scene,int width,int height);
     Result<void> Resize(const Scene& scene,int width,int height);
-    bool Render(const Scene& scene,double now,bool force=false,const std::array<float,4>& clear={.025f,.035f,.055f,1});
+    bool Render(const Scene& scene,double now,bool force=false,const std::array<float,4>& clear={.025f,.035f,.055f,1},bool bypassPacing=false);
     void Present() const; // In the native single-sample swapchain pass.
     void Invalidate() noexcept {scheduler_.Invalidate();}
     bool Due(double now) const;

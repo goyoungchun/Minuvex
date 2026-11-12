@@ -134,6 +134,26 @@ void Persistence() {
     const auto& restored = precise.GetScene().GetObject(precise.GetScene().ObjectIds()[0]).Animation;
     Check(restored.Speed() == 1.234567890123 && restored.Time() == 2 && restored.State() == lv::PlaybackState::Stopped,"double speed and stopped endpoint survive serialization exactly");
 }
+void Reimport() {
+    TemporaryDirectory temp;const auto file=temp.File("reimport.gltf");auto source=Json::parse(Read(Fixture("AnimatedRibbon.gltf")));Write(file,source.dump());
+    lv::EditorDocument doc;const auto asset=doc.ImportModel(file).Value();const auto reference=doc.PlaceModel(asset).Value(),a=doc.PlaceModel(asset).Value(),b=doc.PlaceModel(asset).Value();
+    Check(bool(doc.PlayAnimation(a,0)) && bool(doc.SeekAnimation(a,.75)) && bool(doc.PauseAnimation(a)) && bool(doc.SetAnimationSpeed(a,-2)) && bool(doc.PlayAnimation(b,0)) && bool(doc.SeekAnimation(b,1.5)),"reimport fixture has independent playback states");
+    lv::Transform pose;pose.Position.X=.2f;Check(bool(doc.SetJointPose(a,2,pose)),"reimport fixture has an active manual pose");
+    const auto old=doc.GetScene().GetObject(a).Model;
+    source["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"]={.2,.4,.6,1};Write(file,source.dump());
+    Check(bool(doc.ReimportModel(asset)) && doc.IsDirty(),"compatible reimport updates a document");
+    const auto replacement=doc.GetScene().GetObject(a).Model;
+    const auto& pa=doc.GetScene().GetObject(a).Animation;const auto& pb=doc.GetScene().GetObject(b).Animation;
+    Check(replacement != old && replacement->Id == asset && doc.Assets()[0] == replacement && doc.GetScene().GetObject(reference).Model == replacement && doc.GetScene().GetObject(b).Model == replacement && doc.Selection() == b,"reimport replaces every shared instance and library while preserving selection and IDs");
+    Check(pa.Time() == .75 && pa.Speed() == -2 && pa.State() == lv::PlaybackState::Paused && pa.Overrides().Joints.size() == 1 && pb.Time() == 1.5 && pb.State() == lv::PlaybackState::Playing,"reimport retains per-instance playback and pose");
+    Check(bool(doc.Save(temp.File("world.mvxscene.json"))) && !doc.IsDirty(),"reimported Scene remains serializable");
+    auto incompatible=source;incompatible["nodes"][1]["name"]="Changed hierarchy";Write(file,incompatible.dump());
+    const auto failed=doc.ReimportModel(asset);
+    Check(!failed && failed.Error().Code == lv::ErrorCode::InvalidArgument && doc.GetScene().GetObject(reference).Model == replacement && doc.GetScene().GetObject(a).Model == replacement && doc.GetScene().GetObject(b).Model == replacement && doc.Assets()[0] == replacement && !doc.IsDirty(),"incompatible skeleton reimport rolls back all instances, including an earlier compatible reference instance");
+    incompatible=source;incompatible["animations"][0]["name"]="Different clip";Write(file,incompatible.dump());
+    Check(!doc.ReimportModel(asset) && doc.GetScene().GetObject(a).Animation.Time() == .75 && !doc.IsDirty(),"changed selected clip identity is rejected without resetting playback");
+    Write(file,source.dump());const auto c=doc.PlaceModel(asset).Value();Check(doc.GetScene().GetObject(c).Model == replacement,"failed transaction also preserves the registry for later placement");
+}
 void ImportValidation() {
     TemporaryDirectory temp; const auto original = Json::parse(Read(Fixture("AnimatedRibbon.gltf")));
     const auto rejects = [&](Json json,lv::ImportErrorCode code,const char* label) {
@@ -163,7 +183,7 @@ void ImportValidation() {
 }
 }
 int main() {
-    try { DataAndPlayer(); Persistence(); ImportValidation(); }
+    try { DataAndPlayer(); Persistence(); ImportValidation(); Reimport(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

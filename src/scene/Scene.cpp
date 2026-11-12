@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <unordered_set>
+#include <type_traits>
 
 namespace lv {
 namespace {
@@ -97,6 +98,24 @@ AnimationPlayer& Scene::GetAnimation(ObjectId id) {
 void Scene::UpdateAnimations(double deltaSeconds) {
     if (!std::isfinite(deltaSeconds) || deltaSeconds < 0) { throw std::invalid_argument("Animation delta must be finite and nonnegative."); }
     for (auto id : order_) { if (objects_.at(id).Model) { objects_.at(id).Animation.Update(deltaSeconds); } }
+}
+
+std::size_t Scene::ReplaceModel(ModelHandle previous, ModelHandle replacement) {
+    static_assert(std::is_nothrow_move_assignable_v<AnimationPlayer>);
+    if (!previous || !replacement) {throw std::invalid_argument("ReplaceModel requires nonempty model handles.");}
+    if (previous == replacement) {return 0;}
+    std::vector<std::pair<ObjectId,AnimationPlayer>> pending;
+    for (auto id : order_) {
+        const auto& object = objects_.at(id);
+        if (object.Model != previous) {continue;}
+        if (object.Animation.Model() != previous) {throw std::invalid_argument("Scene player was rebound outside its owning Scene.");}
+        auto player = object.Animation; player.Rebind(replacement);
+        pending.emplace_back(id,std::move(player));
+    }
+    for (auto& [id,player] : pending) {
+        auto& object = objects_.at(id); object.Model = replacement; object.Animation = std::move(player);
+    }
+    return pending.size();
 }
 
 Mat4 Scene::GetWorldTransform(ObjectId id) const {

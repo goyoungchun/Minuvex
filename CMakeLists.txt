@@ -6,7 +6,7 @@ if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 endif()
-project(Minuvex VERSION 1.0.0 LANGUAGES CXX)
+project(Minuvex VERSION 1.1.0 LANGUAGES CXX)
 if(MSVC)
     if(POLICY CMP0141)
         # Reconfigured pre-CMP0141 build trees may retain /Zi in their cache.

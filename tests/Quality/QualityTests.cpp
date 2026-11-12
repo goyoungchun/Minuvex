@@ -9,6 +9,7 @@ using Json=nlohmann::json;
 namespace {
 lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4)|(1u<<8);return c;}
 void Policy() {
+    lv::RenderSettings invalidShadow;invalidShadow.Shadow=lv::ShadowMode::Pcf;invalidShadow.ShadowResolution=513;Rejects([&]{(void)lv::RenderTargetBytes(invalidShadow,16,16);},"public target byte helper rejects unsupported shadow resolutions");
     auto low=lv::MakeQualityProfile(lv::QualityPreset::Low),medium=lv::MakeQualityProfile(lv::QualityPreset::Medium),high=lv::MakeQualityProfile(lv::QualityPreset::High);
     auto l=lv::ExpandQuality(low),m=lv::ExpandQuality(medium),h=lv::ExpandQuality(high);
     Check(l && l.Value().MaxRenderHeight == 720 && l.Value().TargetFps == 30 && l.Value().MaxTextureSize == 512 && l.Value().MsaaSamples == 1,"Low profile reduces render/texture load without disabling skinning");

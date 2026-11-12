@@ -13,6 +13,7 @@ int main(int argc, char** argv) {
         lv::EditorDocument doc;const auto asset=doc.ImportModel(argv[1]);
         if (!asset) {std::fprintf(stderr,"%s\n",asset.Error().Message.c_str());return 1;}
         if (!doc.PlaceModel(asset.Value()) || !doc.SetLocalLights({{{0,2,0},{1,1,1},1,5}}, {})) {return 1;}
+        if (!doc.ReimportModel(asset.Value())) {return 1;}
         const auto file=output/"Example.mvxscene.json";
         if (!doc.Save(file)) {return 1;}
         lv::EditorDocument reopened;if (!reopened.Open(file) || reopened.GetScene().Size() != 1 || reopened.GetScene().PointLights.size() != 1) {return 1;}
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
         const auto estimate=lv::EstimateQualityResources(low,caps,reopened.GetScene(),1280,720);
         if (!estimate || !estimate.Value().Cost.BufferBytes) {return 1;}
         lv::Viewer viewer;if (!viewer.AddModel(argv[1]) || !viewer.SetQuality(low)) {return 1;}
+        if (!viewer.ReimportModel(viewer.GetScene().ObjectIds().front())) {return 1;}
         lv::EmbeddedRenderer embedded;if (embedded.IsInitialized()) {return 1;}
         const auto hardware=lv::SystemInfo::QueryHardware();
         std::printf("Minuvex %.*s | %.*s | %.*s | %d bit | graphics=%d | %s\n",

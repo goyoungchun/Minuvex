@@ -93,6 +93,19 @@ Result<void> Viewer::RemoveModel(ObjectId id) {
     catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument, "Use a live model ID.")); }
 }
 
+Result<void> Viewer::ReimportModel(ObjectId id) {
+    auto ready = ObjectReady(*state_,id); if (!ready) {return ready;}
+    const auto previous = state_->World.GetObject(id).Model;
+    if (!previous || state_->Assets.Find(previous->Id) != previous) {return Result<void>::Failure({ErrorCode::InvalidHandle,"Model is not managed by this Viewer's AssetRegistry.","Use an instance created with AddModel.",{}});}
+    try {
+        auto registry = state_->Assets;
+        auto replacement = registry.ReimportModel(previous->Id);
+        (void)state_->World.ReplaceModel(previous,replacement);
+        state_->Assets = std::move(registry);
+        return Result<void>::Success();
+    }catch (...) {auto error = detail::CurrentException(ErrorCode::InvalidArgument,"Restore compatible skeleton/clip data or clear the affected animation and pose before reimporting.");error.SourcePath = previous->SourcePath;return Result<void>::Failure(std::move(error));}
+}
+
 Result<void> Viewer::SetTransform(ObjectId id, const Transform& transform) {
     auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
     try { state_->World.SetTransform(id,transform); return Result<void>::Success(); }

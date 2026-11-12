@@ -125,7 +125,7 @@ Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const Ho
         const auto resized=p.Surface->Resize(scene,target.Width,target.Height);if (!resized) {return Result<EmbeddedFrameResult>::Failure(resized.Error());}
         if (candidate) {p.Target.swap(candidate);candidate.reset();}
         if (options.ForceRedraw) {p.Surface->Invalidate();}
-        const bool rendered=p.Surface->Render(scene,detail::RenderClockSeconds(),false,options.ClearColor);
+        const bool rendered=p.Surface->Render(scene,detail::RenderClockSeconds(),false,options.ClearColor,options.ForceRedraw);
         sg_pass pass{};pass.attachments.colors[0]=p.Target->ColorView;pass.attachments.depth_stencil=p.Target->DepthView;
         pass.action.colors[0].load_action=SG_LOADACTION_CLEAR;pass.action.colors[0].clear_value={options.ClearColor[0],options.ClearColor[1],options.ClearColor[2],options.ClearColor[3]};pass.action.depth.load_action=SG_LOADACTION_CLEAR;pass.action.depth.clear_value=1;
         sg_begin_pass(pass);p.Surface->Present();sg_end_pass();frame.Finish();

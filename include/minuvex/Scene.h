@@ -76,6 +76,7 @@ public:
     void SetTransform(ObjectId id, const Transform& transform);
     void SetVisible(ObjectId id, bool visible);
     void SetModel(ObjectId id, ModelHandle model); // Empty handle detaches the model.
+    std::size_t ReplaceModel(ModelHandle previous, ModelHandle replacement); // All matching instances, transactional; preserves compatible animation/pose.
     AnimationPlayer& GetAnimation(ObjectId id); // Model instance state; throws for empty objects.
     void UpdateAnimations(double deltaSeconds);
     Mat4 GetWorldTransform(ObjectId id) const;

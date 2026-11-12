@@ -75,15 +75,21 @@ Result<QualityEstimate> EstimateQualityResources(const QualityProfile& p,const Q
         QualityEstimate e;e.Quality=std::move(resolved).Value();e.Cost=Cost(scene,e.Quality,e.AssetSignature);
         if (current && current->Quality.Effective) {
             const auto& old=*current->Quality.Effective;const auto& next=*e.Quality.Effective;
+            const auto& cost = current->Cost;
+            const bool suspended = current->Quality.RenderWidth == 0 && current->Quality.RenderHeight == 0;
+            const auto oldTargets = suspended ? 0 : RenderTargetBytes(old,current->Quality.RenderWidth,current->Quality.RenderHeight);
+            if (cost.RenderTargetBytes != oldTargets || cost.TotalBytes != Add(cost.RenderTargetBytes,Add(cost.TextureBytes,cost.BufferBytes))) {
+                throw std::invalid_argument("Current resource cost does not match its extent/settings or total.");
+            }
             const auto shadowBytes=[](const RenderSettings& s) {return s.Shadow != ShadowMode::Off ? std::uint64_t(s.ShadowResolution)*s.ShadowResolution*8:0;};
-            if (old.Shadow != ShadowMode::Off && next.Shadow != ShadowMode::Off && old.ShadowResolution == next.ShadowResolution) {e.ReusedBytes=shadowBytes(next);}
-            if (old.MsaaSamples == next.MsaaSamples && old.PostProcessing == next.PostProcessing && current->Quality.RenderWidth == e.Quality.RenderWidth && current->Quality.RenderHeight == e.Quality.RenderHeight) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.RenderTargetBytes-shadowBytes(next),current->Cost.RenderTargetBytes-shadowBytes(old)));}
+            if (!suspended && old.Shadow != ShadowMode::Off && next.Shadow != ShadowMode::Off && old.ShadowResolution == next.ShadowResolution) {e.ReusedBytes=shadowBytes(next);}
+            if (!suspended && old.MsaaSamples == next.MsaaSamples && old.PostProcessing == next.PostProcessing && current->Quality.RenderWidth == e.Quality.RenderWidth && current->Quality.RenderHeight == e.Quality.RenderHeight) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.RenderTargetBytes-shadowBytes(next),current->Cost.RenderTargetBytes-shadowBytes(old)));}
             if (current->AssetSignature == e.AssetSignature && old.MsaaSamples == next.MsaaSamples && old.MaxTextureSize == next.MaxTextureSize && old.Anisotropy == next.Anisotropy && old.PostProcessing == next.PostProcessing && (old.Shadow != ShadowMode::Off) == (next.Shadow != ShadowMode::Off) && (old.Lighting == LightingMode::Advanced) == (next.Lighting == LightingMode::Advanced)) {e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.TextureBytes,current->Cost.TextureBytes));e.ReusedBytes=Add(e.ReusedBytes,std::min(e.Cost.BufferBytes,current->Cost.BufferBytes));}
         }
         e.AdditionalBytes=e.Cost.TotalBytes-e.ReusedBytes;e.TemporaryPeakBytes=Add(current ? current->Cost.TotalBytes:0,e.AdditionalBytes);
         return Result<QualityEstimate>::Success(std::move(e));
     } catch (const std::bad_alloc& e) {return Result<QualityEstimate>::Failure({ErrorCode::InsufficientResource,e.what(),"Reduce the scene size.",{}});}
-    catch (const std::exception& e) {return Result<QualityEstimate>::Failure({ErrorCode::InvalidData,e.what(),"Check scene references and image sizes.",{}});}
+    catch (const std::exception& e) {return Result<QualityEstimate>::Failure({ErrorCode::InvalidData,e.what(),"Check scene references, image sizes and the current resource-cost snapshot.",{}});}
 }
 QualityRecommendation RecommendQuality(const QualityCapabilities& caps,const SystemSample& system,const Scene& scene,int w,int h,const QualityEstimate* current,const FrameStatistics* frames) {
     QualityRecommendation result;

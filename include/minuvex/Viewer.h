@@ -86,6 +86,7 @@ public:
 
     Result<ObjectId> AddModel(const std::filesystem::path& path, const ModelOptions& options = {});
     Result<void> RemoveModel(ObjectId id);
+    Result<void> ReimportModel(ObjectId id); // Refresh the shared source asset across its Scene instances.
     Result<void> SetTransform(ObjectId id, const Transform& transform);
     Result<void> SetVisible(ObjectId id, bool visible);
     Result<void> SetCamera(const Camera& camera); // Disables automatic framing.

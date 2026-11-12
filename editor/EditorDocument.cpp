@@ -63,6 +63,20 @@ Result<ObjectId> EditorDocument::PlaceModel(AssetId asset, const Transform& tran
         const auto id = world_.AddModel(std::move(model),transform,parent); selection_ = id; dirty_ = true; return id;
     });
 }
+Result<void> EditorDocument::ReimportModel(AssetId asset) {
+    auto previous = registry_.Find(asset);
+    if (!previous) {return Result<void>::Failure({ErrorCode::InvalidHandle,"Asset is not imported in this document.","Use an Asset ID from the imported library.",{}});}
+    auto result = Edit([&] {
+        auto registry = registry_;
+        auto replacement = registry.ReimportModel(asset);
+        auto library = library_;
+        for (auto& model : library) {if (model == previous) {model = replacement;}}
+        (void)world_.ReplaceModel(previous,replacement);
+        registry_ = std::move(registry); library_.swap(library); dirty_ = true;
+    });
+    if (!result) {auto error = result.Error(); error.SourcePath = previous->SourcePath;return Result<void>::Failure(std::move(error));}
+    return result;
+}
 Result<ObjectId> EditorDocument::CreateObject(std::string name, ObjectId parent) {
     return Edit([&] { const auto id = world_.CreateObject(std::move(name),parent); selection_ = id; dirty_ = true; return id; });
 }

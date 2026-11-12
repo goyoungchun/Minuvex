@@ -113,10 +113,11 @@ struct ModelAsset {
 };
 
 // CPU-only, synchronous, single-threaded registry. Strongly retains loaded assets
-// until Clear(); handles and Scene instances remain valid after Clear().
+// until Clear() or reimport replacement; retained handles/instances stay valid.
 class AssetRegistry {
 public:
     ModelHandle LoadModel(const std::filesystem::path& path, const ImportSettings& settings = {});
+    ModelHandle ReimportModel(AssetId id); // Stable ID, fresh immutable data; failure preserves the cache.
     ModelHandle Find(AssetId id) const noexcept;
     std::size_t Size() const noexcept { return models_.size(); }
     void Clear() noexcept { models_.clear(); }

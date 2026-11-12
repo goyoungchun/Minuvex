@@ -70,6 +70,7 @@ Quaternion Slerp(Quaternion from, Quaternion to, float amount);
 class AnimationPlayer {
 public:
     void Bind(ModelHandle model); // Resets clip, time, speed, loop and overrides.
+    void Rebind(ModelHandle model); // Preserve compatible instance state; incompatible changes throw before replacement.
     const ModelHandle& Model() const noexcept { return model_; }
     std::optional<std::size_t> Clip() const noexcept { return clip_; }
     double Time() const noexcept { return time_; }
