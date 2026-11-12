@@ -10,7 +10,8 @@ int main(int argc, char** argv) {
         const auto& info=lv::GetBuildInfo();
         if (info.Version != lv::Version || info.PointerBits != sizeof(void*)*8) {return 1;}
         const auto output=std::filesystem::path(argv[2]);std::filesystem::create_directories(output);
-        lv::EditorDocument doc;const auto opened=doc.OpenModel(argv[1]);
+        lv::EditorDocument doc;const auto preview=doc.PreviewModel(argv[1]);if (!preview || !lv::InspectModel(*preview.Value()).Vertices) {return 1;}
+        lv::ValidateModel(*preview.Value());const auto opened=doc.OpenPreparedModel(preview.Value());
         if (!opened) {std::fprintf(stderr,"%s\n",opened.Error().Message.c_str());return 1;}
         if (!doc.SetLocalLights({{{0,2,0},{1,1,1},1,5}}, {})) {return 1;}
         if (!doc.ReimportModel(doc.GetScene().GetObject(opened.Value()).Model->Id)) {return 1;}

@@ -6,7 +6,7 @@ if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 endif()
-project(Minuvex VERSION 1.2.0 LANGUAGES CXX)
+project(Minuvex VERSION 1.3.0 LANGUAGES CXX)
 if(MSVC)
     if(POLICY CMP0141)
         # Reconfigured pre-CMP0141 build trees may retain /Zi in their cache.
@@ -70,8 +70,8 @@ minuvex_configure_target(minuvex_quality)
 
 # Small CPU codecs are vendored with their licenses: core-only/offline builds
 # need no network or graphics dependencies for importing and testing assets.
-add_library(minuvex_asset_codecs STATIC src/assets/ThirdParty.cpp)
-target_include_directories(minuvex_asset_codecs SYSTEM PRIVATE third_party/cgltf third_party/stb)
+add_library(minuvex_asset_codecs STATIC src/assets/ThirdParty.cpp src/assets/ThirdPartyFbx.cpp)
+target_include_directories(minuvex_asset_codecs SYSTEM PRIVATE third_party/cgltf third_party/stb third_party/tinyobjloader third_party/ufbx)
 target_compile_features(minuvex_asset_codecs PRIVATE cxx_std_20)
 
 add_library(minuvex_animation STATIC src/animation/Animation.cpp)
@@ -79,10 +79,10 @@ add_library(minuvex::animation ALIAS minuvex_animation)
 target_link_libraries(minuvex_animation PUBLIC minuvex_core)
 minuvex_configure_target(minuvex_animation)
 
-add_library(minuvex_assets STATIC src/assets/AssetRegistry.cpp src/assets/GltfImport.cpp)
+add_library(minuvex_assets STATIC src/assets/AssetRegistry.cpp src/assets/ImportCommon.cpp src/assets/GltfImport.cpp src/assets/ObjImport.cpp src/assets/FbxImport.cpp src/assets/ProjectImport.cpp)
 add_library(minuvex::assets ALIAS minuvex_assets)
 target_link_libraries(minuvex_assets PUBLIC minuvex_animation PRIVATE minuvex_asset_codecs)
-target_include_directories(minuvex_assets SYSTEM PRIVATE third_party/cgltf third_party/stb)
+target_include_directories(minuvex_assets SYSTEM PRIVATE third_party/cgltf third_party/stb third_party/tinyobjloader third_party/ufbx)
 minuvex_configure_target(minuvex_assets)
 
 add_library(minuvex_scene STATIC src/scene/Scene.cpp)

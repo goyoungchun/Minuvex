@@ -98,8 +98,13 @@ void CheckEditorFileWorkflows() {
     Require(ui.Document.GetScene().Size() == 1 && !ui.Document.IsDirty(),"Open Scene did not restore the native Save As document.");
     ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Multiple,"Import Assets did not request a multiselect dialog.");return FilePickerResult::Success(std::vector<std::filesystem::path>{source,MINUVEX_EDITOR_ANIMATION_SAMPLE});});
     ui.ChooseFiles(EditorFileAction::ImportAssets);
+    Require(ui.HasImportPreview() && ui.ImportPreviewModel() && ui.Document.Assets().size() == 1 && !ui.Document.IsDirty(),"Import Preview mutated the current document before approval.");
+    ui.CancelImportPreview();Require(ui.Document.Assets().size() == 1 && !ui.Document.IsDirty(),"Cancelling Import Preview changed existing assets.");
+    ui.ChooseFiles(EditorFileAction::ImportAssets);
+    while (ui.HasImportPreview()) {Require(ui.ConfirmImportPreview(),"Failed to confirm a file in the multi-file Import Preview.");}
     Require(ui.Document.Assets().size() == 2 && ui.Document.GetScene().Size() == 1,"Multi-file import placed instances instead of registering assets.");
     ui.DropFiles({source},-10,-10);
+    Require(ui.HasImportPreview() && ui.Document.GetScene().Size() == 1,"Dropped model bypassed Import Preview.");Require(ui.ConfirmImportPreview(),"Dropped model preview could not commit.");
     Require(ui.Document.GetScene().Size() == 2,"Dropped model did not create a Scene instance.");
     ui.SetFilePicker([&](const FilePickerRequest&) {return FilePickerResult::Success(std::vector<std::filesystem::path>{source});});
     ui.ChooseFiles(EditorFileAction::NewProject);ui.ResolvePending(UnsavedChoice::Discard);
@@ -107,6 +112,8 @@ void CheckEditorFileWorkflows() {
     ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Folder,"New Project did not request a folder chooser.");return FilePickerResult::Success(std::vector<std::filesystem::path>{folder});});
     ui.ChooseFiles(EditorFileAction::NewProject);ui.ResolvePending(UnsavedChoice::Discard);
     Require(ui.Document.GetScene().Size() == 0 && std::filesystem::is_directory(folder/"assets") && std::filesystem::is_directory(folder/"scenes"),"Workspace creation failed.");
+    ui.Import(source,false);Require(ui.ConfirmImportPreview(),"Project resource copy did not commit.");
+    Require(ui.Document.Assets().front()->SourcePath!=source && ui.Document.GetScene().Size() == 0,"Project Import retained an external source or placed an unwanted instance.");
     for (int i=0;i<300;++i) {ui.Record(ConsoleLevel::Info,"bounded Console entry");}
     Require(ui.ConsoleEntries().size() == 256,"Console history was not bounded.");
     ui.Shutdown();
@@ -158,7 +165,7 @@ void SmokeAfterDraw(Application& app) {
     auto& ui = *app.UI; auto& doc = ui.Document;
     if (app.Frames == 1) {
         if (app.QualitySmoke) {const auto* panel=ImGui::FindWindowByName("Quality Settings");Require(panel && panel->DockId,"Quality Settings panel was not docked.");Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::Low && ui.Viewport.Quality().Applied,"Initial Low quality was not applied.");}
-        for (const auto* name : {"Viewport","Hierarchy","Inspector","Asset Browser","Console"}) {
+        for (const auto* name : {"Viewport","Hierarchy","Inspector","Asset Browser","Console","Asset Inspector"}) {
             const auto* window = ImGui::FindWindowByName(name);
             Require(window && window->Active && window->DockId,"Editor panel is missing from the docking layout.");
         }
@@ -180,9 +187,11 @@ void SmokeAfterDraw(Application& app) {
         const auto previousSelection=doc.Selection();const auto previousCount=doc.GetScene().Size();
         const auto source=doc.Assets().front()->SourcePath;
         ui.DropFiles({source},browser->Pos.x+20,browser->Pos.y+40);
+        Require(ui.HasImportPreview(),"Asset Browser drop did not show an Import Preview.");Require(ui.ConfirmImportPreview(),"Asset Browser import could not commit.");
         Require(doc.GetScene().Size() == previousCount && doc.Assets().size() == 1,"Dropping on Asset Browser unexpectedly placed an instance.");
         const auto* viewport=ImGui::FindWindowByName("Viewport");
         ui.DropFiles({source},viewport->Pos.x+viewport->Size.x*.5f,viewport->Pos.y+viewport->Size.y*.5f);
+        Require(ui.ConfirmImportPreview(),"Viewport drop could not commit.");
         Require(doc.GetScene().Size() == previousCount+1,"Dropping on Viewport failed to place an instance.");
         Require(doc.RemoveObject(doc.Selection()));Require(doc.Select(previousSelection));
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
@@ -209,6 +218,9 @@ void SmokeAfterDraw(Application& app) {
     }
     if (app.QualitySmoke && app.Frames == 2) {Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::High && ui.Viewport.Quality().Applied,"Editor High quality did not commit.");Require(!doc.IsDirty(),"Quality application dirtied Scene data.");}
     if (app.TelemetrySmoke && app.Frames == 3 && app.RecommendedQuality) {Require(ui.Viewport.Quality().Requested.Base == *app.RecommendedQuality && !doc.IsDirty(),"Queued telemetry recommendation did not apply safely before UI commands.");}
+    if (app.Frames == 3) {Require(ui.HasImportPreview() && ImGui::IsPopupOpen("Import Preview") && ui.ImportPreviewModel()->Format == lv::AssetFormat::Obj && doc.Assets().size() == 1,"Actual Import Preview modal did not display OBJ without changing the document.");}
+    if (app.Frames == 4) {Require(!ui.HasImportPreview() && doc.Assets().size() == 1,"Escape did not cancel the actual Import Preview.");ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,false);}
+    if (app.Frames == 5) {const auto* inspector=ImGui::FindWindowByName("Asset Inspector");Require(inspector && inspector->Active && !inspector->Hidden,"Asset Inspector did not render its selected model information.");}
     if (app.QualitySmoke && app.Frames == 4) {app.CachedFrames=ui.Viewport.RenderedFrames();}
     if (app.QualitySmoke && app.Frames == 5) {Require(ui.Viewport.RenderedFrames() == app.CachedFrames,"Static Editor viewport did not reuse its on-demand image.");}
     if (app.QualitySmoke && app.Frames == 6) {Require(ui.Viewport.RenderedFrames() > app.CachedFrames,"Scene edit failed to wake Editor viewport.");}
@@ -230,6 +242,7 @@ void Frame(void* user) noexcept {
     try {
         simgui_frame_desc_t frame{}; frame.width = sapp_width(); frame.height = sapp_height();
         frame.delta_time = std::clamp(sapp_frame_duration(),0.00001,0.25); frame.dpi_scale = sapp_dpi_scale();
+        if (app.Smoke && app.Frames == 4) {ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,true);}
         simgui_new_frame(frame);
         const auto advanced = app.UI->Document.UpdateAnimations(frame.delta_time);
         if (!advanced) { throw std::runtime_error(advanced.Error().Message); }
@@ -251,7 +264,9 @@ void Frame(void* user) noexcept {
             Require(app.UI->Viewport.ColorImage().id != app.FirstTarget && app.UI->Viewport.Width() != app.FirstWidth,"Viewport resize did not replace the target.");
             app.UI->Viewport.Render(app.UI->Document.GetScene());
             app.UI->Viewport.Resize(0,0); Require(!app.UI->Viewport.Texture().id,"Suspended viewport retained its target.");
+            app.UI->Import(std::filesystem::path(MINUVEX_EDITOR_ASSET_FIXTURES)/"Compatibility.obj",false);
         }
+        if (app.Smoke && app.Frames == 5) {ImGui::SetWindowFocus("Asset Inspector");}
         if (app.TelemetrySmoke && app.Frames == 1) {ImGui::SetWindowFocus("Performance");}
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());

@@ -47,6 +47,8 @@ endif()
 install(FILES third_party/versions.json DESTINATION "${_sdk_share}/licenses")
 install(FILES third_party/cgltf/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME cgltf-LICENSE)
 install(FILES third_party/json/LICENSE.MIT DESTINATION "${_sdk_share}/licenses" RENAME json-LICENSE.MIT)
+install(FILES third_party/tinyobjloader/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME tinyobjloader-LICENSE)
+install(FILES third_party/ufbx/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME ufbx-LICENSE)
 # stb permits redistributing this header with its embedded license notice.
 install(FILES third_party/stb/stb_image.h DESTINATION "${_sdk_share}/licenses")
 if(MINUVEX_BUILD_RENDERER)

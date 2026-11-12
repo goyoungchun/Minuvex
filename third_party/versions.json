@@ -1,4 +1,21 @@
 {
+  "tinyobjloader": {
+    "source": "https://github.com/tinyobjloader/tinyobjloader",
+    "revision": "45636bdcef1a4fec140346b90c0b50bf0bc3e23b",
+    "file": "tinyobjloader/tiny_obj_loader.h",
+    "sha256": "cffc9c8746541bd14a3ba877cd3c52cb7ccfe3779b1d5863f7d13f05d26f1ef8",
+    "license": "MIT (tinyobjloader/LICENSE)",
+    "build": "vendored CPU codec; TINYOBJLOADER_DISABLE_FAST_FLOAT for MSVC C++20 compatibility"
+  },
+  "ufbx": {
+    "source": "https://github.com/ufbx/ufbx",
+    "version": "v0.23.1",
+    "revision": "26a482ae66871d7de36eb722aa060bce95bce274",
+    "headerSha256": "f787be529af577efc04f3e3e735844a08556718dbb613d1211c2b313d72895dc",
+    "sourceSha256": "4a956c26a708e40d82ecb0aeaee54da709d5ba7c144c9642174970059bda7e1d",
+    "license": "MIT or public domain (ufbx/LICENSE)",
+    "build": "vendored CPU codec compiled as C++; no external file callbacks"
+  },
   "nativefiledialog_extended": {
     "source": "https://github.com/btzy/nativefiledialog-extended",
     "version": "v1.4.1",

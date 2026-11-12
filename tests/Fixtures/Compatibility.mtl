@@ -1,0 +1,6 @@
+newmtl Checker
+Kd 1 1 1
+map_Kd -clamp on checker image.png
+newmtl Missing
+Kd 0.2 0.7 0.4
+map_Kd missing.png

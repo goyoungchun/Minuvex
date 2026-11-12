@@ -25,6 +25,7 @@ bool failed = false;
 bool ran = false;
 bool animationTests = false;
 bool qualityTests = false;
+bool compatibilityTests = false;
 
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message,
          std::uint32_t line, const char* file, void* user) {
@@ -313,10 +314,23 @@ void Initialize() {
     desc.environment.defaults.sample_count = 1;
     sg_setup(desc);
 }
+void RunCompatibility() {
+    lv::AssetRegistry registry;Target target;lv::detail::SceneRenderer renderer;
+    for (const auto* file:{"Compatibility.obj","Compatibility.fbx","CompatibilityBinary.fbx"}) {
+        const auto model=registry.LoadModel(Fixture(file));lv::Scene scene;const auto object=scene.AddModel(model);
+        const auto center=lv::Vec3{(model->ModelBounds.Min.X+model->ModelBounds.Max.X)*.5f,0,0};
+        scene.MainCamera.Target=center;scene.MainCamera.Position={center.X,0,3};scene.Sun.Intensity=0;scene.Sun.Ambient=1;
+        const auto before=target.Render(renderer,scene);std::size_t lit=0;for (int y=0;y<Size;++y) {for (int x=0;x<Size;++x) {lit+=Lit(before,x,y);}}
+        Check(lit>150,"OBJ/ASCII FBX/binary FBX imported triangles produce actual GPU pixels");
+        Check(renderer.GetStats().ResidentModels == 1,"format change releases the previous GPU asset");
+        if (!model->Animations.empty()) {scene.GetAnimation(object).Play(0);scene.GetAnimation(object).Seek(1);const auto after=target.Render(renderer,scene);std::size_t changed=0;for (std::size_t i=0;i<after.size();++i) {changed+=before[i]!=after[i];}Check(changed>100,"FBX animation changes real GPU skinning pixels");}
+    }
+    renderer.Clear();
+}
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();} else if (animationTests) { RunAnimation(); } else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -326,6 +340,7 @@ void Cleanup() { if (sg_isvalid()) { sg_shutdown(); } }
 int main(int argc, char** argv) {
     animationTests = argc > 1 && std::strcmp(argv[1],"--animation") == 0;
     qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
+    compatibilityTests=argc > 1 && std::strcmp(argv[1],"--compatibility") == 0;
     sapp_desc app{};
     app.width = app.height = 64; app.window_title = "Minuvex D3D11 pixel tests";
     app.init_cb = Initialize; app.frame_cb = Frame; app.cleanup_cb = Cleanup; app.logger.func = Log;

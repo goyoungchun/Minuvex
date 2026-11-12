@@ -27,7 +27,7 @@ target_include_directories(minuvex_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
 target_link_libraries(minuvex_imgui PRIVATE minuvex_sokol_headers)
 target_compile_features(minuvex_imgui PRIVATE cxx_std_20)
 
-add_library(minuvex_editor_ui STATIC editor/EditorUI.cpp editor/PerformancePanel.cpp editor/SceneViewport.cpp editor/NativeFiles.cpp editor/EditorPreferences.cpp)
+add_library(minuvex_editor_ui STATIC editor/EditorUI.cpp editor/AssetPanels.cpp editor/PerformancePanel.cpp editor/SceneViewport.cpp editor/NativeFiles.cpp editor/EditorPreferences.cpp)
 target_include_directories(minuvex_editor_ui PUBLIC editor PRIVATE src runtime/standalone)
 target_link_libraries(minuvex_editor_ui PUBLIC minuvex_editor_document PRIVATE minuvex_renderer minuvex_imgui minuvex_camera minuvex_sokol_headers minuvex_json_io nfd::nfd)
 target_include_directories(minuvex_editor_ui SYSTEM PRIVATE third_party/json)
@@ -51,5 +51,6 @@ target_compile_definitions(minuvex_editor PRIVATE
     MINUVEX_EDITOR_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/SharedBox.glb"
     MINUVEX_EDITOR_ANIMATION_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/AnimatedRibbon.gltf"
     MINUVEX_EDITOR_DOCUMENTATION="${PROJECT_SOURCE_DIR}/README.md"
+    MINUVEX_EDITOR_ASSET_FIXTURES="${PROJECT_SOURCE_DIR}/tests/Fixtures"
     MINUVEX_EDITOR_TEST_OUTPUT="${PROJECT_BINARY_DIR}/test-output/editor")
 minuvex_configure_target(minuvex_editor)

@@ -20,7 +20,7 @@ std::string Text(const std::filesystem::path& path) { const auto s = path.generi
 bool ModelFile(const std::filesystem::path& path) {
     auto ext = path.extension().string();
     std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext == ".gltf" || ext == ".glb";
+    return ext == ".gltf" || ext == ".glb" || ext == ".obj" || ext == ".fbx";
 }
 void Id(ObjectId id) { ImGui::PushID(reinterpret_cast<void*>(static_cast<std::uintptr_t>(id))); }
 bool VecInput(const char* label, Vec3& value, float speed = 0.05f) {
@@ -58,14 +58,31 @@ void EditorUI::PersistPreferences() {
 void EditorUI::Remember(const std::filesystem::path& path,RecentKind kind) {try {preferences_.Touch(path,kind);directory_=preferences_.Directory;PersistPreferences();}catch (const std::exception& e) {Record(ConsoleLevel::Warning,e.what(),preferencesPath_);}}
 void EditorUI::Shutdown() noexcept {try {PersistPreferences();}catch (...) {}Viewport.Clear();}
 void EditorUI::Import(const std::filesystem::path& path, bool place) {
-    if (!ModelFile(path)) {ShowError({ErrorCode::UnsupportedFeature,"This stage opens glTF/GLB models; OBJ/FBX arrive in Phase 6.","Choose a .gltf or .glb file.",path});return;}
-    auto imported = Document.ImportModel(path);
-    if (!Report(imported)) { return; }
-    selectedAsset_ = imported.Value();
-    if (place && Report(Document.PlaceModel(selectedAsset_))) { FrameScene(); }
-    status_ = "Imported " + Text(path.filename());
-    welcome_=false;Remember(path,RecentKind::Model);Record(ConsoleLevel::Info,status_,path);
-    for (const auto& model:Document.Assets()) {if (model->Id == selectedAsset_) {for (const auto& warning:model->Warnings) {Record(ConsoleLevel::Warning,warning,path);}}}
+    if (importQueue_.size()>=32) {ShowError({ErrorCode::InsufficientResource,"At most 32 files can be queued for Import Preview.","Finish or cancel the current import first.",path});return;}
+    importQueue_.push_back({path,place});if (importQueue_.size() == 1) {importSettings_={};copyImport_=!projectRoot_.empty();RefreshImportPreview(importSettings_);}
+}
+void EditorUI::RefreshImportPreview(const ImportSettings& settings) {
+    if (importQueue_.empty()) {return;}
+    importSettings_=settings;importCandidate_.reset();importError_.reset();
+    auto candidate=Document.PreviewModel(importQueue_.front().Path,settings);
+    if (candidate) {importCandidate_=candidate.Value();}else {importError_=candidate.Error();Record(ConsoleLevel::Error,candidate.Error().Message,candidate.Error().SourcePath);}
+}
+void EditorUI::AdvanceImportPreview() {importCandidate_.reset();importError_.reset();if (!importQueue_.empty()) {importQueue_.erase(importQueue_.begin());}if (!importQueue_.empty()) {RefreshImportPreview(importSettings_);}}
+void EditorUI::CancelImportPreview() {importQueue_.clear();importCandidate_.reset();importError_.reset();status_="Import cancelled; Scene and assets retained.";}
+bool EditorUI::ConfirmImportPreview() {
+    if (!importCandidate_ || importQueue_.empty()) {return false;}
+    auto model=importCandidate_;
+    if (copyImport_ && !projectRoot_.empty()) {
+        try {model=CopyModelToProject(model,projectRoot_/"assets");}
+        catch (const std::exception& e) {importError_=Error{ErrorCode::AssetLoad,e.what(),"Refresh the preview, fix dependencies, or choose external references.",importQueue_.front().Path};Record(ConsoleLevel::Error,e.what(),importQueue_.front().Path);return false;}
+    }
+    const bool place=importQueue_.front().Place;auto committed=Document.CommitImport(model,place);
+    if (!committed) {importError_=committed.Error();Record(ConsoleLevel::Error,committed.Error().Message,model->SourcePath);return false;}
+    selectedAsset_=committed.Value();assetInspector_=true;welcome_=false;
+    if (place) {FrameScene();}
+    status_="Imported "+Text(model->SourcePath.filename());Remember(model->SourcePath,RecentKind::Model);Record(ConsoleLevel::Info,status_,model->SourcePath,place ? Document.Selection():NoObject);
+    for (const auto& warning:model->Warnings) {Record(ConsoleLevel::Warning,warning,model->SourcePath);}
+    AdvanceImportPreview();return true;
 }
 void EditorUI::FrameScene() {
     try {
@@ -73,7 +90,11 @@ void EditorUI::FrameScene() {
         Report(Document.SetCamera(detail::FitSceneCamera(Document.GetScene(),aspect,Document.Selection())),Document.Selection());
     } catch (const std::exception& e) { ShowError({ErrorCode::InvalidState,e.what(),"Place a visible model in the Scene first.",{}}); }
 }
-void EditorUI::Ask(Action action) { pending_ = action; if (!Document.IsDirty()) { ApplyPending(); } }
+void EditorUI::ReimportAsset(AssetId asset) {
+    if (!Report(Document.ReimportModel(asset))) {return;}
+    for (const auto& model:Document.Assets()) {if (model->Id == asset) {status_="Reimported "+Text(model->SourcePath.filename());Record(ConsoleLevel::Info,status_,model->SourcePath);for (const auto& warning:model->Warnings) {Record(ConsoleLevel::Warning,warning,model->SourcePath);}}}
+}
+void EditorUI::Ask(Action action) {if (HasImportPreview()) {Record(ConsoleLevel::Warning,"Finish or cancel Import Preview before changing the document.");return;}pending_ = action; if (!Document.IsDirty()) { ApplyPending(); } }
 void EditorUI::RequestOpen(const std::filesystem::path& path) { openPath_ = path; Ask(Action::Open); }
 void EditorUI::RequestQuickOpen(const std::filesystem::path& path) {openPath_=path;Ask(Action::QuickOpen);}
 void EditorUI::RequestNew() { Ask(Action::New); }
@@ -82,10 +103,15 @@ void EditorUI::ApplyPending() {
     switch (pending_) {
     case Action::New: Document.New(); selectedAsset_ = 0; controls_.Reset();welcome_=false; status_ = "New Scene"; break;
     case Action::Open:
-        if (Report(Document.Open(openPath_))) { selectedAsset_ = 0; controls_.Reset();welcome_=false;projectRoot_.clear(); status_ = "Opened " + Text(openPath_);Remember(openPath_,RecentKind::Scene);Record(ConsoleLevel::Info,status_,openPath_); }
+        if (Report(Document.Open(openPath_))) {
+            selectedAsset_ = 0; controls_.Reset();welcome_=false;projectRoot_.clear();
+            const auto scenes=Document.Path().parent_path();std::error_code ec;
+            if (scenes.filename() == "scenes" && std::filesystem::is_directory(scenes.parent_path()/"assets",ec)) {projectRoot_=scenes.parent_path();}
+            status_ = "Opened " + Text(openPath_);Remember(openPath_,RecentKind::Scene);Record(ConsoleLevel::Info,status_,openPath_);
+        }
         break;
     case Action::QuickOpen: {
-        if (!ModelFile(openPath_)) {ShowError({ErrorCode::UnsupportedFeature,"This stage opens glTF/GLB models; OBJ/FBX arrive in Phase 6.","Choose a .gltf or .glb file.",openPath_});break;}
+        if (!ModelFile(openPath_)) {ShowError({ErrorCode::UnsupportedFeature,"Choose a supported glTF, GLB, OBJ or FBX model.","Check the file extension.",openPath_});break;}
         const auto opened=Document.OpenModel(openPath_,{},Viewport.Aspect());
         if (Report(opened)) {selectedAsset_=Document.GetScene().GetObject(opened.Value()).Model->Id;controls_.Reset();welcome_=false;projectRoot_.clear();status_="Quick Open: "+Text(openPath_.filename());Remember(openPath_,RecentKind::Model);Record(ConsoleLevel::Info,status_,openPath_,opened.Value());for (const auto& warning:Document.Assets().front()->Warnings) {Record(ConsoleLevel::Warning,warning,openPath_);}}
         break;
@@ -182,8 +208,9 @@ void EditorUI::Menu() {
             ImGui::MenuItem("Quality Settings",nullptr,&quality_);
             ImGui::MenuItem("Performance",nullptr,&performance_);
             ImGui::MenuItem("Console",nullptr,&console_);
+            ImGui::MenuItem("Asset Inspector",nullptr,&assetInspector_);
             ImGui::MenuItem("Welcome",nullptr,&welcome_);
-            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = performance_ = console_ = true; }
+            if (ImGui::MenuItem("Reset layout")) { resetLayout_ = true; viewport_ = hierarchy_ = inspector_ = assets_ = bones_ = animation_ = quality_ = performance_ = console_ = assetInspector_ = true; }
             ImGui::EndMenu();
         }
         ImGui::Separator();
@@ -217,12 +244,13 @@ void EditorUI::Dockspace() {
         ImGui::DockBuilderDockWindow("Asset Browser",bottom); ImGui::DockBuilderDockWindow("Viewport",center);
         ImGui::DockBuilderDockWindow("Bone Inspector",right); ImGui::DockBuilderDockWindow("Animation Controls",bottom);
         ImGui::DockBuilderDockWindow("Console",bottom);
+        ImGui::DockBuilderDockWindow("Asset Inspector",right);
         ImGui::DockBuilderDockWindow("Quality Settings",right);
         ImGui::DockBuilderDockWindow("Performance",right);
         ImGui::DockBuilderFinish(dock);
     }
     // Add Phase 5 panels to a saved Phase 4 layout without resetting user splits.
-    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"},std::pair{"Console","Asset Browser"}}) {
+    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"},std::pair{"Console","Asset Browser"},std::pair{"Asset Inspector","Inspector"}}) {
         if (!ImGui::FindWindowSettingsByID(ImHashStr(panel.first))) {
             const auto* anchor = ImGui::FindWindowSettingsByID(ImHashStr(panel.second));
             ImGui::DockBuilderDockWindow(panel.first,anchor && anchor->DockId ? anchor->DockId : dock);
@@ -474,7 +502,7 @@ void EditorUI::AssetBrowser() {
                     }
                     ImGui::PopID();
                 }
-                if (reimport) {Report(Document.ReimportModel(reimport));}
+                if (reimport) {ReimportAsset(reimport);}
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Files")) {
@@ -540,7 +568,7 @@ void EditorUI::ViewportPanel() {
     ImGui::End();
 }
 void EditorUI::DropFiles(const std::vector<std::filesystem::path>& paths,float x,float y) {
-    if (dialog_ != Dialog::None || pending_ != Action::None) {Record(ConsoleLevel::Warning,"Finish the current operation before dropping files.");return;}
+    if (dialog_ != Dialog::None || pending_ != Action::None || HasImportPreview()) {Record(ConsoleLevel::Warning,"Finish the current operation before dropping files.");return;}
     const bool library=assets_ && x >= assetRect_[0] && y >= assetRect_[1] && x < assetRect_[2] && y < assetRect_[3];
     for (const auto& path:paths) {
         auto name=Text(path.filename());std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c) {return static_cast<char>(std::tolower(c));});
@@ -558,7 +586,7 @@ void EditorUI::Welcome() {
         ImGui::TextUnformatted("MINUVEX");ImGui::TextWrapped("Open a model and start inspecting. No project is required.");ImGui::Spacing();
         if (ImGui::Button("Open Model",{520,40})) {FileDialog(Dialog::QuickOpen);}
         if (ImGui::Button("Open Scene",{255,32})) {FileDialog(Dialog::Open);}ImGui::SameLine();if (ImGui::Button("New Project",{255,32})) {FileDialog(Dialog::Project);}
-        ImGui::TextDisabled("Supported now: glTF / GLB. OBJ / FBX: Phase 6.");ImGui::Separator();ImGui::TextUnformatted("Recent Files");
+        ImGui::TextDisabled("Supported: glTF / GLB / OBJ / FBX");ImGui::Separator();ImGui::TextUnformatted("Recent Files");
         std::optional<RecentFile> open;
         if (preferences_.Recent.empty()) {ImGui::TextDisabled("Your opened models and saved Scenes will appear here.");}
         for (std::size_t i=0;i<preferences_.Recent.size();++i) {const auto& entry=preferences_.Recent[i];std::error_code ec;const bool exists=std::filesystem::is_regular_file(entry.Path,ec);ImGui::PushID(static_cast<int>(i));const auto label=(exists ? "":"[missing] ")+Text(entry.Path.filename());if (ImGui::Selectable(label.c_str())) {open=entry;}if (ImGui::IsItemHovered()) {ImGui::SetTooltip("%s",Text(entry.Path).c_str());}ImGui::PopID();}
@@ -605,7 +633,7 @@ void EditorUI::Dialogs() {
 }
 void EditorUI::Draw() {
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
-    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();Console(); Welcome(); Dialogs();
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();Console(); Welcome();ImportPreview(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());

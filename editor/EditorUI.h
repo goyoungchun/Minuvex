@@ -25,6 +25,11 @@ public:
     void Record(ConsoleLevel level,std::string message,std::filesystem::path source={},ObjectId object=NoObject);
     const std::vector<ConsoleEntry>& ConsoleEntries() const noexcept {return consoleEntries_;}
     void Import(const std::filesystem::path& path, bool place);
+    bool HasImportPreview() const noexcept {return !importQueue_.empty();}
+    ModelHandle ImportPreviewModel() const noexcept {return importCandidate_;}
+    void RefreshImportPreview(const ImportSettings& settings);
+    bool ConfirmImportPreview();
+    void CancelImportPreview();
     void RequestOpen(const std::filesystem::path& path);
     void RequestNew();
     void RequestQuit();
@@ -57,6 +62,12 @@ private:
     bool bones_ = true, animation_ = true;
     bool quality_ = true;
     bool performance_ = true;
+    bool assetInspector_=true,copyImport_=false;
+    struct PendingImport {std::filesystem::path Path;bool Place=false;};
+    std::vector<PendingImport> importQueue_;
+    ImportSettings importSettings_;
+    ModelHandle importCandidate_;
+    std::optional<Error> importError_;
     QualityProfile qualityDraft_;
     std::optional<QualityProfile> pendingQuality_;
     QualityProfile analyzedProfile_;
@@ -86,6 +97,10 @@ private:
     void QualitySettings();
     void PerformancePanel();
     void AssetBrowser();
+    void AssetInspector();
+    void ImportPreview();
+    void AdvanceImportPreview();
+    void ReimportAsset(AssetId asset);
     void ViewportPanel();
     void Dialogs();
     template<typename T> bool Report(const Result<T>& result,ObjectId object=NoObject) {

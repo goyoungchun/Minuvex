@@ -14,7 +14,7 @@ void TestImports() {
     Check(gltf->Id != 0 && gltf->Id != glb->Id, "assets have unique nonzero IDs");
     Check(registry.Find(gltf->Id) == gltf && !registry.Find(0), "registry lookup and invalid asset ID");
     Check(registry.LoadModel(Fixture("../Fixtures/SharedBox.gltf")) == gltf, "canonical path load reuses the same CPU asset");
-    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 3, "registry retains import metadata");
+    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 4, "registry retains import metadata");
     Check(gltf->ContentHash && gltf->SourcePath.is_absolute(), "asset has a content hash and canonical source");
     Check(gltf->Dependencies.size() == 1 && external->Dependencies.size() == 3, "embedded and external dependency lists");
     for (const auto& model : {gltf, glb, external}) {
@@ -141,11 +141,67 @@ void TestLargeIndices() {
     const auto model = registry.LoadModel(temp.File("large.gltf"));
     Check(model->Meshes[0].Primitives[0].Geometry.Vertices.size() == count && model->Meshes[0].Primitives[0].Geometry.Indices[2] == 65536, "32-bit indices survive glTF import without truncation");
 }
+void TestCompatibility() {
+    lv::AssetRegistry registry;
+    Check(registry.Importers().Supports("model.OBJ") && registry.Importers().Supports("model.FBX") && !registry.Importers().Supports("model.xyz") && registry.Importers().Extensions().size() == 4,"common importer registry dispatches extensions case-insensitively");
+    const auto preview=registry.PrepareModel(Fixture("Compatibility.obj"));
+    Check(registry.Size() == 0 && preview->Format == lv::AssetFormat::Obj && preview->Status == lv::AssetImportStatus::ReadyWithWarnings,"OBJ preview is validated without registering it");
+    const auto info=lv::InspectModel(*preview);
+    Check(info.Meshes == 2 && info.Indices == 9 && info.Materials == 3 && info.Bones == 0 && info.Animations == 0,"OBJ quad triangulation, groups, negative indices and material partitioning");
+    Check(preview->Dependencies.size() == 3 && preview->MissingDependencies.size() == 1 && preview->Materials[0].BaseColorTexture && !preview->Materials[1].BaseColorTexture,"OBJ/MTL textures and missing texture fallback retain dependency diagnostics");
+    Check(preview->Textures[*preview->Materials[0].BaseColorTexture].WrapU == lv::TextureWrap::ClampToEdge,"OBJ MTL clamp option maps to the common texture sampler");
+    Check(Near(preview->Meshes[0].Primitives[0].Geometry.Vertices[0].TexCoord[1],1),"OBJ UV origin is normalized to the engine convention");
+    const auto committed=registry.AddPrepared(preview);
+    Check(committed == preview && registry.LoadModel(Fixture("Compatibility.obj")) == preview && registry.Size() == 1,"preview commit and cached loads share immutable data");
+    auto invalid=std::make_shared<lv::ModelAsset>(*preview);invalid->Meshes[0].Primitives[0].MaterialIndex=999;
+    Rejects([&] {lv::ValidateModel(*invalid);},"common validation catches a foreign material before GPU upload");
+    const auto fbx=registry.LoadModel(Fixture("Compatibility.fbx"));const auto rig=lv::InspectModel(*fbx);
+    Check(fbx->Format == lv::AssetFormat::Fbx && rig.Skins == 1 && rig.Bones == 2 && rig.Animations == 1 && rig.Indices == 6,"FBX mesh, hierarchy, two-bone skin and animation layer import");
+    Check(fbx->Materials[0].BaseColorTexture && fbx->Dependencies.size() == 2,"FBX external PNG texture is decoded and tracked as a dependency");
+    Check(Near(fbx->ModelBounds.Min.X,1.5f) && Near(fbx->ModelBounds.Max.X,2.5f) && Near(fbx->ModelBounds.Max.Y,.5f),"FBX bind matrices preserve transformed mesh placement");
+    lv::AnimationPlayer animation;animation.Bind(fbx);animation.Play(0);
+    Check(Near(animation.GetBounds().Max.Y,fbx->ModelBounds.Max.Y) && Near(animation.GetBounds().Min.Y,fbx->ModelBounds.Min.Y),"FBX animation begins at its authored reference pose");animation.Seek(1);
+    if (!Near(animation.GetBounds().Max.Y,1.5f)) {std::fprintf(stderr,"FBX diagnostic: duration=%g time=%g minY=%g maxY=%g\n",fbx->Animations[0].Duration,animation.Time(),animation.GetBounds().Min.Y,animation.GetBounds().Max.Y);for (const auto& track:fbx->Animations[0].Tracks) {std::fprintf(stderr,"  node=%s path=%d keys=%zu refY=%g firstY=%g lastY=%g\n",fbx->Nodes[track.Joint].Name.c_str(),int(track.Path),track.Times.size(),fbx->Skeleton.Joints[track.Joint].ReferenceLocal.Position.Y,track.Values.front()[1],track.Values.back()[1]);}}
+    Check(Near(animation.GetBounds().Max.Y,1.5f) && Near(animation.GetBounds().Min.Y,-.5f),"FBX baked animation drives existing skin evaluation independently of the mesh node");
+    const auto binary=registry.LoadModel(Fixture("CompatibilityBinary.fbx"));
+    Check(binary->Format == lv::AssetFormat::Fbx && lv::InspectModel(*binary).Indices == 3,"FBX binary and generated normals use the common model path");
+    lv::ImportSettings settings;settings.ImportAnimations=false;settings.ImportMaterials=false;
+    const auto geometry=registry.LoadModel(Fixture("Compatibility.fbx"),settings);
+    Check(geometry->Animations.empty() && geometry->Materials.size() == 1 && geometry->Skins.size() == 1,"animation/material import flags preserve skeleton/skinning");
+    const auto gltfGeometry=registry.LoadModel(Fixture("AnimatedRibbon.gltf"),settings);Check(gltfGeometry->Animations.empty() && gltfGeometry->Materials.size() == 1 && gltfGeometry->Images.empty() && gltfGeometry->Skins.size() == 1,"glTF shares animation/material import flags with FBX");
+    settings={};settings.MaxAnimationSamples=1;
+    ImportRejects([&] {registry.LoadModel(Fixture("Compatibility.fbx"),settings);},lv::ImportErrorCode::ResourceLimit,"FBX bake obeys the animation key budget");
+    settings={};settings.AnimationBakeRate=0;Rejects([&] {registry.LoadModel(Fixture("Compatibility.fbx"),settings);},"invalid FBX bake rate rejected");
+    settings={};settings.GenerateMissingNormals=false;
+    ImportRejects([&] {registry.LoadModel(Fixture("CompatibilityBinary.fbx"),settings);},lv::ImportErrorCode::InvalidData,"strict FBX normals option is enforced");
+    TemporaryDirectory temp;
+    Write(temp.File("centimeters.fbx"),Replace(Read(Fixture("Compatibility.fbx")),"\"UnitScaleFactor\", \"double\", \"Number\", \"\",100","\"UnitScaleFactor\", \"double\", \"Number\", \"\",1"));
+    const auto centimeters=registry.LoadModel(temp.File("centimeters.fbx"));
+    Check(Near(centimeters->ModelBounds.Max.X,.025f) && Near(centimeters->ModelBounds.Max.Y,.005f),"FBX source units are converted to meters");
+    Write(temp.File("broken.fbx"),"Kaydara FBX Binary");const auto prior=registry.Size();
+    ImportRejects([&] {registry.LoadModel(temp.File("broken.fbx"));},lv::ImportErrorCode::InvalidData,"truncated FBX returns structured InvalidData");Check(registry.Size() == prior,"failed FBX import preserves the registry");
+    Write(temp.File("flat.obj"),"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    const auto flat=registry.LoadModel(temp.File("flat.obj"));Check(Near(flat->Meshes[0].Primitives[0].Geometry.Vertices[0].Normal[2],1),"OBJ missing normals generate triangle normals");
+    ImportRejects([&] {registry.LoadModel(temp.File("flat.obj"),settings);},lv::ImportErrorCode::InvalidData,"OBJ missing normals can be rejected");
+    Write(temp.File("flat.obj"),Read(temp.File("flat.obj"))+"o Added\nf 1 2 3\n");const auto revised=registry.ReimportModel(flat->Id);
+    Check(revised->Id == flat->Id && revised->Meshes.size() == 2 && !revised->Warnings.empty() && revised->Status == lv::AssetImportStatus::ReadyWithWarnings,"OBJ reimport preserves ID and warns about structural changes");
+    Write(temp.File("bad.obj"),"v 0 0 0\nf 1 2 999\n");ImportRejects([&] {registry.LoadModel(temp.File("bad.obj"));},lv::ImportErrorCode::InvalidData,"malformed OBJ indices are rejected");
+    Write(temp.File("source.custom"),"custom");registry.Importers().Register(".custom",[&](const auto&,const auto&) {return *flat;});
+    const auto custom=registry.LoadModel(temp.File("source.custom"));Check(custom->Format == lv::AssetFormat::Custom && custom->Id!=flat->Id,"custom CPU importer uses common validation and independent identity");
+    Rejects([&] {registry.Importers().Register(".OBJ",[](const auto&,const auto&) {return lv::ModelAsset{};});},"duplicate importer registration is explicit");
+    const auto project=temp.File("project")/"assets";
+    const auto package=lv::CopyModelToProject(preview,project);
+    Check(package->SourcePath!=preview->SourcePath && package->ContentHash == preview->ContentHash && package->Dependencies.size() == preview->Dependencies.size() && std::filesystem::is_regular_file(package->SourcePath),"project copy preserves source, MTL and loaded texture layout");
+    const auto copied=registry.LoadModel(package->SourcePath);Check(copied->MissingDependencies.size() == 1 && copied->Images.size() == 1,"copied OBJ remains independently importable with its diagnostics");
+    auto changed=std::make_shared<lv::ModelAsset>(*flat);changed->ContentHash++;
+    ImportRejects([&] {registry.AddPrepared(changed);},lv::ImportErrorCode::InvalidData,"stale preview cannot silently replace existing registered content");
+}
 } // namespace
 
-int main() {
+int main(int argc,char** argv) {
     try {
-        TestImports();TestFailuresAndLimits();TestLargeIndices();
+        if (argc>1 && std::string_view(argv[1]) == "--compatibility") {TestCompatibility();return Finish();}
+        TestImports();TestFailuresAndLimits();TestLargeIndices();TestCompatibility();
         {
             TemporaryDirectory temp;const auto file=temp.File("reimport.gltf");const auto source=Read(Fixture("SharedBox.gltf"));Write(file,source);
             lv::AssetRegistry registry;const auto old=registry.LoadModel(file);Write(file,source+"\n");const auto fresh=registry.ReimportModel(old->Id);

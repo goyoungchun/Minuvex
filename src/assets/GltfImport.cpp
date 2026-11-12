@@ -1,4 +1,4 @@
-#include "GltfImport.h"
+#include "ImportCommon.h"
 
 #include <cgltf.h>
 #include <stb_image.h>
@@ -305,6 +305,7 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
     model.Images.resize(data.images_count);
     model.Textures.resize(data.textures_count);
     std::vector<bool> decoded(data.images_count, false);
+    std::vector<bool> missing(data.images_count, false);
     for (std::size_t i = 0; i < data.materials_count; ++i) {
         const auto& source = data.materials[i];
         MaterialAsset material;
@@ -351,12 +352,25 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
             if (!decoded[imageIndex]) {
                 const auto& image = *sourceTexture.image;
                 std::vector<std::uint8_t> encoded;
-                if (image.uri) { encoded = ReadUri(context, image.uri); }
+                if (image.uri) {
+                    try {encoded=ReadUri(context,image.uri);}
+                    catch (const ImportError& e) {
+                        if (e.Code!=ImportErrorCode::Io) {throw;}
+                        std::string decodedUri;
+                        for (std::size_t p=0;image.uri[p];++p) {if (image.uri[p]=='%' && image.uri[p+1] && image.uri[p+2] && Hex(image.uri[p+1])>=0 && Hex(image.uri[p+2])>=0) {decodedUri.push_back(static_cast<char>(Hex(image.uri[p+1])*16+Hex(image.uri[p+2])));p+=2;}else {decodedUri.push_back(image.uri[p]);}}
+                        const auto resource=std::filesystem::path(std::u8string(decodedUri.begin(),decodedUri.end()));
+                        std::error_code ec;const auto alternative=model.Settings.TextureDirectory/resource.filename();
+                        if (!model.Settings.TextureDirectory.empty() && std::filesystem::is_regular_file(alternative,ec)) {encoded=context.Read(alternative);}
+                        else {missing[imageIndex]=true;model.MissingDependencies.push_back(resource);model.Warnings.push_back("Missing texture: "+decodedUri+" (using material color).");}
+                    }
+                }
                 else if (image.buffer_view) {
                     const auto* bytes = cgltf_buffer_view_data(image.buffer_view);
                     if (image.buffer_view->size > model.Settings.MaxFileBytes) { Limit("Encoded image exceeds MaxFileBytes."); }
                     encoded.assign(bytes, bytes + image.buffer_view->size);
                 } else { Invalid("Image has no URI or buffer view."); }
+                if (missing[imageIndex]) {context.Reserve(4);model.Images[imageIndex]={1,1,{255,255,255,255}};decoded[imageIndex]=true;}
+                else {
                 if (encoded.empty() || encoded.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) { Invalid("Invalid encoded image size."); }
                 int width = 0, height = 0, channels = 0;
                 const auto byteCount = static_cast<int>(encoded.size());
@@ -368,7 +382,9 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
                 if (!pixels) { Invalid("PNG/JPEG decoding failed."); }
                 model.Images[imageIndex] = {width, height, {pixels.get(), pixels.get() + decodedSize}};
                 decoded[imageIndex] = true;
+                }
             }
+            if (missing[imageIndex]) {if (!role) {material.BaseColorTexture.reset();}else {material.NormalTexture.reset();}}
         }
         }
         model.Materials.push_back(std::move(material));
@@ -486,7 +502,7 @@ void ImportRig(Context& context, const cgltf_data& data) {
     }
     try { ValidateSkeleton(model.Skeleton); } catch (const std::invalid_argument& e) { Invalid(e.what()); }
     model.Skeleton.Signature = SkeletonSignature(model.Skeleton);
-    for (std::size_t i=0;i<data.animations_count;++i) {
+    for (std::size_t i=0;model.Settings.ImportAnimations && i<data.animations_count;++i) {
         const auto& source = data.animations[i]; AnimationClip clip;
         clip.Name = source.name ? source.name : "Animation " + std::to_string(i);
         if (source.channels_count > model.Nodes.size()*3) { Limit("Animation exceeds the per-node track limit."); }
@@ -560,14 +576,14 @@ std::shared_ptr<ModelAsset> ImportGltf(const std::filesystem::path& path, const 
     }
     ValidateStorage(*data, settings);
     if (cgltf_validate(data.get()) != cgltf_result_success) { Invalid("glTF validation failed (accessors, indices, hierarchy or scenes)."); }
-    ImportMaterials(context, *data);
+    if (settings.ImportMaterials) {ImportMaterials(context,*data);}else {model->Materials.push_back({});}
     for (std::size_t i = 0; i < data->meshes_count; ++i) {
         const auto& sourceMesh = data->meshes[i];
         MeshAsset mesh;
         if (sourceMesh.name) { mesh.Name = sourceMesh.name; }
         for (std::size_t k = 0; k < sourceMesh.primitives_count; ++k) {
             const auto& primitive = sourceMesh.primitives[k];
-            mesh.Primitives.push_back({ImportGeometry(context, primitive), primitive.material ? cgltf_material_index(data.get(), primitive.material) : data->materials_count,Attribute(primitive,cgltf_attribute_type_joints) != nullptr});
+            mesh.Primitives.push_back({ImportGeometry(context, primitive), settings.ImportMaterials ? (primitive.material ? cgltf_material_index(data.get(), primitive.material) : data->materials_count):0,Attribute(primitive,cgltf_attribute_type_joints) != nullptr});
         }
         if (mesh.Primitives.empty()) { Invalid("Mesh has no primitives."); }
         model->Meshes.push_back(std::move(mesh));

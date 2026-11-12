@@ -107,7 +107,9 @@ Json Vector(Vec3 value) {
 Json Settings(const ImportSettings& s) {
     return {{"generateMissingNormals",s.GenerateMissingNormals},{"maxFileBytes",s.MaxFileBytes},
         {"maxResourceBytes",s.MaxResourceBytes},{"maxVertices",s.MaxVertices},{"maxIndices",s.MaxIndices},
-        {"maxNodes",s.MaxNodes},{"maxImageDimension",s.MaxImageDimension}};
+        {"maxNodes",s.MaxNodes},{"maxImageDimension",s.MaxImageDimension},
+        {"importAnimations",s.ImportAnimations},{"importMaterials",s.ImportMaterials},
+        {"animationBakeRate",s.AnimationBakeRate},{"maxAnimationSamples",s.MaxAnimationSamples},{"textureDirectory",Utf8(s.TextureDirectory)}};
 }
 ImportSettings Settings(const Json& j) {
     ImportSettings s, ceiling;
@@ -119,6 +121,11 @@ ImportSettings Settings(const Json& j) {
     s.MaxNodes = static_cast<std::size_t>(UInt(j.at("maxNodes"),ceiling.MaxNodes));
     s.MaxImageDimension = static_cast<int>(UInt(j.at("maxImageDimension"),ceiling.MaxImageDimension));
     Require(s.MaxFileBytes && s.MaxResourceBytes && s.MaxVertices && s.MaxIndices && s.MaxNodes && s.MaxImageDimension,"Import limits must be positive.");
+    if (j.contains("importAnimations")) {s.ImportAnimations=j.at("importAnimations").get<bool>();}
+    if (j.contains("importMaterials")) {s.ImportMaterials=j.at("importMaterials").get<bool>();}
+    if (j.contains("animationBakeRate")) {s.AnimationBakeRate=Number(j.at("animationBakeRate"));Require(s.AnimationBakeRate>=1 && s.AnimationBakeRate<=240,"Invalid FBX bake rate.");}
+    if (j.contains("maxAnimationSamples")) {s.MaxAnimationSamples=static_cast<std::size_t>(UInt(j.at("maxAnimationSamples"),ceiling.MaxAnimationSamples));Require(s.MaxAnimationSamples>0,"Animation sample budget must be positive.");}
+    if (j.contains("textureDirectory")) {s.TextureDirectory=detail::PathFromUtf8(String(j.at("textureDirectory")));}
     return s;
 }
 void ValidateScene(const Scene& scene) {
@@ -151,13 +158,15 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",3},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",4},{"assets",Json::array()},{"objects",Json::array()}};
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
             if (assetIds.contains(model.get())) { return; }
             Require(assetIds.size() < MaxAssets,"Scene asset limit exceeded.");
-            const auto settings = Settings(model->Settings); (void)Settings(settings);
+            auto sourceSettings=model->Settings;
+            if (!sourceSettings.TextureDirectory.empty()) {auto relative=sourceSettings.TextureDirectory.lexically_relative(destination.parent_path());if (!relative.empty()) {sourceSettings.TextureDirectory=std::move(relative);}}
+            const auto settings = Settings(sourceSettings); (void)Settings(settings);
             auto relative = model->SourcePath.lexically_relative(destination.parent_path());
             if (relative.empty()) { relative = model->SourcePath; }
             const auto id = assetIds.size()+1;
@@ -192,7 +201,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 3),"Unsupported scene format/version.");
+        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 4),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -205,6 +214,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
             const auto id = UInt(assets[i].at("id"));
             Require(id && assetIndices.emplace(id,i).second,"Duplicate/zero asset ID.");
             (void)String(assets[i].at("path")); (void)Settings(assets[i].at("import"));
+            if (version>=4) {for (const auto* field:{"importAnimations","importMaterials","animationBakeRate","maxAnimationSamples","textureDirectory"}) {Require(assets[i].at("import").contains(field),"Scene v4 is missing Import settings.");}}
         }
         for (const auto& object : objects) {
             const auto id = UInt(object.at("id"));
@@ -242,7 +252,8 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& asset : assets) {
             const auto reference = detail::PathFromUtf8(String(asset.at("path")));
             Require(!reference.empty(),"Empty asset path.");
-            auto model = registry.LoadModel(base/reference,Settings(asset.at("import")));
+            auto settings=Settings(asset.at("import"));if (!settings.TextureDirectory.empty() && settings.TextureDirectory.is_relative()) {settings.TextureDirectory=base/settings.TextureDirectory;}
+            auto model = registry.LoadModel(base/reference,settings);
             models.emplace(UInt(asset.at("id")),model);
             if (std::find(archive.Assets.begin(),archive.Assets.end(),model) == archive.Assets.end()) { archive.Assets.push_back(std::move(model)); }
         }

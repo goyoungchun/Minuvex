@@ -17,6 +17,9 @@ public:
     void New(); // Caller handles unsaved-change confirmation.
     Result<void> Open(const std::filesystem::path& path); // Transactional replacement.
     Result<ObjectId> OpenModel(const std::filesystem::path& path, const ImportSettings& settings = {}, float aspect = 1);
+    Result<ModelHandle> PreviewModel(const std::filesystem::path& path,const ImportSettings& settings={}) const;
+    Result<ObjectId> OpenPreparedModel(ModelHandle model,float aspect=1);
+    Result<AssetId> CommitImport(ModelHandle model,bool place=false); // Commit only after Preview approval.
     // Quick Open: one model in an unsaved Scene with fitted camera. Failure preserves the document.
     Result<void> Save(const std::filesystem::path& path); // Save As; protects source resources, path/dirty change only on success.
     Result<AssetId> ImportModel(const std::filesystem::path& path, const ImportSettings& settings = {});

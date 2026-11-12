@@ -75,7 +75,7 @@ void InvalidArchives() {
     const auto bytes = Read(file); const auto valid = Json::parse(bytes);
     lv::AssetRegistry registry;
     const auto rejects = [&](Json j,const char* label) { Write(file,j.dump()); auto result = lv::LoadScene(file,registry); Check(!result && result.Error().Code == lv::ErrorCode::InvalidData,label); };
-    auto j = valid; j["version"] = 4; rejects(j,"future scene versions rejected");
+    auto j = valid; j["version"] = 5; rejects(j,"future scene versions rejected");
     j = valid; j["version"] = 1.0; rejects(j,"noninteger schema version rejected");
     j = valid; j["objects"][1]["id"] = j["objects"][0]["id"]; rejects(j,"duplicate object IDs rejected");
     j = valid; j["objects"][0]["id"] = 0; rejects(j,"zero object IDs rejected");
@@ -174,9 +174,29 @@ void QuickOpenAndPreferences() {
     for (int i=0;i<15;++i) {preferences.Touch(temp.File(("missing-"+std::to_string(i)+".glb").c_str()),RecentKind::Model);}
     Check(preferences.Recent.size() == 12 && preferences.Save(settings) && loaded.Load(settings) && loaded.Recent.size() == 12,"recent history is bounded and missing files remain reopenable entries");
 }
+void CompatibilityDocument() {
+    TemporaryDirectory temp;lv::EditorDocument doc;
+    auto sentinel=doc.CreateObject("retain");Check(bool(sentinel),"create document before preview");
+    auto preview=doc.PreviewModel(Fixture("Compatibility.obj"));
+    Check(preview && doc.Assets().empty() && doc.GetScene().Size() == 1 && doc.Selection() == sentinel.Value() && doc.IsDirty(),"preparing/cancelling OBJ preview preserves the previous document");
+    Check(bool(doc.CommitImport(preview.Value(),true)) && doc.GetScene().Size() == 2 && doc.Assets().size() == 1,"prepared OBJ can be committed and placed without reparsing");
+    const auto before=doc.Selection();auto bad=std::make_shared<lv::ModelAsset>(*preview.Value());bad->Parts.front().MeshIndex=999;
+    Check(!doc.CommitImport(bad,true) && doc.Selection() == before && doc.GetScene().Size() == 2 && doc.Assets().size() == 1,"invalid prepared import preserves Scene, selection and library");
+    lv::ImportSettings settings;settings.ImportAnimations=false;settings.ImportMaterials=false;settings.AnimationBakeRate=24;settings.MaxAnimationSamples=1000;
+    auto fbx=doc.PreviewModel(Fixture("Compatibility.fbx"),settings);Check(bool(fbx) && bool(doc.OpenPreparedModel(fbx.Value())) && doc.Path().empty() && doc.IsDirty(),"FBX preview can replace the document through Quick Open");
+    const auto file=temp.File("modern.mvxscene.json");Check(bool(doc.Save(file)),"Scene v4 saves extended import settings");
+    auto json=Json::parse(Read(file));Check(json["version"] == 4 && json["assets"][0]["import"]["importAnimations"] == false,"Scene v4 records import flags explicitly");
+    lv::EditorDocument reopened;Check(bool(reopened.Open(file)) && reopened.Assets().front()->Settings == settings && reopened.Assets().front()->Animations.empty(),"FBX import settings round trip without enabling unwanted clips/materials");
+    json["version"]=3;for (const auto* field:{"importAnimations","importMaterials","animationBakeRate","maxAnimationSamples","textureDirectory"}) {json["assets"][0]["import"].erase(field);}Write(file,json.dump());
+    Check(bool(reopened.Open(file)) && reopened.Assets().front()->Settings.ImportAnimations && !reopened.Assets().front()->Animations.empty(),"legacy Scene v3 restores default import options");
+    const auto project=temp.File("project"),moved=temp.File("moved");std::filesystem::create_directories(project/"scenes");
+    const auto copied=lv::CopyModelToProject(preview.Value(),project/"assets");doc.New();Check(bool(doc.CommitImport(copied,true)) && bool(doc.Save(project/"scenes"/"Model.mvxscene.json")),"project copied OBJ saves as relative Scene references");
+    std::filesystem::rename(project,moved);
+    Check(bool(reopened.Open(moved/"scenes"/"Model.mvxscene.json")) && reopened.GetScene().Size() == 1 && reopened.Assets().front()->Materials[0].BaseColorTexture,"moved project resolves OBJ, MTL and texture references independently");
+}
 }
 int main() {
-    try { RoundTrip(); InvalidArchives(); QuickOpenAndPreferences(); }
+    try { RoundTrip(); InvalidArchives(); QuickOpenAndPreferences(); CompatibilityDocument(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

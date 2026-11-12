@@ -57,19 +57,35 @@ Result<void> EditorDocument::Save(const std::filesystem::path& path) {
     return saved;
 }
 Result<ObjectId> EditorDocument::OpenModel(const std::filesystem::path& path,const ImportSettings& settings,float aspect) {
+    auto preview=PreviewModel(path,settings);if (!preview) {return Result<ObjectId>::Failure(preview.Error());}return OpenPreparedModel(preview.Value(),aspect);
+}
+Result<ModelHandle> EditorDocument::PreviewModel(const std::filesystem::path& path,const ImportSettings& settings) const {
+    auto result=Edit([&] {return registry_.PrepareModel(path,settings);});
+    if (!result) {auto error=result.Error();error.SourcePath=path;return Result<ModelHandle>::Failure(std::move(error));}return result;
+}
+Result<ObjectId> EditorDocument::OpenPreparedModel(ModelHandle model,float aspect) {
     static_assert(std::is_nothrow_move_assignable_v<EditorDocument>);
     auto result = Edit([&] {
         EditorDocument next;
-        const auto model = next.registry_.LoadModel(path,settings);
-        next.library_.push_back(model);
-        const auto id = next.world_.AddModel(model);
+        const auto registered=next.registry_.AddPrepared(model);
+        next.library_.push_back(registered);
+        const auto id = next.world_.AddModel(registered);
         next.world_.MainCamera = detail::FitSceneCamera(next.world_,aspect);
         next.selection_ = id; next.dirty_ = true;
         *this = std::move(next);
         return id;
     });
-    if (!result) {auto error=result.Error();error.SourcePath=path;return Result<ObjectId>::Failure(std::move(error));}
+    if (!result) {auto error=result.Error();if (model) {error.SourcePath=model->SourcePath;}return Result<ObjectId>::Failure(std::move(error));}
     return result;
+}
+Result<AssetId> EditorDocument::CommitImport(ModelHandle model,bool place) {
+    auto result=Edit([&] {
+        auto registry=registry_;const auto imported=registry.AddPrepared(model);auto library=library_;
+        const bool added=std::find(library.begin(),library.end(),imported) == library.end();if (added) {library.push_back(imported);}
+        ObjectId instance=NoObject;if (place) {instance=world_.AddModel(imported);}
+        registry_=std::move(registry);library_=std::move(library);if (place) {selection_=instance;}dirty_|=added || place;return imported->Id;
+    });
+    if (!result) {auto error=result.Error();if (model) {error.SourcePath=model->SourcePath;}return Result<AssetId>::Failure(std::move(error));}return result;
 }
 Result<AssetId> EditorDocument::ImportModel(const std::filesystem::path& path, const ImportSettings& settings) {
     auto result = Edit([&] {

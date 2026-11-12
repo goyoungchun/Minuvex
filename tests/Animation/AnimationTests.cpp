@@ -13,7 +13,7 @@ void MatrixNear(const lv::Mat4& a, const lv::Mat4& b, const char* label) {
 }
 void DataAndPlayer() {
     lv::AssetRegistry registry; auto model = registry.LoadModel(Fixture("AnimatedRibbon.gltf"));
-    Check(model->ImportVersion == 3 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
+    Check(model->ImportVersion == 4 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
     Check(model->Skeleton.Joints.size() == 4 && model->Skeleton.Joints[1].IsJoint && model->Skeleton.Joints[2].Parent == 1,"joint mapping includes non-joint ancestors");
     Check(model->Skins[0].Joints == std::vector<lv::JointId>({1,2}) && Near(model->Skins[0].InverseBindMatrices[1].Elements[13],-1),"inverse binds and joint mapping retained");
     Check(model->Parts.size() == 1 && model->Parts[0].SkinIndex == 0 && model->Parts[0].Node == 3,"part keeps skin and node identity");
