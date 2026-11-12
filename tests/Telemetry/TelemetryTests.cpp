@@ -75,6 +75,7 @@ void Recommendations() {
     system.GpuMemoryBudget={1024ull*1024*1024,lv::MetricStatus::Measured,"test budget"};system.GpuMemoryUsage={0,lv::MetricStatus::Measured,"test usage"};
     caps=Caps();r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);
     Check(r.Preset == lv::QualityPreset::Medium && r.PerformanceValidated && r.Profiles[1].PerformanceValidated && !r.Profiles[2].PerformanceValidated,"retain an observed exact preset rather than claiming an unmeasured High profile");
+    f.DebugRendering=true;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(!r.PerformanceValidated,"debug rendering cannot validate normal preset performance");f.DebugRendering=false;
     auto custom=lv::QualityProfile{};custom.Overrides.MsaaSamples=2;auto customCurrent=lv::EstimateQualityResources(custom,caps,scene,1280,720);customCurrent.Value().Quality.Applied=true;
     r=lv::RecommendQuality(caps,system,scene,1280,720,&customCurrent.Value(),&f);Check(!r.PerformanceValidated,"Custom performance does not validate its base preset with different effective settings");
     ++current.Value().AssetSignature;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(!r.PerformanceValidated,"changed scene assets invalidate prior preset evidence");

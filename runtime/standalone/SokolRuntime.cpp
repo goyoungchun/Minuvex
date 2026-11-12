@@ -80,6 +80,8 @@ void Initialize(void* user) noexcept {
         }
         const auto quality=runtime.Surface.ApplyQuality(runtime.State.Quality.Requested,runtime.State.World,sapp_width(),sapp_height());
         if (!quality) {runtime.Fail(quality.Error().Code,quality.Error().Message.c_str(),quality.Error().Hint.c_str());return;}
+        const auto debug=runtime.Surface.SetDebugOptions(runtime.State.Debug);if (!debug) {runtime.Fail(debug.Error().Code,debug.Error().Message.c_str(),debug.Error().Hint.c_str());return;}
+        const auto commands=runtime.Surface.SetDebugDraw(runtime.State.DebugCommands);if (!commands) {runtime.Fail(commands.Error().Code,commands.Error().Message.c_str(),commands.Error().Hint.c_str());return;}
         runtime.State.Quality=runtime.Surface.Quality();runtime.LastUpdate=RenderClockSeconds();
         runtime.Initialized = !runtime.Failed;
     } catch (...) { runtime.Capture(ErrorCode::GraphicsInitialization,"Check the Scene and GPU resource availability."); }
@@ -212,11 +214,14 @@ Result<void> RunStandalone(Viewer& viewer, ViewerState& state, const ViewerRunOp
     };
     state.Invalidate=[&]{runtime.Surface.Invalidate();};
     state.ReadTelemetry=[&]{return runtime.Surface.Telemetry(RenderClockSeconds());};
+    state.ApplyDebug=[&](const DebugOptions& o) {return runtime.Surface.SetDebugOptions(o);};
+    state.ApplyDebugDraw=[&](const DebugDraw& d) {return runtime.Surface.SetDebugDraw(d);};
+    state.ReadDebug=[&]{return runtime.Surface.Inspect();};
     state.CloseRequested.store(false);
     state.HasRun = true;
     state.ActiveRun = &options;
     state.Running.store(true);
-    struct ResetRunning { ViewerState& State; ~ResetRunning() { State.ApplyQuality={};State.Invalidate={};State.ReadTelemetry={};State.ActiveRun = nullptr; State.Running.store(false); } } reset{state};
+    struct ResetRunning { ViewerState& State; ~ResetRunning() { State.ApplyQuality={};State.Invalidate={};State.ReadTelemetry={};State.ApplyDebug={};State.ApplyDebugDraw={};State.ReadDebug={};State.ActiveRun = nullptr; State.Running.store(false); } } reset{state};
     sapp_desc app{};
     app.user_data = &runtime;
     app.init_userdata_cb = Initialize; app.frame_userdata_cb = Frame;

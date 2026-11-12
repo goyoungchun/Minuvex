@@ -1,4 +1,5 @@
 #pragma once
+#include <minuvex/Debug.h>
 #include <minuvex/Telemetry.h>
 #include <memory>
 
@@ -49,6 +50,9 @@ public:
     Result<QualityCapabilities> GetQualityCapabilities() const;
     Result<TelemetrySnapshot> GetTelemetry() const;
     Result<void> RequestRedraw();
+    Result<void> SetDebugOptions(const DebugOptions& options);
+    Result<void> SetDebugDraw(const DebugDraw& commands);
+    Result<RenderDebugInfo> GetRenderDebugInfo() const;
     Result<void> DetachTarget(); // Release Minuvex's target references before Host resize/replacement.
     Result<void> WaitIdle(std::uint32_t timeoutMilliseconds = 5000); // Explicit GPU completion boundary.
     Result<void> Shutdown(); // Idempotent; releases only Minuvex's resources/references.

@@ -19,6 +19,7 @@ out vec4 world_tangent;
 out vec4 shadow_position;
 out vec4 color;
 out vec2 uv;
+out float bone_weight;
 @end
 @block skin_common
 layout(binding=2) uniform skin_params {
@@ -36,7 +37,7 @@ void main() {
     world_position=(model_matrix*p).xyz;
     world_normal=mat3(normal_matrix)*normal;
     world_tangent=vec4(mat3(model_matrix)*tangent.xyz,tangent.w*sign(determinant(mat3(model_matrix))));
-    shadow_position=shadow_matrix*p;color=color0;uv=texcoord0;
+    shadow_position=shadow_matrix*p;color=color0;uv=texcoord0;bone_weight=0.0;
 }
 @end
 @vs skin_vs
@@ -54,6 +55,8 @@ void main() {
     gl_Position=mvp*p;world_position=(model_matrix*p).xyz;world_normal=mat3(normal_matrix)*n;
     world_tangent=vec4(mat3(model_matrix)*t,handed*sign(determinant(mat3(model_matrix))));
     shadow_position=shadow_matrix*p;color=color0;uv=texcoord0;
+    bone_weight=skin_options.y < 0.0 ? max(max(joint_weights.x,joint_weights.y),max(joint_weights.z,joint_weights.w)):dot(joint_weights,vec4(equal(joint_indices,uvec4(uint(skin_options.y)))));
+    if (skin_options.x < .5) {bone_weight=0.0;}
 }
 @end
 @fs mesh_fs
@@ -64,6 +67,7 @@ layout(binding=1) uniform material_params {
     vec4 options;
     vec4 normal_options;
     vec4 shadow_options;
+    vec4 debug_options;
     vec4 local_positions[8];
     vec4 local_colors[8];
     vec4 local_directions[8];
@@ -81,6 +85,7 @@ in vec4 world_tangent;
 in vec4 shadow_position;
 in vec4 color;
 in vec2 uv;
+in float bone_weight;
 out vec4 frag_color;
 float visibility(vec3 n) {
     if (shadow_options.x < 0.5) {return 1.0;}
@@ -97,6 +102,12 @@ void main() {
     // Evaluate derivatives before dynamic branches (and support meshes without authored TANGENT).
     vec3 dp1=dFdx(world_position),dp2=dFdy(world_position);vec2 duv1=dFdx(uv),duv2=dFdy(uv);
     if (options.x >= 0.0 && albedo.a < options.x) {discard;}
+    if (debug_options.x > .5 && debug_options.x < 1.5) {frag_color=vec4(albedo.rgb,1);return;}
+    if (debug_options.x > 1.5 && debug_options.x < 2.5) {frag_color=vec4(1);return;}
+    if (debug_options.x > 2.5 && debug_options.x < 3.5) {frag_color=vec4(geometric*.5+.5,1);return;}
+    if (debug_options.x > 3.5 && debug_options.x < 4.5) {frag_color=vec4(fract(uv),0,1);return;}
+    if (debug_options.x > 4.5 && debug_options.x < 5.5) {float depth=debug_options.y/(debug_options.z-gl_FragCoord.z*(debug_options.z-debug_options.y));frag_color=vec4(vec3(depth),1);return;}
+    if (debug_options.x > 6.5 && debug_options.x < 7.5) {float w=clamp(bone_weight,0.0,1.0);frag_color=vec4(w,1.0-abs(w*2.0-1.0),1.0-w,1);return;}
     if (normal_options.y > .5) {
         vec3 t;vec3 b;
         if (abs(world_tangent.w) > .5) {

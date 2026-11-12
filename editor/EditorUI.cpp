@@ -201,6 +201,12 @@ void EditorUI::Menu() {
             if (ImGui::MenuItem("Quit")) { RequestQuit(); }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Debug")) {
+            ImGui::MenuItem("Render Debugger",nullptr,&renderDebugger_);
+            ImGui::MenuItem("Animation Debugger",nullptr,&animationDebugger_);
+            if (ImGui::MenuItem("Reset debug display")) {Report(Viewport.SetDebugOptions({}));editorDebugDraw_.Clear();Report(Viewport.SetDebugDraw(editorDebugDraw_));}
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Window")) {
             ImGui::MenuItem("Viewport",nullptr,&viewport_); ImGui::MenuItem("Hierarchy",nullptr,&hierarchy_);
             ImGui::MenuItem("Inspector",nullptr,&inspector_); ImGui::MenuItem("Asset Browser",nullptr,&assets_);
@@ -247,10 +253,11 @@ void EditorUI::Dockspace() {
         ImGui::DockBuilderDockWindow("Asset Inspector",right);
         ImGui::DockBuilderDockWindow("Quality Settings",right);
         ImGui::DockBuilderDockWindow("Performance",right);
+        ImGui::DockBuilderDockWindow("Render Debugger",right);ImGui::DockBuilderDockWindow("Animation Debugger",right);
         ImGui::DockBuilderFinish(dock);
     }
     // Add Phase 5 panels to a saved Phase 4 layout without resetting user splits.
-    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"},std::pair{"Console","Asset Browser"},std::pair{"Asset Inspector","Inspector"}}) {
+    for (const auto& panel : {std::pair{"Bone Inspector","Inspector"},std::pair{"Animation Controls","Asset Browser"},std::pair{"Quality Settings","Inspector"},std::pair{"Performance","Inspector"},std::pair{"Console","Asset Browser"},std::pair{"Asset Inspector","Inspector"},std::pair{"Render Debugger","Inspector"},std::pair{"Animation Debugger","Inspector"}}) {
         if (!ImGui::FindWindowSettingsByID(ImHashStr(panel.first))) {
             const auto* anchor = ImGui::FindWindowSettingsByID(ImHashStr(panel.second));
             ImGui::DockBuilderDockWindow(panel.first,anchor && anchor->DockId ? anchor->DockId : dock);
@@ -644,7 +651,7 @@ void EditorUI::Dialogs() {
 }
 void EditorUI::Draw() {
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
-    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();Console(); Welcome();ImportPreview(); Dialogs();
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();RenderDebugger();AnimationDebugger();Console(); Welcome();ImportPreview(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());

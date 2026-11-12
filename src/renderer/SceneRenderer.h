@@ -19,6 +19,7 @@ struct SceneRenderStats {
     std::uint64_t ResidentAssetSignature = 0;
     int MaxResidentTextureSize = 0;
     std::uint64_t LastShadowDrawCalls=0,LastShadowTriangles=0;
+    std::uint64_t LastWireLines=0;
 };
 
 // Context/thread ownership stays with the caller. Prepare outside a render pass,
@@ -37,12 +38,15 @@ public:
     SceneRenderStats GetStats() const noexcept { return stats_; }
     void Clear() noexcept;
     void SetDrawSettings(const RenderSettings& settings) noexcept {settings_=settings;}
+    void SetDebugOptions(const DebugOptions& options) noexcept {debug_=options;}
+    void Inspect(std::vector<DebugResource>& resources) const;
 
 private:
     struct GpuModel;
     std::unordered_map<const ModelAsset*, std::unique_ptr<GpuModel>> models_;
     SceneRenderStats stats_;
     RenderSettings settings_;
+    DebugOptions debug_;
     void DrawImpl(const Scene& scene,const Mat4& viewProjection,bool shadowPass,const ShadowSampling& shadow);
 };
 

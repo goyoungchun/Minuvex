@@ -57,6 +57,18 @@ Result<QualityCapabilities> Viewer::GetQualityCapabilities() const {
     return Result<QualityCapabilities>::Success(state_->Quality.Capabilities);
 }
 Result<void> Viewer::RequestRedraw() {auto ready=Ready(*state_);if (!ready) {return ready;}if (state_->Invalidate) {state_->Invalidate();}return Result<void>::Success();}
+Result<void> Viewer::SetDebugOptions(const DebugOptions& options) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {ValidateDebugOptions(options);if (state_->ApplyDebug) {auto r=state_->ApplyDebug(options);if (!r) {return r;}}state_->Debug=options;return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Check debug options."));}
+}
+Result<DebugOptions> Viewer::GetDebugOptions() const {auto ready=Ready(*state_);if (!ready) {return Result<DebugOptions>::Failure(ready.Error());}return Result<DebugOptions>::Success(state_->Debug);}
+Result<void> Viewer::SetDebugView(DebugView view) {auto options=GetDebugOptions();if (!options) {return Result<void>::Failure(options.Error());}options.Value().View=view;return SetDebugOptions(options.Value());}
+Result<void> Viewer::SetShowSkeleton(bool show) {auto options=GetDebugOptions();if (!options) {return Result<void>::Failure(options.Error());}options.Value().ShowSkeleton=show;return SetDebugOptions(options.Value());}
+Result<void> Viewer::SetDebugDraw(const DebugDraw& commands) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {DebugDraw copy=commands;if (state_->ApplyDebugDraw) {auto r=state_->ApplyDebugDraw(copy);if (!r) {return r;}}state_->DebugCommands=std::move(copy);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Reduce debug command count."));}
+}
+Result<RenderDebugInfo> Viewer::GetRenderDebugInfo() const {
+    auto ready=Ready(*state_);if (!ready) {return Result<RenderDebugInfo>::Failure(ready.Error());}try {if (state_->ReadDebug) {return Result<RenderDebugInfo>::Success(state_->ReadDebug());}return Result<RenderDebugInfo>::Failure({detail::GraphicsRuntimeAvailable() ? ErrorCode::InvalidState:ErrorCode::UnsupportedFeature,"Render inspection requires an active graphics session.","Query on the owner thread during OnFrame.",{}});}catch (...) {return Result<RenderDebugInfo>::Failure(detail::CurrentException(ErrorCode::Rendering,"Cannot inspect renderer resources."));}
+}
 Scene& Viewer::GetScene() noexcept { return state_->World; }
 const Scene& Viewer::GetScene() const noexcept { return state_->World; }
 

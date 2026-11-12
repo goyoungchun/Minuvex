@@ -27,6 +27,11 @@ struct ViewerState {
     std::function<void()> Invalidate;
     std::function<TelemetrySnapshot()> ReadTelemetry;
     std::optional<TelemetrySnapshot> LastTelemetry;
+    DebugOptions Debug;
+    DebugDraw DebugCommands;
+    std::function<Result<void>(const DebugOptions&)> ApplyDebug;
+    std::function<Result<void>(const DebugDraw&)> ApplyDebugDraw;
+    std::function<RenderDebugInfo()> ReadDebug;
     float Aspect() const {
         return static_cast<float>(Width > 0 ? Width : Options.Width) / static_cast<float>(Height > 0 ? Height : Options.Height);
     }

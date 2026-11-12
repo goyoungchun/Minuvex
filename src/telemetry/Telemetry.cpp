@@ -116,8 +116,8 @@ QualityRecommendation RecommendQuality(const QualityCapabilities& caps,const Sys
     const bool lowRam=system.AvailableSystemMemory.Value && (system.AvailableSystemMemory.Status == MetricStatus::Measured || system.AvailableSystemMemory.Status == MetricStatus::Estimated) && *system.AvailableSystemMemory.Value < 512ull*1024*1024;
     const auto recent=[&](std::optional<double> time) {return frames && time && std::isfinite(*time) && *time >= 0 && std::isfinite(frames->CapturedAtSeconds) && frames->CapturedAtSeconds >= *time && frames->CapturedAtSeconds-*time <= 2;};
     const auto measured=[](const Metric<double>& m) {return m.Status == MetricStatus::Measured && m.Value && std::isfinite(*m.Value) && *m.Value >= 0;};
-    const bool cpuEvidence=frames && frames->SampleCount >= 30 && recent(frames->LastCpuSampleAtSeconds) && measured(frames->P95CpuMs);
-    const bool gpuEvidence=frames && frames->GpuSampleCount >= 30 && recent(frames->LastGpuSampleAtSeconds) && measured(frames->P95GpuMs);
+    const bool cpuEvidence=frames && !frames->DebugRendering && frames->SampleCount >= 30 && recent(frames->LastCpuSampleAtSeconds) && measured(frames->P95CpuMs);
+    const bool gpuEvidence=frames && !frames->DebugRendering && frames->GpuSampleCount >= 30 && recent(frames->LastGpuSampleAtSeconds) && measured(frames->P95GpuMs);
     const double target=current && current->Quality.Effective && current->Quality.Effective->TargetFps > 0 ? 1000.0/current->Quality.Effective->TargetFps:0;
     const bool cpuPressure=target > 0 && cpuEvidence && *frames->P95CpuMs.Value > target;
     const bool gpuPressure=target > 0 && gpuEvidence && *frames->P95GpuMs.Value > target;

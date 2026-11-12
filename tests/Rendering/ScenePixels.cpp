@@ -307,6 +307,38 @@ void RunEnhancements() {
     auto shared=std::make_shared<lv::ModelAsset>(*model);shared->Materials[0].BaseColorTexture=0;scene.SetModel(object,shared);p.Overrides.Shadow=lv::ShadowMode::Pcf;apply();(void)render();
     auto estimate=lv::EstimateQualityResources(p,surface.Quality().Capabilities,scene,Size,Size);auto measured=surface.Telemetry(lv::detail::RenderClockSeconds());Check(estimate && estimate.Value().Cost.TotalBytes == measured.Resident.TotalBytes && surface.Stats().ResidentImages == 2 && measured.Resident.TextureBytes == 12,"combined shadow/HDR and shared sRGB/linear image accounting agrees with renderer allocations");
 }
+void RunDebug() {
+    lv::AssetRegistry assets;auto model=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("Sparse.gltf")));
+    auto& geometry=model->Meshes[0].Primitives[0].Geometry;geometry.Vertices.resize(3);geometry.Indices={0,1,2};const std::array<std::array<float,3>,3> positions={{{-.8f,-.8f,0},{.8f,-.8f,0},{0,.8f,0}}};
+    for (int i=0;i<3;++i) {geometry.Vertices[i].Position=positions[i];geometry.Vertices[i].Normal={1,0,0};geometry.Vertices[i].Color={1,1,1,1};geometry.Vertices[i].TexCoord={i == 0 ? 0.0f:i == 1 ? 1.0f:.5f,i == 2 ? 1.0f:0.0f};}
+    model->Materials={lv::MaterialAsset{}};model->Materials[0].BaseColor={.25f,.5f,.75f,1};model->Meshes[0].Primitives[0].MaterialIndex=0;
+    lv::Scene scene;const auto object=scene.AddModel(model);scene.MainCamera.Position={0,0,2};scene.MainCamera.Target={};scene.MainCamera.VerticalFovRadians=std::numbers::pi_v<float>/2;scene.MainCamera.FarPlane=10;scene.Sun.Intensity=scene.Sun.Ambient=0;
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Low);profile.Overrides.FixedWidth=profile.Overrides.FixedHeight=Size;profile.Overrides.Resolution=lv::ResolutionMode::Fixed;profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;profile.Overrides.FrustumCulling=false;
+    lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare diagnostic test surface.");double clock=1;
+    const auto render=[&] {Require(surface.Render(scene,clock++,false,{0,0,0,1}),"Debug change failed to invalidate On-Demand rendering.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    const auto set=[&](lv::DebugView view) {lv::DebugOptions o;o.View=view;Require(bool(surface.SetDebugOptions(o)),"Cannot select diagnostic view.");};
+    const auto lit=render();Check(lit[64*Size+64][0] == 0,"Lit respects the original dark lighting");
+    set(lv::DebugView::Unlit);auto unlit=render();const auto center=unlit[64*Size+64];Check(center[0]>55 && center[0]<75 && center[1]>115 && center[1]<140 && center[2]>180,"Unlit displays material color without editing the material");
+    set(lv::DebugView::Normal);auto normals=render();auto normal=normals[64*Size+64];Check(normal[0]>245 && normal[1]>120 && normal[1]<135 && normal[2]>120 && normal[2]<135,"Normal view maps world geometric normals to RGB");
+    set(lv::DebugView::UV);auto uv=render();const auto coord=uv[64*Size+64];Check(coord[0]>100 && coord[0]<155 && coord[1]>90 && coord[1]<160 && coord[2]==0,"UV view visualizes interpolated UV0 independently of lighting");
+    set(lv::DebugView::Depth);auto depth=render();Check(depth[64*Size+64][0]>45 && depth[64*Size+64][0]<60 && depth[64*Size+64][0] == depth[64*Size+64][1],"Depth view reconstructs linear view depth divided by far plane");
+    set(lv::DebugView::Wireframe);auto wire=render();std::size_t edgePixels=0;for (const auto& p:wire) {edgePixels+=p[0]>240;}Check(edgePixels>50 && wire[64*Size+64][0]==0 && surface.Stats().LastTriangles==0,"Wireframe draws triangle edges rather than filled interiors");
+    const auto inspection=surface.Inspect();bool buffers=false,targets=false,valid=true;for (const auto& r:inspection.Resources) {buffers|=r.Name == "Wireframe edge indices" && r.Bytes>0;targets|=r.Kind == lv::DebugResourceKind::RenderTarget && r.Width == Size;valid&=r.State == lv::DebugResourceState::Valid;}Check(buffers && targets && valid && inspection.DebugBufferBytes>0 && !inspection.Passes.empty(),"inspection snapshots expose valid targets, extra debug bytes, edge buffers, shaders and pipelines");
+    const auto image=surface.ColorImage().id;Check(!surface.SetDebugOptions({static_cast<lv::DebugView>(99)}) && !surface.SetDebugOptions({lv::DebugView::ShadowMap}) && surface.ColorImage().id == image && surface.Debug().View == lv::DebugView::Wireframe,"invalid and unavailable views retain prior rendering settings/resources");
+    set(lv::DebugView::BoneWeight);const auto rigid=render();Check(rigid[64*Size+64][2]>245 && rigid[64*Size+64][0]==0,"rigid vertices show zero influence instead of fabricated skin weights");
+    set(lv::DebugView::BoundingBox);(void)render();Check(surface.Inspect().LineCount == 12 && surface.Inspect().LineDrawCalls == 1,"bounding box overlay is submitted independently of mesh triangles");
+    set(lv::DebugView::Unlit);lv::DebugDraw commands;commands.DrawLine({-.5f,0,-1},{.5f,0,-1},{1,0,0,1});Require(bool(surface.SetDebugDraw(commands)),"Cannot submit public debug geometry.");const auto hidden=render();auto options=surface.Debug();options.DepthTest=false;Require(bool(surface.SetDebugOptions(options)),"Cannot select x-ray overlay.");const auto shown=render();std::size_t hiddenRed=0,shownRed=0;for (std::size_t i=0;i<shown.size();++i) {hiddenRed+=hidden[i][0]>240 && hidden[i][1]==0;shownRed+=shown[i][0]>240 && shown[i][1]==0;}Check(shownRed>hiddenRed+15,"debug line depth-test option controls occlusion behind a mesh");
+    Require(bool(surface.SetDebugDraw({})),"Cannot clear diagnostic commands.");set(lv::DebugView::Normal);(void)render();profile.Base=lv::QualityPreset::High;profile.Overrides.MsaaSamples=1;profile.Overrides.ShadowResolution=512;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot enable shadow/HDR debug target.");
+    const auto history=surface.Telemetry(lv::detail::RenderClockSeconds());Check(history.PreviousQualityFrames && history.PreviousQualityFrames->DebugRendering,"quality history preserves the diagnostic measurement flag");
+    set(lv::DebugView::Normal);auto hdr=render();Check(hdr[64*Size+64] == normal,"HDR diagnostic output bypasses FXAA and tone mapping");
+    set(lv::DebugView::ShadowMap);auto shadow=render();std::size_t written=0;bool gray=true;for (const auto& p:shadow) {written+=p[0]<250;gray&=p[0]==p[1] && p[1]==p[2];}Check(gray && written>20 && surface.InspectionTexture(2).id,"Shadow Map view visualizes actual directional depth across the target");
+    auto noShadow=profile;noShadow.Overrides.Shadow=lv::ShadowMode::Off;Check(!surface.ApplyQuality(noShadow,scene,Size,Size) && surface.Quality().Requested == profile,"disabling shadows during Shadow Map inspection is explicitly rejected");
+    set(lv::DebugView::Lit);Require(bool(surface.ApplyQuality(noShadow,scene,Size,Size)),"Cannot restore no-shadow profile.");
+    scene.SetModel(object,assets.LoadModel(Fixture("AnimatedRibbon.gltf")));scene.GetAnimation(object).Play(0);scene.GetAnimation(object).Seek(.5);scene.MainCamera.Position={.2f,.5f,3};scene.MainCamera.Target={.2f,.5f,0};
+    options={};options.View=lv::DebugView::Skeleton;options.DepthTest=false;options.ShowReferencePose=true;Require(bool(surface.SetDebugOptions(options)),"Cannot select skeleton/reference overlay.");(void)render();const auto bones=surface.Inspect();Check(bones.LineCount>6 && scene.GetAnimation(object).Time() == .5 && surface.Telemetry(lv::detail::RenderClockSeconds()).Frames.DebugRendering,"animated/reference skeleton drawing preserves playback and marks diagnostic timing");
+    set(lv::DebugView::BoneWeight);auto weights=render();std::size_t weighted=0;for (const auto& p:weights) {weighted+=p[0]>20 && (p[1]>20 || p[0]>240);}Check(weighted>20,"Bone Weight heatmap uses actual skinned vertex influences");
+    set(lv::DebugView::Lit);const auto normalFrames=render();(void)normalFrames;Check(!surface.Telemetry(lv::detail::RenderClockSeconds()).Frames.DebugRendering,"returning to Lit starts normal performance evidence again");
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -330,7 +362,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }

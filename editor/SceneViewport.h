@@ -21,6 +21,12 @@ public:
     TelemetrySnapshot Telemetry() {return surface_.Telemetry(detail::RenderClockSeconds());}
     int OutputWidth() const noexcept {return width_;}
     int OutputHeight() const noexcept {return height_;}
+    Result<void> SetDebugOptions(const DebugOptions& o) {return surface_.SetDebugOptions(o);}
+    Result<void> SetDebugDraw(const DebugDraw& d) {return surface_.SetDebugDraw(d);}
+    const DebugOptions& Debug() const noexcept {return surface_.Debug();}
+    RenderDebugInfo Inspect() const {return surface_.Inspect();}
+    sg_view InspectionTexture(int target) const noexcept {return surface_.InspectionTexture(target);}
+    sg_sampler InspectionSampler(int target) const noexcept {return surface_.InspectionSampler(target);}
 private:
     detail::RenderSurface surface_;
     Scene empty_;

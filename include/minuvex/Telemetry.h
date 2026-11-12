@@ -14,6 +14,7 @@ struct FrameStatistics {
     Metric<double> P95GpuMs{std::nullopt, MetricStatus::Unsupported, "GPU timestamps unavailable"};
     double CapturedAtSeconds = 0;
     std::optional<double> LastCpuSampleAtSeconds, LastGpuSampleAtSeconds;
+    bool DebugRendering=false; // Diagnostic work cannot validate normal quality preset performance.
 };
 // Bounded CPU/GPU windows (240 each), restarted on submissions after >2s idle.
 // Cadence includes pacing; CPU time excludes pacing and presentation. Single-thread owned.

@@ -25,6 +25,9 @@ int main(int argc, char** argv) {
         if (!estimate || !estimate.Value().Cost.BufferBytes) {return 1;}
         lv::Viewer viewer;if (!viewer.AddModel(argv[1]) || !viewer.SetQuality(low)) {return 1;}
         if (!viewer.ReimportModel(viewer.GetScene().ObjectIds().front())) {return 1;}
+        lv::DebugDraw debug;debug.DrawAxis(lv::Mat4::Identity());debug.DrawBoundingBox(preview.Value()->ModelBounds);
+        if (!viewer.SetDebugDraw(debug) || !viewer.SetDebugView(lv::DebugView::Wireframe) || !viewer.SetShowSkeleton(true)) {return 1;}
+        const auto influences=lv::InspectBoneInfluences(*preview.Value());(void)influences;
         lv::EmbeddedRenderer embedded;if (embedded.IsInitialized()) {return 1;}
         const auto hardware=lv::SystemInfo::QueryHardware();
         std::printf("Minuvex %.*s | %.*s | %.*s | %d bit | graphics=%d | %s\n",

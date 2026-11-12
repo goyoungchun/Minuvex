@@ -156,6 +156,30 @@ Result<QualityState> EmbeddedRenderer::GetQuality() const {
 Result<QualityCapabilities> EmbeddedRenderer::GetQualityCapabilities() const {
     auto quality=GetQuality();if (!quality) {return Result<QualityCapabilities>::Failure(quality.Error());}return Result<QualityCapabilities>::Success(quality.Value().Capabilities);
 }
+Result<void> EmbeddedRenderer::SetDebugOptions(const DebugOptions& options) {
+    auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
+#if MINUVEX_EMBEDDED_GRAPHICS
+    try {auto scope=p.Bridge->Enter();return p.Surface->SetDebugOptions(options);}catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
+#else
+    (void)options;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
+#endif
+}
+Result<void> EmbeddedRenderer::SetDebugDraw(const DebugDraw& commands) {
+    auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
+#if MINUVEX_EMBEDDED_GRAPHICS
+    try {auto scope=p.Bridge->Enter();return p.Surface->SetDebugDraw(commands);}catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
+#else
+    (void)commands;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
+#endif
+}
+Result<RenderDebugInfo> EmbeddedRenderer::GetRenderDebugInfo() const {
+    auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<RenderDebugInfo>::Failure(ready.Error());}
+#if MINUVEX_EMBEDDED_GRAPHICS
+    try {auto scope=p.Bridge->Enter();return Result<RenderDebugInfo>::Success(p.Surface->Inspect());}catch (...) {return Result<RenderDebugInfo>::Failure(Exception(ErrorCode::Rendering));}
+#else
+    return Failure<RenderDebugInfo>(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
+#endif
+}
 Result<TelemetrySnapshot> EmbeddedRenderer::GetTelemetry() const {
     auto& p=*impl_;auto ready=p.Ready(false);if (!ready) {return Result<TelemetrySnapshot>::Failure(ready.Error());}
 #if MINUVEX_EMBEDDED_GRAPHICS

@@ -1,6 +1,7 @@
 #include "renderer/MeshRenderer.h"
 
 #include "mesh.glsl.h"
+#include "DebugResources.h"
 
 #include <cstddef>
 #include <cmath>
@@ -132,6 +133,7 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     fragment.light_color = {light.Color.X, light.Color.Y, light.Color.Z, light.Ambient};
     fragment.options = {material.AlphaCutoff, material.Unlit || forceUnlit ? 1.0f : 0.0f, 0,lighting.Advanced ? 1.0f:0.0f};
     fragment.normal_options={material.NormalScale,lighting.Advanced && lighting.NormalTexture.id ? 1.0f:0.0f,0,0};
+    fragment.debug_options={static_cast<float>(lighting.Debug.View),lighting.NearPlane,lighting.FarPlane,0};
     if (lighting.Shadow) {fragment.shadow_options={static_cast<float>(lighting.Shadow->Mode),1.0f/lighting.Shadow->Resolution,.0008f,.003f};}
     std::size_t local=0;
     const auto point=[&](Vec3 position,Vec3 color,float intensity,float range) {fragment.local_positions[local]={position.X,position.Y,position.Z,range};fragment.local_colors[local]={color.X,color.Y,color.Z,intensity};};
@@ -145,7 +147,9 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     bindings.samplers[SMP_base_sampler] = sampler.id ? sampler : whiteSampler_;
     bindings.views[VIEW_normal_texture]=lighting.NormalTexture.id ? lighting.NormalTexture:whiteView_;bindings.samplers[SMP_normal_sampler]=lighting.NormalSampler.id ? lighting.NormalSampler:whiteSampler_;
     bindings.views[VIEW_shadow_texture]=lighting.Shadow && lighting.Shadow->Texture.id ? lighting.Shadow->Texture:whiteView_;bindings.samplers[SMP_shadow_sampler]=lighting.Shadow && lighting.Shadow->Sampler.id ? lighting.Shadow->Sampler:nearestSampler_;
-    sg_apply_pipeline(pipelines_[model.LinearDeterminant() < 0 ? 1 : 0]);
+    const bool wire=lighting.Debug.View == DebugView::Wireframe;
+    if (wire) {bindings.index_buffer=edges_;}
+    sg_apply_pipeline(wire ? wirePipelines_[model.LinearDeterminant() < 0 ? 1:0]:pipelines_[model.LinearDeterminant() < 0 ? 1 : 0]);
     sg_apply_bindings(bindings);
     sg_apply_uniforms(UB_mesh_params, SG_RANGE(uniforms));
     sg_apply_uniforms(UB_material_params, SG_RANGE(fragment));
@@ -153,10 +157,27 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
         if (palette.size() > MaxSkinJoints) { throw std::invalid_argument("Skin palette exceeds 128 joints."); }
         skin_params_t skin{};
         for (std::size_t i=0;i<palette.size();++i) { skin.joint_matrices[i] = palette[i]; }
-        skin.skin_options = {palette.empty() ? 0.0f : 1.0f,0,0,0};
+        skin.skin_options = {palette.empty() ? 0.0f : 1.0f,static_cast<float>(lighting.Debug.WeightJoint),0,0};
         sg_apply_uniforms(UB_skin_params,SG_RANGE(skin));
     }
-    sg_draw(0, indexCount_, 1);
+    sg_draw(0,wire ? edgeIndexCount_:indexCount_,1);
+}
+
+void MeshRenderer::PrepareWireframe(const MeshData& mesh) {
+    if (edges_.id) {return;}
+    if (mesh.Indices.size() > static_cast<std::size_t>(INT_MAX)/2) {throw std::length_error("Wireframe index limit exceeded.");}
+    std::vector<std::uint32_t> edges;edges.reserve(mesh.Indices.size()*2);
+    for (std::size_t i=0;i<mesh.Indices.size();i+=3) {const auto a=mesh.Indices[i],b=mesh.Indices[i+1],c=mesh.Indices[i+2];edges.insert(edges.end(),{a,b,b,c,c,a});}
+    sg_buffer_desc b{};b.usage.index_buffer=true;b.data={edges.data(),edges.size()*sizeof(std::uint32_t)};b.label="debug-wireframe-indices";
+    sg_buffer buffer=sg_make_buffer(b);sg_pipeline pipelines[2]{};
+    for (int i=0;i<2;++i) {auto d=sg_query_pipeline_desc(pipelines_[i]);d.primitive_type=SG_PRIMITIVETYPE_LINES;d.cull_mode=SG_CULLMODE_NONE;d.label="debug-wireframe-pipeline";pipelines[i]=sg_make_pipeline(d);}
+    if (sg_query_buffer_state(buffer) != SG_RESOURCESTATE_VALID || sg_query_pipeline_state(pipelines[0]) != SG_RESOURCESTATE_VALID || sg_query_pipeline_state(pipelines[1]) != SG_RESOURCESTATE_VALID) {for (auto p:pipelines) {if (p.id) {sg_destroy_pipeline(p);}}if (buffer.id) {sg_destroy_buffer(buffer);}throw std::runtime_error("Cannot create debug wireframe resources.");}
+    edges_=buffer;wirePipelines_[0]=pipelines[0];wirePipelines_[1]=pipelines[1];edgeIndexCount_=static_cast<int>(edges.size());
+}
+void MeshRenderer::Inspect(std::vector<DebugResource>& r) const {
+    InspectBuffer(r,vertices_,"Mesh vertices");InspectBuffer(r,indices_,"Mesh triangle indices");InspectBuffer(r,edges_,"Wireframe edge indices");InspectImage(r,whiteImage_,"Fallback white");
+    InspectShader(r,shader_,skinned_ ? "skin":"mesh");InspectShader(r,shadowShader_,skinned_ ? "shadow_skin":"shadow_mesh");
+    for (auto p:pipelines_) {InspectPipeline(r,p,"Mesh winding pipeline");}for (auto p:wirePipelines_) {InspectPipeline(r,p,"Wireframe winding pipeline");}for (auto p:shadowPipelines_) {InspectPipeline(r,p,"Shadow winding pipeline");}
 }
 
 void MeshRenderer::DrawShadow(const Mat4& model,const Mat4& lightViewProjection,const MaterialAsset& material,sg_view texture,sg_sampler sampler,std::span<const Mat4> palette) const {
@@ -169,6 +190,7 @@ void MeshRenderer::DrawShadow(const Mat4& model,const Mat4& lightViewProjection,
 }
 void MeshRenderer::Shutdown() noexcept {
     if (sg_isvalid()) {
+        if (edges_.id) {sg_destroy_buffer(edges_);}for (auto p:wirePipelines_) {if (p.id) {sg_destroy_pipeline(p);}}
         if (whiteSampler_.id) { sg_destroy_sampler(whiteSampler_); }
         if (nearestSampler_.id) {sg_destroy_sampler(nearestSampler_);}
         for (const auto pipeline:shadowPipelines_) {if (pipeline.id) {sg_destroy_pipeline(pipeline);}}
@@ -189,6 +211,7 @@ void MeshRenderer::Shutdown() noexcept {
     indices_ = {};
     vertices_ = {};
     indexCount_ = 0;
+    edges_={};wirePipelines_[0]=wirePipelines_[1]={};edgeIndexCount_=0;
 }
 
 } // namespace lv::detail

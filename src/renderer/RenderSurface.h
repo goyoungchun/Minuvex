@@ -6,6 +6,7 @@
 
 namespace lv::detail {
 class GraphicsTelemetry;
+class DebugRenderer;
 class RenderSurface final {
 public:
     RenderSurface();
@@ -26,15 +27,27 @@ public:
     SceneRenderStats Stats() const noexcept {return renderer_ ? renderer_->GetStats():SceneRenderStats{};}
     std::uint64_t RenderedFrames() const noexcept {return frames_;}
     TelemetrySnapshot Telemetry(double now);
+    Result<void> SetDebugOptions(const DebugOptions& options);
+    Result<void> SetDebugDraw(const DebugDraw& commands);
+    const DebugOptions& Debug() const noexcept {return debug_;}
+    RenderDebugInfo Inspect() const;
+    sg_view InspectionTexture(int target) const noexcept; // 0 final, 1 resolved scene, 2 shadow.
+    sg_sampler InspectionSampler(int target) const noexcept;
 private:
     struct Targets;
     struct Presenter;
     struct ShadowTargets;
+    struct DebugPreview;
     std::unique_ptr<Targets> targets_;
     std::unique_ptr<Presenter> presenter_;
     std::unique_ptr<SceneRenderer> renderer_;
     std::unique_ptr<ShadowTargets> shadow_;
     std::unique_ptr<GraphicsTelemetry> telemetry_;
+    std::unique_ptr<DebugRenderer> debugRenderer_;
+    std::unique_ptr<DebugPreview> debugPreview_;
+    DebugOptions debug_;
+    DebugDraw debugDraw_;
+    std::uint64_t debugLines_=0,debugCalls_=0;
     FrameMonitor frameMonitor_;
     std::optional<std::uint64_t> monitoredAssets_;
     std::optional<FrameStatistics> previousFrames_;

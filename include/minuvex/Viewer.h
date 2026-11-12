@@ -4,6 +4,7 @@
 #include <minuvex/Scene.h>
 #include <minuvex/Quality.h>
 #include <minuvex/Telemetry.h>
+#include <minuvex/Debug.h>
 
 #include <functional>
 #include <memory>
@@ -103,6 +104,12 @@ public:
     Result<QualityCapabilities> GetQualityCapabilities() const;
     Result<TelemetrySnapshot> GetTelemetry() const; // Live on owner thread; last snapshot retained after Run.
     Result<void> RequestRedraw(); // Invalidate on-demand rendering on the owner thread.
+    Result<void> SetDebugOptions(const DebugOptions& options);
+    Result<DebugOptions> GetDebugOptions() const;
+    Result<void> SetDebugView(DebugView view);
+    Result<void> SetShowSkeleton(bool show);
+    Result<void> SetDebugDraw(const DebugDraw& commands); // Copies persistent world-space lines; empty clears.
+    Result<RenderDebugInfo> GetRenderDebugInfo() const; // Active graphics session only; diagnostic values, no GPU ownership.
 
     // Advanced API: owner thread only, retaining Phase 2's exception contracts.
     Scene& GetScene() noexcept;

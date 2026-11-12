@@ -42,6 +42,7 @@ public:
     void SetQualityDraft(QualityProfile profile) {qualityDraft_=std::move(profile);}
     void ResetQualityDraft() {qualityDraft_=Viewport.Quality().Requested;}
     const std::optional<QualityEstimate>& SelectedQualityEstimate() const noexcept {return selectedEstimate_;}
+    void ShowDebuggers() noexcept {renderDebugger_=animationDebugger_=true;}
     // Queue from UI actions after Image commands exist; commit at the next Draw entry.
     void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
@@ -67,6 +68,9 @@ private:
     bool quality_ = true;
     bool performance_ = true;
     bool assetInspector_=true,copyImport_=false;
+    bool renderDebugger_=false,animationDebugger_=false;
+    int inspectedTarget_=0;
+    DebugDraw editorDebugDraw_;
     struct PendingImport {std::filesystem::path Path;bool Place=false;};
     std::vector<PendingImport> importQueue_;
     ImportSettings importSettings_;
@@ -104,6 +108,8 @@ private:
     void PerformancePanel();
     const TelemetrySnapshot& RefreshQualityAnalysis();
     void QualityOverview();
+    void RenderDebugger();
+    void AnimationDebugger();
     void AssetBrowser();
     void AssetInspector();
     void ImportPreview();

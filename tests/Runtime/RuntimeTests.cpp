@@ -45,6 +45,8 @@ int main(int argc, char* argv[]) {
         ++callbacks;
         if (mode == "telemetry") {
             auto t=v.GetTelemetry();Check(t && t.Value().Live && t.Value().Hardware.ActiveGraphicsDevice && !t.Value().Hardware.GpuName.empty() && !t.Value().Hardware.Formats.empty(),"live telemetry identifies the actual graphics device and relevant format support");
+            if (info.FrameNumber == 1) {Require(v.SetDebugView(lv::DebugView::Wireframe));}
+            if (info.FrameNumber == 2) {const auto debug=v.GetRenderDebugInfo();Check(debug && debug.Value().Live && debug.Value().LineCount>0 && t.Value().Frames.DebugRendering,"Viewer public debug API drives real wireframe rendering and inspection");Require(v.SetDebugView(lv::DebugView::Lit));}
             if (info.FrameNumber == 20) {
                 const auto& s=t.Value();Check(s.Frames.SampleCount > 0 && s.Frames.DrawCalls > 0 && s.Frames.Triangles > 0 && s.Frames.AverageCpuMs.Value,"actual rendered frames expose timing and draw/triangle counters");
                 auto estimate=lv::EstimateQualityResources(s.Quality.Requested,s.Quality.Capabilities,v.GetScene(),info.FramebufferWidth,info.FramebufferHeight);

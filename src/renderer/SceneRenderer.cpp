@@ -3,6 +3,7 @@
 #include "renderer/MeshRenderer.h"
 #include "renderer/TextureData.h"
 #include "telemetry/ResourceSignature.h"
+#include "DebugResources.h"
 
 #include <algorithm>
 #include <cmath>
@@ -120,6 +121,7 @@ void SceneRenderer::Prepare(const Scene& scene) {
         }
     }
     std::erase_if(models_, [&needed](const auto& entry) { return !needed.contains(entry.first); });
+    if (debug_.View == DebugView::Wireframe) {for (auto& [key,model]:models_) {(void)key;for (std::size_t i=0;i<model->Meshes.size();++i) {for (std::size_t p=0;p<model->Meshes[i].size();++p) {model->Meshes[i][p]->PrepareWireframe(model->Asset->Meshes[i].Primitives[p].Geometry);}}}}
     stats_.ResidentModels = models_.size();
     stats_.ResidentAssetSignature=signature;
     stats_.ResidentPrimitives = stats_.ResidentImages = 0;
@@ -133,7 +135,7 @@ void SceneRenderer::Prepare(const Scene& scene) {
     }
 }
 
-void SceneRenderer::Draw(const Scene& scene,float aspect,const ShadowSampling& shadow) {DrawImpl(scene,scene.MainCamera.ViewProjection(aspect),false,shadow);}
+void SceneRenderer::Draw(const Scene& scene,float aspect,const ShadowSampling& shadow) {stats_.LastWireLines=0;DrawImpl(scene,scene.MainCamera.ViewProjection(aspect),false,shadow);}
 void SceneRenderer::DrawShadow(const Scene& scene,const Mat4& matrix) {DrawImpl(scene,matrix,true,{});}
 void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool shadowPass,const ShadowSampling& shadow) {
     scene.ValidateLighting();
@@ -185,9 +187,10 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                 if (shadowPass) {model.Meshes.at(part.MeshIndex).at(i)->DrawShadow(transform,viewProjection,material,texture,sampler,palette);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3;}
                 else {
                     MeshLighting lighting;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
+                    lighting.Debug=debug_;lighting.NearPlane=scene.MainCamera.NearPlane;lighting.FarPlane=scene.MainCamera.FarPlane;
                     if (lighting.Advanced && material.NormalTexture) {const auto index=*material.NormalTexture;lighting.NormalTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.NormalSampler=model.Samplers.at(index);}
                     model.Meshes.at(part.MeshIndex).at(i)->Draw(transform,viewProjection,scene.Sun,material,texture,sampler,palette,settings_.Lighting == LightingMode::Unlit,lighting);
-                    ++stats_.LastDrawCalls;stats_.LastTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3;
+                    ++stats_.LastDrawCalls;if (debug_.View == DebugView::Wireframe) {stats_.LastWireLines+=mesh.Primitives[i].Geometry.Indices.size();}else {stats_.LastTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3;}
                 }
             }
         }
@@ -218,5 +221,6 @@ Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene) const {
     return projection*view;
 }
 void SceneRenderer::Clear() noexcept { models_.clear(); stats_ = {}; }
+void SceneRenderer::Inspect(std::vector<DebugResource>& r) const {for (const auto& [key,model]:models_) {(void)key;for (const auto& mesh:model->Meshes) {for (const auto& p:mesh) {p->Inspect(r);}}for (const auto& image:model->Images) {InspectImage(r,image.Image,"Asset texture (base/normal)");}}}
 
 } // namespace lv::detail

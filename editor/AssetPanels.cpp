@@ -69,6 +69,7 @@ void EditorUI::AssetInspector() {
             ImGui::Text("Content hash: %016llx",static_cast<unsigned long long>(model.ContentHash));
             ImGui::Text("Status: %s",model.Status == AssetImportStatus::Ready ? "Ready":"Ready with warnings");
             Summary(model);
+            if (ImGui::CollapsingHeader("Bone influences")) {const auto stats=InspectBoneInfluences(model);ImGui::Text("Skinned / rigid vertices: %zu / %zu",stats.SkinnedVertices,stats.RigidVertices);ImGui::Text("Unweighted: %zu | weight sum: %.6f .. %.6f",stats.UnweightedVertices,stats.MinimumWeightSum,stats.MaximumWeightSum);for (unsigned n=0;n<=4;++n) {ImGui::Text("%u influences: %zu",n,stats.InfluenceCounts[n]);}}
             if (ImGui::Button("Reimport source")) {ReimportAsset(model.Id);}
             ImGui::SameLine();if (ImGui::Button("Open folder")) {Report(NativeFiles::OpenPath(model.SourcePath.parent_path()));}
             if (ImGui::CollapsingHeader("Import Settings")) {
@@ -87,6 +88,7 @@ void EditorUI::AssetInspector() {
                 for (const auto& clip:model.Animations) {ImGui::Text("%s: %.3f seconds / %zu tracks",clip.Name.c_str(),clip.Duration,clip.Tracks.size());}
             }
             if (ImGui::CollapsingHeader("Textures / Images")) {for (std::size_t i=0;i<model.Textures.size();++i) {const auto& texture=model.Textures[i];const auto& image=model.Images[texture.ImageIndex];ImGui::Text("Texture %zu -> image %zu: %d x %d / %zu bytes",i,texture.ImageIndex,image.Width,image.Height,image.Rgba.size());}}
+            if (ImGui::CollapsingHeader("Material texture connections")) {for (std::size_t i=0;i<model.Materials.size();++i) {const auto& m=model.Materials[i];ImGui::Text("Material %zu: %s",i,m.Name.c_str());const auto connection=[&](const char* role,std::optional<std::size_t> index) {if (index) {ImGui::Text("%s -> texture %zu -> image %zu [connected]",role,*index,model.Textures.at(*index).ImageIndex);}else {ImGui::Text("%s: none / fallback",role);}};connection("Base Color (sRGB)",m.BaseColorTexture);connection("Normal (linear, Advanced)",m.NormalTexture);}}
         }
     }ImGui::End();
 }

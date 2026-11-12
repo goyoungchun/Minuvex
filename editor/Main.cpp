@@ -230,6 +230,8 @@ void SmokeAfterDraw(Application& app) {
     }
     if (app.Frames == 7) {
         Require(ui.Viewport.Texture().id != 0,"Viewport did not resume after suspension.");
+        const auto* debug=ImGui::FindWindowByName("Render Debugger");const auto* animation=ImGui::FindWindowByName("Animation Debugger");const auto info=ui.Viewport.Inspect();
+        Require(debug && debug->DockId && animation && animation->DockId && info.LineCount>0 && info.LineDrawCalls==1,"Editor debug panels or actual skeleton/bounds overlay were not connected.");
         // New/Open/Quit guard is also exercised in the real ImGui frame.
         Require(doc.CreateObject("Unsaved object")); ui.RequestQuit();
     }
@@ -277,6 +279,7 @@ void Frame(void* user) noexcept {
         if (app.Smoke && app.Frames == 5) {ImGui::SetWindowFocus("Asset Inspector");}
         if (app.TelemetrySmoke && app.Frames == 1) {ImGui::SetWindowFocus("Performance");}
         if (app.QualitySmoke && app.Frames == 6) {ImGui::SetWindowFocus("Quality Settings");}
+        if (app.Smoke && app.Frames == 7) {const auto dirty=app.UI->Document.IsDirty();app.UI->ShowDebuggers();lv::DebugOptions debug;debug.View=lv::DebugView::Normal;debug.ShowSkeleton=debug.ShowBounds=debug.ShowReferencePose=true;debug.DepthTest=false;Require(app.UI->Viewport.SetDebugOptions(debug));Require(app.UI->Document.IsDirty() == dirty,"Debug display dirtied the Scene.");}
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());
         if (app.Smoke) { SmokeAfterDraw(app); }
