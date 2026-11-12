@@ -228,11 +228,24 @@ void TestInput() {
 }
 }
 
+void TestOrthographicControls() {
+    lv::Viewer viewer;Check(bool(viewer.AddModel(Fixture("SharedBox.glb"))),"orthographic sample imports");
+    lv::Camera camera;camera.Position={0,0,10};camera.Target={};camera.Projection=lv::CameraProjection::Orthographic;
+    Check(bool(viewer.SetCamera(camera)) && bool(viewer.FrameScene()),"orthographic FrameScene fits the model");CheckFramed(viewer,1280.0f/720);
+    const auto fitted=viewer.GetScene().MainCamera;
+    lv::ViewerInputEvent event;event.Type=lv::ViewerInputType::Scroll;event.ScrollY=2;
+    Check(bool(viewer.ProcessInput(event)) && viewer.GetScene().MainCamera.OrthographicHeight<fitted.OrthographicHeight && Same(viewer.GetScene().MainCamera.Position,fitted.Position),"orthographic zoom changes span without dollying");
+    const auto before=viewer.GetScene().MainCamera;event={};event.Type=lv::ViewerInputType::MouseDown;event.Button=lv::ViewerMouseButton::Right;Check(bool(viewer.ProcessInput(event)),"orthographic pan starts");event.Type=lv::ViewerInputType::MouseMove;event.DeltaX=10;
+    Check(bool(viewer.ProcessInput(event)) && Near(viewer.GetScene().MainCamera.Position.X-before.Position.X,-before.OrthographicHeight*10/720),"orthographic pan uses world span per logical pixel");
+    camera=viewer.GetScene().MainCamera;camera.Projection=static_cast<lv::CameraProjection>(99);Check(!viewer.SetCamera(camera) && viewer.GetScene().MainCamera.Projection == lv::CameraProjection::Orthographic,"invalid projection preserves the active camera");
+}
+
 int main() {
     try {
         TestFacade();TestFailures();TestInput();
         TestDebugContracts();
         TestOptimizationContracts();
+        TestOrthographicControls();
         lv::EmbeddedRenderer embedded;lv::Scene scene;
         Check(!embedded.IsInitialized() && embedded.Shutdown().HasValue(),"Embedded inactive shutdown is idempotent");
         ErrorIs(embedded.Render(scene,{}),lv::ErrorCode::InvalidState,"Embedded render requires initialization");

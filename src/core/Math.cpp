@@ -177,6 +177,22 @@ Mat4 Mat4::Perspective(float fov, float aspect, float nearPlane, float farPlane)
     result.Elements[10] = farPlane / (nearPlane - farPlane);
     result.Elements[11] = -1.0f;
     result.Elements[14] = nearPlane * result.Elements[10];
+    for (const auto value:result.Elements) {if (!std::isfinite(value)) {throw std::invalid_argument("Perspective exceeds the supported numeric range.");}}
+    return result;
+}
+
+Mat4 Mat4::Orthographic(float width,float height,float nearPlane,float farPlane) {
+    if (!std::isfinite(width) || !std::isfinite(height) || !std::isfinite(nearPlane) || !std::isfinite(farPlane) || width <= 0 || height <= 0 || nearPlane <= 0 || farPlane <= nearPlane) {throw std::invalid_argument("Orthographic requires positive width/height and 0 < near < far.");}
+    auto result=Identity();result.Elements[0]=2/width;result.Elements[5]=2/height;result.Elements[10]=1/(nearPlane-farPlane);result.Elements[14]=nearPlane/(nearPlane-farPlane);
+    for (const auto value:result.Elements) {if (!std::isfinite(value)) {throw std::invalid_argument("Orthographic exceeds the supported numeric range.");}}
+    return result;
+}
+
+Mat4 Mat4::InverseAffine() const {
+    const auto normal=NormalMatrix();auto result=Identity();
+    for (int row=0;row<3;++row) {for (int column=0;column<3;++column) {result.Elements[column*4+row]=normal.Elements[row*4+column];}}
+    for (int row=0;row<3;++row) {double t=0;for (int column=0;column<3;++column) {t-=double(result.Elements[column*4+row])*Elements[12+column];}result.Elements[12+row]=static_cast<float>(t);}
+    for (auto value:result.Elements) {if (!std::isfinite(value)) {throw std::invalid_argument("Affine inverse exceeds the supported numeric range.");}}
     return result;
 }
 

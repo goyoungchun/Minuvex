@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <numbers>
 #include <unordered_set>
 #include <type_traits>
 
@@ -12,7 +13,14 @@ std::atomic<ObjectId> nextObjectId{1};
 }
 
 Mat4 Camera::ViewProjection(float aspect) const {
-    return Mat4::Perspective(VerticalFovRadians, aspect, NearPlane, FarPlane) * Mat4::LookAt(Position, Target, Up);
+    const auto result=ProjectionMatrix(aspect) * Mat4::LookAt(Position, Target, Up);
+    for (auto value:result.Elements) {if (!std::isfinite(value)) {throw std::invalid_argument("Camera matrix exceeds the supported numeric range.");}}return result;
+}
+Mat4 Camera::ProjectionMatrix(float aspect) const {
+    if (!std::isfinite(OrthographicHeight) || OrthographicHeight <= 0 || !std::isfinite(VerticalFovRadians) || VerticalFovRadians <= 0 || VerticalFovRadians >= std::numbers::pi_v<float>) {throw std::invalid_argument("Camera requires a positive orthographic height and 0 < FOV < pi.");}
+    if (Projection == CameraProjection::Perspective) {return Mat4::Perspective(VerticalFovRadians,aspect,NearPlane,FarPlane);}
+    if (Projection == CameraProjection::Orthographic) {return Mat4::Orthographic(OrthographicHeight*aspect,OrthographicHeight,NearPlane,FarPlane);}
+    throw std::invalid_argument("Unknown camera projection.");
 }
 
 void DirectionalLight::Validate() const {

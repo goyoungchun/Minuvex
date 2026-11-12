@@ -594,7 +594,7 @@ std::shared_ptr<ModelAsset> ImportGltf(const std::filesystem::path& path, const 
         try { AnimationPlayer reference; reference.Bind(model); model->ModelBounds = reference.GetBounds(); }
         catch (const std::invalid_argument& e) { Invalid(e.what()); }
     }
-    model->Warnings.push_back("Base-color diffuse/unlit shading; advanced PBR, normal and emissive maps are not evaluated.");
+    model->Warnings.push_back("Base-color diffuse/unlit shading with tangent-space normal maps; metallic/roughness PBR and emissive maps are not evaluated.");
     return model;
 }
 

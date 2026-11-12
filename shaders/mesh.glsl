@@ -120,7 +120,7 @@ void main() {
     if (debug_options.x > 1.5 && debug_options.x < 2.5) {frag_color=vec4(1);return;}
     if (debug_options.x > 2.5 && debug_options.x < 3.5) {frag_color=vec4(geometric*.5+.5,1);return;}
     if (debug_options.x > 3.5 && debug_options.x < 4.5) {frag_color=vec4(fract(uv),0,1);return;}
-    if (debug_options.x > 4.5 && debug_options.x < 5.5) {float depth=debug_options.y/(debug_options.z-gl_FragCoord.z*(debug_options.z-debug_options.y));frag_color=vec4(vec3(depth),1);return;}
+    if (debug_options.x > 4.5 && debug_options.x < 5.5) {float depth=debug_options.w > .5 ? (debug_options.y+gl_FragCoord.z*(debug_options.z-debug_options.y))/debug_options.z:debug_options.y/(debug_options.z-gl_FragCoord.z*(debug_options.z-debug_options.y));frag_color=vec4(vec3(depth),1);return;}
     if (debug_options.x > 6.5 && debug_options.x < 7.5) {float w=clamp(bone_weight,0.0,1.0);frag_color=vec4(w,1.0-abs(w*2.0-1.0),1.0-w,1);return;}
     if (normal_options.y > .5) {
         vec3 t;vec3 b;

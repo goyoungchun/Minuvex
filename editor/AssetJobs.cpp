@@ -2,6 +2,7 @@
 #include <algorithm>
 namespace lv::editor {
 void EditorUI::PollAssetJobs() {
+    if (Document.IsEditing()) {return;} // Defer registry/Scene commits until the edit boundary.
     if (previewJob_ && loader_) {const auto job=loader_->Poll(*previewJob_);if (job && job.Value().State != AssetLoadState::Queued && job.Value().State != AssetLoadState::Importing) {importCandidate_=job.Value().Model;importError_=job.Value().Failure;if (importError_) {Record(ConsoleLevel::Error,importError_->Message,importError_->SourcePath);}(void)loader_->Forget(*previewJob_);previewJob_.reset();}}
     watcher_.Synchronize(Document.Assets());
     const auto submit=[&](ModelHandle model) {if (!loader_) {loader_=std::make_unique<AssetLoader>();}const auto job=loader_->Submit(model->SourcePath,model->Settings);if (job) {reloads_.push_back({job.Value(),std::move(model)});}else {Record(ConsoleLevel::Error,job.Error().Message,job.Error().SourcePath);}};

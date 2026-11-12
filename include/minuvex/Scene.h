@@ -9,6 +9,7 @@ namespace lv {
 using ObjectId = std::uint64_t;
 inline constexpr ObjectId NoObject = 0;
 
+enum class CameraProjection { Perspective, Orthographic };
 struct Camera {
     Vec3 Position{0, 1.5f, 4};
     Vec3 Target{};
@@ -16,6 +17,9 @@ struct Camera {
     float VerticalFovRadians = 1.04719755f;
     float NearPlane = 0.1f;
     float FarPlane = 1000.0f;
+    CameraProjection Projection = CameraProjection::Perspective;
+    float OrthographicHeight = 10.0f; // Full vertical span in world units.
+    Mat4 ProjectionMatrix(float aspect) const;
     Mat4 ViewProjection(float aspect) const;
 };
 
@@ -89,6 +93,7 @@ public:
     void ValidateLighting() const; // At most 8 point+spot lights in total.
 
 private:
+    friend class EditorDocument; // Private CPU history snapshots preserve object identities.
     std::unordered_map<ObjectId, SceneObject> objects_;
     std::vector<ObjectId> order_;
 };

@@ -84,7 +84,8 @@ Camera FitSceneCamera(const Scene& scene, float aspect,ObjectId focus) {
     const double radius = std::max(std::hypot(high[0]-low[0], high[1]-low[1], high[2]-low[2]) * 0.5, 0.0001);
     const double vertical = camera.VerticalFovRadians * 0.5;
     const double horizontal = std::atan(std::tan(vertical) * aspect);
-    const double distance = radius * 1.1 / std::sin(std::min(vertical, horizontal));
+    const double distance = camera.Projection == CameraProjection::Orthographic ? radius*2:radius * 1.1 / std::sin(std::min(vertical, horizontal));
+    if (camera.Projection == CameraProjection::Orthographic) {camera.OrthographicHeight=static_cast<float>(radius*2.2/std::min(1.0f,aspect));}
     const auto direction = Normalize(Subtract(camera.Position, camera.Target));
     camera.Target = {static_cast<float>((low[0]+high[0])*0.5), static_cast<float>((low[1]+high[1])*0.5), static_cast<float>((low[2]+high[2])*0.5)};
     camera.Position = Add(camera.Target, Scale(direction, distance));
@@ -98,8 +99,10 @@ ObjectId PickSceneObject(const Scene& scene,float aspect,float x,float y) {
     const auto& camera=scene.MainCamera;(void)camera.ViewProjection(aspect);
     if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 1 || std::abs(y) > 1) {throw std::invalid_argument("Picking coordinates must be in [-1,1].");}
     const auto forward=Normalize(Subtract(camera.Target,camera.Position));const auto right=Normalize(Cross(forward,camera.Up));const auto up=Cross(right,forward);const double tangent=std::tan(camera.VerticalFovRadians*.5);
-    const auto ray=Normalize(Add(forward,Add(Scale(right,x*tangent*aspect),Scale(up,y*tangent))));
-    const double cosine=Dot(ray,forward),origin[]{camera.Position.X,camera.Position.Y,camera.Position.Z},direction[]{ray.X,ray.Y,ray.Z};
+    const bool ortho=camera.Projection == CameraProjection::Orthographic;
+    const auto ray=ortho ? forward:Normalize(Add(forward,Add(Scale(right,x*tangent*aspect),Scale(up,y*tangent))));
+    const auto eye=ortho ? Add(camera.Position,Add(Scale(right,x*camera.OrthographicHeight*aspect*.5),Scale(up,y*camera.OrthographicHeight*.5))):camera.Position;
+    const double cosine=Dot(ray,forward),origin[]{eye.X,eye.Y,eye.Z},direction[]{ray.X,ray.Y,ray.Z};
     double nearest=camera.FarPlane/cosine;ObjectId selected=NoObject;
     for (const auto& item:scene.CollectRenderItems()) {
         const auto bounds=item.Animation ? item.Animation->GetBounds():item.Model->ModelBounds;double low[]{INFINITY,INFINITY,INFINITY},high[]{-INFINITY,-INFINITY,-INFINITY};
@@ -137,17 +140,21 @@ bool CameraController::Process(Camera& camera, const ViewerInputEvent& event, co
     const auto up = Normalize(camera.Up);
     if (zoom) {
         const double factor = std::exp(std::clamp(-double(event.ScrollY)*options.ZoomSpeed, -100.0, 100.0));
+        if (camera.Projection == CameraProjection::Orthographic) {next.OrthographicHeight=static_cast<float>(std::clamp(camera.OrthographicHeight*factor,double(options.MinimumDistance),double(options.MaximumDistance)));}
+        else {
         const double distance = std::clamp(radius*factor, double(options.MinimumDistance), double(options.MaximumDistance));
         next.Position = Add(camera.Target, Scale(offset, distance/radius));
         // Keep the orbit target inside the clipping range while zooming across
         // model scales; a fitted far plane must not make zoom-out go blank.
         next.NearPlane = std::min(camera.NearPlane,static_cast<float>(distance*0.001));
         next.FarPlane = std::max(camera.FarPlane,static_cast<float>(distance*2));
+        }
     } else if (pan) {
         const auto forward = Normalize(Scale(offset,-1));
         const auto right = Normalize(Cross(forward, up));
         const auto cameraUp = Cross(right, forward);
-        const double scale = 2*radius*std::tan(camera.VerticalFovRadians*0.5)/height*options.PanSpeed;
+        const double span=camera.Projection == CameraProjection::Orthographic ? camera.OrthographicHeight:2*radius*std::tan(camera.VerticalFovRadians*0.5);
+        const double scale = span/height*options.PanSpeed;
         const auto shift = Add(Scale(right, -double(event.DeltaX)*scale), Scale(cameraUp, double(event.DeltaY)*scale));
         next.Position = Add(next.Position, shift); next.Target = Add(next.Target, shift);
     } else {
@@ -162,7 +169,7 @@ bool CameraController::Process(Camera& camera, const ViewerInputEvent& event, co
     (void)next.ViewProjection(1);
     if (next.Position.X == camera.Position.X && next.Position.Y == camera.Position.Y && next.Position.Z == camera.Position.Z &&
         next.Target.X == camera.Target.X && next.Target.Y == camera.Target.Y && next.Target.Z == camera.Target.Z &&
-        next.NearPlane == camera.NearPlane && next.FarPlane == camera.FarPlane) { return false; }
+        next.NearPlane == camera.NearPlane && next.FarPlane == camera.FarPlane && next.OrthographicHeight == camera.OrthographicHeight) { return false; }
     camera = next;
     return true;
 }

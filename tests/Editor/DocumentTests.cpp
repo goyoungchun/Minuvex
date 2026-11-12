@@ -75,7 +75,7 @@ void InvalidArchives() {
     const auto bytes = Read(file); const auto valid = Json::parse(bytes);
     lv::AssetRegistry registry;
     const auto rejects = [&](Json j,const char* label) { Write(file,j.dump()); auto result = lv::LoadScene(file,registry); Check(!result && result.Error().Code == lv::ErrorCode::InvalidData,label); };
-    auto j = valid; j["version"] = 5; rejects(j,"future scene versions rejected");
+    auto j = valid; j["version"] = 7; rejects(j,"future scene versions rejected");
     j = valid; j["version"] = 1.0; rejects(j,"noninteger schema version rejected");
     j = valid; j["objects"][1]["id"] = j["objects"][0]["id"]; rejects(j,"duplicate object IDs rejected");
     j = valid; j["objects"][0]["id"] = 0; rejects(j,"zero object IDs rejected");
@@ -185,7 +185,7 @@ void CompatibilityDocument() {
     lv::ImportSettings settings;settings.ImportAnimations=false;settings.ImportMaterials=false;settings.AnimationBakeRate=24;settings.MaxAnimationSamples=1000;
     auto fbx=doc.PreviewModel(Fixture("Compatibility.fbx"),settings);Check(bool(fbx) && bool(doc.OpenPreparedModel(fbx.Value())) && doc.Path().empty() && doc.IsDirty(),"FBX preview can replace the document through Quick Open");
     const auto file=temp.File("modern.mvxscene.json");Check(bool(doc.Save(file)),"Scene v4 saves extended import settings");
-    auto json=Json::parse(Read(file));Check(json["version"] == 4 && json["assets"][0]["import"]["importAnimations"] == false,"Scene v4 records import flags explicitly");
+    auto json=Json::parse(Read(file));Check(json["version"] == 6 && json["assets"][0]["import"]["importAnimations"] == false,"Scene v6 retains explicit import flags");
     lv::EditorDocument reopened;Check(bool(reopened.Open(file)) && reopened.Assets().front()->Settings == settings && reopened.Assets().front()->Animations.empty(),"FBX import settings round trip without enabling unwanted clips/materials");
     json["version"]=3;for (const auto* field:{"importAnimations","importMaterials","animationBakeRate","maxAnimationSamples","textureDirectory"}) {json["assets"][0]["import"].erase(field);}Write(file,json.dump());
     Check(bool(reopened.Open(file)) && reopened.Assets().front()->Settings.ImportAnimations && !reopened.Assets().front()->Animations.empty(),"legacy Scene v3 restores default import options");
@@ -195,8 +195,32 @@ void CompatibilityDocument() {
     Check(bool(reopened.Open(moved/"scenes"/"Model.mvxscene.json")) && reopened.GetScene().Size() == 1 && reopened.Assets().front()->Materials[0].BaseColorTexture,"moved project resolves OBJ, MTL and texture references independently");
 }
 }
+void HistoryAndOrthographic() {
+    TemporaryDirectory temp;lv::EditorDocument doc;Check(!doc.CanUndo() && !doc.Undo(),"empty history is rejected");
+    const auto parent=doc.CreateObject("Parent").Value(),child=doc.CreateObject("Child",parent).Value();lv::Transform t;t.Position={2,3,4};t.Scale={2,3,-4};t.Rotation={0,0,.38268343f,.92387953f};Check(bool(doc.SetTransform(parent,t)),"parent TRS is editable");
+    const auto world=doc.GetScene().GetWorldTransform(child);auto moved=world;moved.Elements[12]+=1;
+    Check(bool(doc.SetWorldTransform(child,moved)) && Near(doc.GetScene().GetWorldTransform(child).Elements[12],moved.Elements[12]),"world-space gizmo edits preserve parent TRS");
+    const auto identity=world.InverseAffine()*world;bool invertible=true;for (int i=0;i<16;++i) {invertible&=Near(identity.Elements[i],i%5 == 0 ? 1:0);}Check(invertible,"affine inverse handles translation, rotation, nonuniform and negative scale");
+    const auto file=temp.File("History.mvxscene.json");Check(bool(doc.Save(file)) && !doc.IsDirty(),"history savepoint is clean");const auto saved=doc.GetScene().GetObject(child).LocalTransform;
+    Check(bool(doc.BeginEdit()) && !doc.BeginEdit() && !doc.Save(file),"edit groups reject nesting and save before completion");
+    auto edited=saved;edited.Position.X+=2;Check(bool(doc.SetTransform(child,edited)),"group first transform applies");edited.Position.Y+=3;Check(bool(doc.SetTransform(child,edited)) && bool(doc.CommitEdit()) && doc.CanUndo(),"group commits multiple changes as one step");
+    Check(bool(doc.Undo()) && !doc.IsDirty() && Near(doc.GetScene().GetObject(child).LocalTransform.Position.X,saved.Position.X),"one undo restores group and savepoint");
+    Check(bool(doc.Redo()) && doc.IsDirty() && Near(doc.GetScene().GetObject(child).LocalTransform.Position.Y,edited.Position.Y),"redo restores group");
+    Check(bool(doc.BeginEdit()) && bool(doc.SetVisible(parent,false)) && bool(doc.CancelEdit()) && doc.GetScene().GetObject(parent).Visible,"cancel restores pre-edit Scene");
+    Check(bool(doc.Undo()) && bool(doc.RenameObject(child,"Branch")) && !doc.CanRedo(),"new edit after undo invalidates redo branch");
+    const auto stable=doc.GetScene().GetObject(child).LocalTransform;Check(bool(doc.BeginEdit()) && bool(doc.SetVisible(child,false)),"start group before rejected transform");lv::Transform invalid;invalid.Scale.X=0;
+    Check(!doc.SetTransform(child,invalid) && !doc.IsEditing() && doc.GetScene().GetObject(child).Visible && Near(doc.GetScene().GetObject(child).LocalTransform.Position.X,stable.Position.X),"failed grouped mutation rolls back the entire group");
+    Check(bool(doc.RemoveObject(parent)) && !doc.GetScene().Contains(child) && bool(doc.Undo()) && doc.GetScene().Contains(parent) && doc.GetScene().Contains(child),"undo deletion restores subtree IDs and selection");
+    lv::Camera camera;camera.Position={0,0,10};camera.Target={};camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=4;Check(bool(doc.SetCamera(camera)) && bool(doc.Save(file)),"orthographic Scene saves");
+    lv::EditorDocument reopened;Check(bool(reopened.Open(file)) && reopened.GetScene().MainCamera.Projection == lv::CameraProjection::Orthographic && Near(reopened.GetScene().MainCamera.OrthographicHeight,4),"Scene v5 restores orthographic camera");
+    auto json=Json::parse(Read(file));json["version"]=4;Write(file,json.dump());Check(bool(reopened.Open(file)) && reopened.GetScene().MainCamera.Projection == lv::CameraProjection::Perspective,"Scene v4 camera remains perspective");
+    json["version"]=5;json["camera"]["near"]=0;Write(file,json.dump());const auto count=reopened.GetScene().Size();Check(!reopened.Open(file) && reopened.GetScene().Size() == count,"invalid loaded camera cannot replace the document");
+    lv::EditorDocument pick;auto asset=pick.ImportModel(Fixture("SharedBox.glb")).Value();const auto object=pick.PlaceModel(asset).Value();Check(bool(pick.SetCamera(camera)) && lv::detail::PickSceneObject(pick.GetScene(),1,0,0) == object && !lv::detail::PickSceneObject(pick.GetScene(),1,.95f,.95f),"orthographic picking uses parallel rays with offset origins");
+    const bool dirty=doc.IsDirty();Check(bool(doc.ClearUndoHistory()) && !doc.CanUndo() && !doc.CanRedo() && doc.IsDirty() == dirty && doc.GetScene().Contains(child),"clearing history releases snapshots without changing the document or savepoint");
+    doc.New();Check(!doc.CanUndo() && !doc.CanRedo() && !doc.IsEditing() && !doc.IsDirty(),"new document clears all history");
+}
 int main() {
-    try { RoundTrip(); InvalidArchives(); QuickOpenAndPreferences(); CompatibilityDocument(); }
+    try { RoundTrip(); InvalidArchives(); QuickOpenAndPreferences(); CompatibilityDocument();HistoryAndOrthographic(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

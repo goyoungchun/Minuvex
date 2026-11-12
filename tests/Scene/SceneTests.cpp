@@ -2,6 +2,7 @@
 #include <minuvex/Scene.h>
 
 #include <numbers>
+#include <limits>
 
 using namespace test;
 namespace {
@@ -94,6 +95,14 @@ void TestCameraLightAndDepth() {
     const auto matrix = camera.ViewProjection(16.0f/9);
     Check(std::isfinite(matrix.Elements[0]), "default camera creates a finite projection");
     Rejects([&] { (void)camera.ViewProjection(0); }, "camera rejects zero aspect");
+    camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=4;
+    const auto ortho=camera.ProjectionMatrix(2);
+    Check(Near(ortho.Elements[0],.25f) && Near(ortho.Elements[5],.5f) && Near(ortho.Elements[15],1),"orthographic full span and aspect produce affine projection");
+    Check(Near(ortho.TransformPoint({0,0,-camera.NearPlane}).Z,0) && Near(ortho.TransformPoint({0,0,-camera.FarPlane}).Z,1),"orthographic RH depth maps near/far to zero/one");
+    Check(Near(ortho.TransformPoint({1,1,-2}).X,ortho.TransformPoint({1,1,-20}).X),"orthographic apparent size does not depend on depth");
+    camera.OrthographicHeight=0;Rejects([&] {(void)camera.ViewProjection(1);},"orthographic height must be positive");camera.OrthographicHeight=4;
+    camera.Projection=static_cast<lv::CameraProjection>(99);Rejects([&] {(void)camera.ViewProjection(1);},"unknown camera projection is rejected");camera.Projection=lv::CameraProjection::Perspective;
+    Rejects([&] {(void)lv::Mat4::Perspective(std::numeric_limits<float>::denorm_min(),1,.1f,100);},"projection overflow is rejected before rendering");
     camera.Target = camera.Position;
     Rejects([&] { (void)camera.ViewProjection(1); }, "camera rejects degenerate view");
     lv::DirectionalLight light;

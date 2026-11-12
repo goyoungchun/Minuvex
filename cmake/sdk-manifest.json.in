@@ -8,11 +8,11 @@
   "pointerBytes": @CMAKE_SIZEOF_VOID_P@,
   "configuration": "$<CONFIG>",
   "runtime": "@MINUVEX_SDK_RUNTIME@",
-  "sceneVersion": 4,
+  "sceneVersion": 6,
   "poseVersion": 1,
   "qualityVersion": 1,
   "importVersion": 4,
   "linkage": "static",
   "abiPolicy": "Rebuild consumers with the same compiler toolset, architecture, configuration and C++ runtime.",
-  "publication": "local artifact; documentation drafts excluded by default"
+  "publication": "local SDK artifact; Markdown installation is opt-in"
 }

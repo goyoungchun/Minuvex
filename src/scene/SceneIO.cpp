@@ -75,11 +75,17 @@ Json Animation(const SceneObject& object) {
     Require(player.Model() == object.Model,"Scene player was rebound to a foreign model; use Scene::SetModel.");
     (void)player.Evaluate();
     Json json{{"clip",nullptr},{"clipName",""},{"time",player.Time()},{"speed",player.Speed()},{"loop",player.Loop()},
-        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)}};
+        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr}};
     if (player.Clip()) { json["clip"] = *player.Clip(); json["clipName"] = String(object.Model->Animations.at(*player.Clip()).Name); }
+    if (player.Blend()) {
+        const auto& blend=*player.Blend();
+        json["blend"]={{"sourceClip",nullptr},{"sourceClipName",""},{"sourceTime",blend.SourceTime},{"duration",blend.Duration},{"elapsed",blend.Elapsed},{"sourcePose",nullptr}};
+        if (blend.SourceClip) {json["blend"]["sourceClip"]=*blend.SourceClip;json["blend"]["sourceClipName"]=String(object.Model->Animations.at(*blend.SourceClip).Name);}
+        else {json["blend"]["sourcePose"]=Pose(blend.SourcePose,object.Model->Skeleton);}
+    }
     return json;
 }
-void Animation(const Json& json, Scene& scene, ObjectId id) {
+void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend) {
     const auto& object = scene.GetObject(id);
     if (!object.Model) { Require(json.is_null(),"Empty object cannot have animation state."); return; }
     auto& player = scene.GetAnimation(id);
@@ -96,7 +102,17 @@ void Animation(const Json& json, Scene& scene, ObjectId id) {
         if (state == static_cast<unsigned>(PlaybackState::Paused)) { player.Pause(); }
         player.Seek(time);
     } else { Require(time == 0 && state == static_cast<unsigned>(PlaybackState::Stopped),"A clipless player must be stopped at time zero."); }
-    player.ApplyPose(Pose(json.at("overrides"),object.Model->Skeleton)); (void)player.Evaluate();
+    player.ApplyPose(Pose(json.at("overrides"),object.Model->Skeleton));
+    if (restoreBlend && !json.at("blend").is_null()) {
+        const auto& saved=json.at("blend");AnimationBlendState blend;
+        blend.SourceTime=Number(saved.at("sourceTime"));blend.Duration=Number(saved.at("duration"));blend.Elapsed=Number(saved.at("elapsed"));
+        if (!saved.at("sourceClip").is_null()) {
+            const auto source=UInt(saved.at("sourceClip"));Require(source<object.Model->Animations.size(),"Saved blend source clip no longer exists.");
+            Require(String(saved.at("sourceClipName")) == object.Model->Animations[source].Name && saved.at("sourcePose").is_null(),"Saved blend source identity has changed.");blend.SourceClip=static_cast<std::size_t>(source);
+        }else {Require(String(saved.at("sourceClipName")).empty(),"Frozen blend source must not name a clip.");blend.SourcePose=Pose(saved.at("sourcePose"),object.Model->Skeleton);}
+        player.RestoreBlend(blend);
+    }
+    (void)player.Evaluate();
 }
 Json ReadJson(const std::filesystem::path& path) { return detail::ReadJsonFile(path,MaxBytes); }
 void WriteJson(const Json& json,const std::filesystem::path& path) { detail::WriteJsonFile(json,path,MaxBytes); }
@@ -158,7 +174,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",4},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",6},{"assets",Json::array()},{"objects",Json::array()}};
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -187,7 +203,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
         }
         const auto& c = scene.MainCamera; const auto& l = scene.Sun;
         root["camera"] = {{"position",Vector(c.Position)},{"target",Vector(c.Target)},{"up",Vector(c.Up)},
-            {"fov",c.VerticalFovRadians},{"near",c.NearPlane},{"far",c.FarPlane}};
+            {"fov",c.VerticalFovRadians},{"near",c.NearPlane},{"far",c.FarPlane},{"projection",c.Projection == CameraProjection::Orthographic ? "orthographic":"perspective"},{"orthographicHeight",c.OrthographicHeight}};
         root["light"] = {{"direction",Vector(l.Direction)},{"color",Vector(l.Color)},{"intensity",l.Intensity},{"ambient",l.Ambient}};
         root["pointLights"]=Json::array();for (const auto& light:scene.PointLights) {root["pointLights"].push_back({{"position",Vector(light.Position)},{"color",Vector(light.Color)},{"intensity",light.Intensity},{"range",light.Range}});}
         root["spotLights"]=Json::array();for (const auto& light:scene.SpotLights) {root["spotLights"].push_back({{"position",Vector(light.Position)},{"direction",Vector(light.Direction)},{"color",Vector(light.Color)},{"intensity",light.Intensity},{"range",light.Range},{"inner",light.InnerConeRadians},{"outer",light.OuterConeRadians}});}
@@ -201,7 +217,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 4),"Unsupported scene format/version.");
+        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 6),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -240,6 +256,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         }
         const auto& c = root.at("camera");
         scene.MainCamera = {Vector(c.at("position")),Vector(c.at("target")),Vector(c.at("up")),Float(c.at("fov")),Float(c.at("near")),Float(c.at("far"))};
+        if (version >= 5) {const auto projection=String(c.at("projection"));Require(projection == "perspective" || projection == "orthographic","Unknown camera projection.");scene.MainCamera.Projection=projection == "orthographic" ? CameraProjection::Orthographic:CameraProjection::Perspective;scene.MainCamera.OrthographicHeight=Float(c.at("orthographicHeight"));}
         const auto& l = root.at("light");
         scene.Sun = {Vector(l.at("direction")),Vector(l.at("color")),Float(l.at("intensity")),Float(l.at("ambient"))};
         if (version >= 3) {
@@ -260,8 +277,9 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
-            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id")))); }
+            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6); }
         }
+        ValidateScene(scene);
         return Result<SceneArchive>::Success(std::move(archive));
     } catch (...) { return Result<SceneArchive>::Failure(Failure(path)); }
 }

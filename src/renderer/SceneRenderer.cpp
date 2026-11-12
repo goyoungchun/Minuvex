@@ -117,7 +117,7 @@ unsigned SceneRenderer::Lod(const Scene& scene,const Bounds& b,const Mat4& world
     const float scale=std::sqrt(e[0]*e[0]+e[1]*e[1]+e[2]*e[2]+e[4]*e[4]+e[5]*e[5]+e[6]*e[6]+e[8]*e[8]+e[9]*e[9]+e[10]*e[10]); // Conservative upper bound, including hierarchy-induced shear.
     const float radius=.5f*std::hypot(b.Max.X-b.Min.X,b.Max.Y-b.Min.Y,b.Max.Z-b.Min.Z)*scale;const auto& c=scene.MainCamera;
     const float distance=std::max(c.NearPlane,std::hypot(center.X-c.Position.X,center.Y-c.Position.Y,center.Z-c.Position.Z)-radius);
-    const float pixels=radius*height_/(std::tan(c.VerticalFovRadians*.5f)*distance);return std::isfinite(pixels) ? SelectMeshLod(pixels,settings_.LodBias,levels):0;
+    const float pixels=c.Projection == CameraProjection::Orthographic ? 2*radius*height_/c.OrthographicHeight:radius*height_/(std::tan(c.VerticalFovRadians*.5f)*distance);return std::isfinite(pixels) ? SelectMeshLod(pixels,settings_.LodBias,levels):0;
 }
 void SceneRenderer::PrepareBatches(const Scene& scene) {
     batches_.clear();stats_.Optimization={};if (!settings_.Instancing || debug_.View == DebugView::Wireframe || (!viewportKnown_ && settings_.FrustumCulling)) {return;}
@@ -216,6 +216,7 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                 else {
                     MeshLighting lighting;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
                     lighting.Debug=debug_;lighting.NearPlane=scene.MainCamera.NearPlane;lighting.FarPlane=scene.MainCamera.FarPlane;
+                    lighting.Orthographic=scene.MainCamera.Projection == CameraProjection::Orthographic;
                     if (lighting.Advanced && material.NormalTexture) {const auto index=*material.NormalTexture;lighting.NormalTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.NormalSampler=model.Samplers.at(index);}
                     auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();const auto level=part.SkinIndex ? 0:Lod(scene,model.MeshBounds[part.MeshIndex],transform,mesh.Primitives[i].Lods.size());lighting.Lod=level;
                     const BatchKey key{renderer,level,transform.LinearDeterminant()<0,false};const auto group=batches_.find(key);const bool eligible=!mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());std::size_t count=1;Mat4 drawTransform=transform;

@@ -14,6 +14,15 @@ public:
     const std::filesystem::path& Path() const noexcept { return path_; }
     ObjectId Selection() const noexcept { return selection_; }
     bool IsDirty() const noexcept { return dirty_; }
+    bool CanUndo() const noexcept { return !pendingEdit_ && !undo_.empty(); }
+    bool CanRedo() const noexcept { return !pendingEdit_ && !redo_.empty(); }
+    bool IsEditing() const noexcept { return bool(pendingEdit_); }
+    Result<void> Undo();
+    Result<void> Redo();
+    Result<void> ClearUndoHistory(); // Release retained snapshots; preserve Scene/savepoint/dirty.
+    Result<void> BeginEdit(); // Group multiple successful mutations into one history step.
+    Result<void> CommitEdit();
+    Result<void> CancelEdit(); // Restore the complete pre-edit CPU state.
     void New(); // Caller handles unsaved-change confirmation.
     Result<void> Open(const std::filesystem::path& path); // Transactional replacement.
     Result<ObjectId> OpenModel(const std::filesystem::path& path, const ImportSettings& settings = {}, float aspect = 1);
@@ -32,11 +41,13 @@ public:
     Result<void> RenameObject(ObjectId object, std::string name);
     Result<void> SetParent(ObjectId object, ObjectId parent); // Keeps local TRS.
     Result<void> SetTransform(ObjectId object, const Transform& transform);
+    Result<void> SetWorldTransform(ObjectId object, const Mat4& world); // Reject local shear.
     Result<void> SetVisible(ObjectId object, bool visible);
     Result<void> SetCamera(const Camera& camera);
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> SetLocalLights(std::vector<PointLight> points,std::vector<SpotLight> spots);
     Result<void> PlayAnimation(ObjectId object, std::size_t clip);
+    Result<void> CrossFadeAnimation(ObjectId object, std::size_t clip, double durationSeconds = .3);
     Result<void> PauseAnimation(ObjectId object);
     Result<void> ResumeAnimation(ObjectId object);
     Result<void> StopAnimation(ObjectId object);
@@ -59,6 +70,23 @@ private:
     std::filesystem::path path_;
     ObjectId selection_ = NoObject;
     bool dirty_ = false;
+    struct Snapshot {
+        AssetRegistry Registry;
+        Scene World;
+        std::vector<ModelHandle> Library;
+        ObjectId Selection=NoObject;
+        std::uint64_t Revision=0;
+    };
+    std::vector<std::unique_ptr<Snapshot>> undo_,redo_;
+    std::unique_ptr<Snapshot> pendingEdit_;
+    std::uint64_t revision_=0,savedRevision_=0,nextRevision_=0;
+    std::unique_ptr<Snapshot> Capture() const;
+    void Restore(std::unique_ptr<Snapshot> snapshot) noexcept;
+    void MarkChanged() noexcept {revision_=++nextRevision_;dirty_=true;}
+    void KeepUndo(std::unique_ptr<Snapshot> snapshot) noexcept;
+    void ClearHistory() noexcept;
+    template<class Function> auto Change(Function function) -> Result<decltype(function())>;
+    template<class Function> Result<void> ChangeAnimation(ObjectId object,Function function);
 };
 
 } // namespace lv

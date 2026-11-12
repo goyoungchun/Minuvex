@@ -135,7 +135,7 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     fragment.light_color = {light.Color.X, light.Color.Y, light.Color.Z, light.Ambient};
     fragment.options = {material.AlphaCutoff, material.Unlit || forceUnlit ? 1.0f : 0.0f, 0,lighting.Advanced ? 1.0f:0.0f};
     fragment.normal_options={material.NormalScale,lighting.Advanced && lighting.NormalTexture.id ? 1.0f:0.0f,0,0};
-    fragment.debug_options={static_cast<float>(lighting.Debug.View),lighting.NearPlane,lighting.FarPlane,0};
+    fragment.debug_options={static_cast<float>(lighting.Debug.View),lighting.NearPlane,lighting.FarPlane,lighting.Orthographic ? 1.0f:0.0f};
     if (lighting.Shadow) {fragment.shadow_options={static_cast<float>(lighting.Shadow->Mode),1.0f/lighting.Shadow->Resolution,.0008f,.003f};}
     std::size_t local=0;
     const auto point=[&](Vec3 position,Vec3 color,float intensity,float range) {fragment.local_positions[local]={position.X,position.Y,position.Z,range};fragment.local_colors[local]={color.X,color.Y,color.Z,intensity};};

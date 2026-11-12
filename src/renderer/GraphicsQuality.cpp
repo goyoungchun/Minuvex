@@ -50,6 +50,7 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
     const auto scalar=[&](float value){integer(std::bit_cast<std::uint32_t>(value));};
     const auto vector=[&](Vec3 value){scalar(value.X);scalar(value.Y);scalar(value.Z);};
     const auto& c=scene.MainCamera;vector(c.Position);vector(c.Target);vector(c.Up);scalar(c.VerticalFovRadians);scalar(c.NearPlane);scalar(c.FarPlane);
+    integer(static_cast<unsigned>(c.Projection));scalar(c.OrthographicHeight);
     const auto& l=scene.Sun;vector(l.Direction);vector(l.Color);scalar(l.Intensity);scalar(l.Ambient);
     integer(scene.PointLights.size());for (const auto& light:scene.PointLights) {vector(light.Position);vector(light.Color);scalar(light.Intensity);scalar(light.Range);}
     integer(scene.SpotLights.size());for (const auto& light:scene.SpotLights) {vector(light.Position);vector(light.Direction);vector(light.Color);scalar(light.Intensity);scalar(light.Range);scalar(light.InnerConeRadians);scalar(light.OuterConeRadians);}
@@ -58,6 +59,8 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
         for (auto value:item.WorldTransform.Elements) {scalar(value);}
         if (item.Animation) {
             integer(item.Animation->Clip().has_value());integer(item.Animation->Clip().value_or(0));integer(std::bit_cast<std::uint64_t>(item.Animation->Time()));
+            integer(item.Animation->Blend().has_value());
+            if (const auto& blend=item.Animation->Blend()) {integer(blend->SourceClip.has_value());integer(blend->SourceClip.value_or(0));for (auto value:{blend->SourceTime,blend->Duration,blend->Elapsed}) {integer(std::bit_cast<std::uint64_t>(value));}integer(blend->SourcePose.Joints.size());for (const auto& joint:blend->SourcePose.Joints) {integer(joint.Joint);vector(joint.Local.Position);vector(joint.Local.Scale);const auto& q=joint.Local.Rotation;scalar(q.X);scalar(q.Y);scalar(q.Z);scalar(q.W);}}
             integer(item.Animation->Overrides().Joints.size());
             for (const auto& joint:item.Animation->Overrides().Joints) {integer(joint.Joint);vector(joint.Local.Position);vector(joint.Local.Scale);const auto& q=joint.Local.Rotation;scalar(q.X);scalar(q.Y);scalar(q.Z);scalar(q.W);}
         }

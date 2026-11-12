@@ -27,6 +27,7 @@ struct MeshLighting {
     bool Advanced=false;
     DebugOptions Debug;
     float NearPlane=.1f,FarPlane=1000;
+    bool Orthographic=false;
     sg_buffer Instances{};int InstanceCount=0;unsigned Lod=0;bool Mirrored=false;
 };
 

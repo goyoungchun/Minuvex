@@ -32,10 +32,12 @@ struct Mat4 {
     // Depth after perspective divide is [0, 1] (D3D11 and Metal).
     // Invalid or non-finite arguments throw std::invalid_argument.
     static Mat4 Perspective(float verticalFovRadians, float aspect, float nearPlane, float farPlane);
+    static Mat4 Orthographic(float width, float height, float nearPlane, float farPlane);
     static Mat4 LookAt(Vec3 eye, Vec3 target, Vec3 up);
 
     // Rejects non-affine, non-finite and singular matrices.
     Mat4 NormalMatrix() const;
+    Mat4 InverseAffine() const; // Same finite/affine/nonsingular contract.
     double LinearDeterminant() const noexcept;
     Vec3 TransformPoint(Vec3 point) const noexcept;
 };

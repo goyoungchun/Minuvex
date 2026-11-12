@@ -361,6 +361,35 @@ void RunOptimization() {
         std::printf("Optimization observed: main draws %zu -> %zu; distant triangles %zu -> %llu; texture bytes %llu -> %llu. Timing is not a controlled benchmark.\n",before.LastDrawCalls,after.LastDrawCalls,primitive.Geometry.Indices.size()/3,static_cast<unsigned long long>(lod.LastTriangles),static_cast<unsigned long long>(rawBytes),static_cast<unsigned long long>(compressedBytes));
     }
 }
+void RunCamera() {
+    auto model=std::make_shared<lv::ModelAsset>();model->Meshes.push_back({"Cube",{{lv::MakeCube(),0,false}}});model->Materials.push_back({});model->Materials[0].Unlit=true;model->Parts.push_back({0});model->ModelBounds={{-.5f,-.5f,-.5f},{.5f,.5f,.5f}};
+    lv::Scene scene;const auto object=scene.AddModel(model);auto& camera=scene.MainCamera;camera.Position={0,0,4};camera.Target={};camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=4;camera.FarPlane=20;
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Low);profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;profile.Overrides.Lod=false;
+    lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare camera test.");double clock=1;
+    const auto render=[&] {Require(surface.Render(scene,clock++,false,{0,0,0,1}),"Camera change failed to wake On-Demand.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    const auto count=[](const auto& pixels) {return std::count_if(pixels.begin(),pixels.end(),[](const auto& p){return p[0]+p[1]+p[2]>20;});};
+    const auto nearPixels=render();camera.Position.Z=8;const auto farPixels=render();Check(nearPixels == farPixels && count(nearPixels)>500,"orthographic pixels retain apparent size across camera distance");
+    camera.Projection=lv::CameraProjection::Perspective;const auto perspective=render();Check(count(perspective)<count(nearPixels)/2,"switching projection invalidates the cache and changes real geometry size");
+    camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=8;const auto zoom=render();Check(count(zoom)<count(nearPixels)/2,"orthographic span changes invalidate cached output");
+    Require(bool(surface.SetDebugOptions({lv::DebugView::Depth})),"Cannot select orthographic depth view.");const auto depth=render();Check(std::abs(int(depth[64*Size+64][0])-96)<=2 && depth[64*Size+64][0] == depth[64*Size+64][1],"orthographic Depth View reconstructs linear view depth");
+    auto grid=std::make_shared<lv::ModelAsset>(*model);auto& primitive=grid->Meshes[0].Primitives[0];primitive.Geometry=OptimizationGrid();primitive.Lods=lv::GenerateMeshLods(primitive.Geometry);grid->ModelBounds={{-1,-1,0},{1,1,0}};scene.SetModel(object,grid);profile.Overrides.Lod=true;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare orthographic LOD.");
+    (void)render();const auto triangles=surface.Stats().LastTriangles;camera.Position.Z=12;(void)render();Check(triangles<primitive.Geometry.Indices.size()/3 && triangles == surface.Stats().LastTriangles,"orthographic LOD depends on projected span rather than perspective distance");
+}
+void RunBlend() {
+    lv::AssetRegistry registry;auto model=std::make_shared<lv::ModelAsset>(*registry.LoadModel(Fixture("AnimatedRibbon.gltf")));
+    auto clip=model->Animations[0];clip.Name="Constant bent pose";clip.Duration=0;for (auto& track:clip.Tracks) {track.Times={0};track.Values={track.Values[1]};}model->Animations.push_back(clip);
+    lv::Scene scene;scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};scene.Sun.Intensity=0;scene.Sun.Ambient=1;const auto id=scene.AddModel(model);
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Low);profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;
+    lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare blend rendering.");double clock=1;
+    const auto render=[&] {Require(surface.Render(scene,clock++,false,{0,0,0,1}),"Blend progress failed to wake On-Demand.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    const auto reference=render();auto& player=scene.GetAnimation(id);player.CrossFade(model->Animations.size()-1,1);(void)render();scene.UpdateAnimations(.5);const auto blended=render();
+    Check(player.Time() == 0 && player.Blend() && reference != blended,"fade progress changes real GPU skinning pixels even with stationary target playhead");
+    player.Pause();scene.UpdateAnimations(.25);Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"paused blend reuses cached output");
+    lv::Scene expected;expected.MainCamera=scene.MainCamera;expected.Sun=scene.Sun;const auto expectedId=expected.AddModel(model);auto pose=lv::ReferencePose(model->Skeleton);pose.Joints[1].Local.Position.X=.25f;pose.Joints[2].Local.Rotation={0,0,std::sin(std::numbers::pi_v<float>/8),std::cos(std::numbers::pi_v<float>/8)};expected.GetAnimation(expectedId).ApplyPose(pose);
+    Require(surface.Render(expected,clock++,false,{0,0,0,1}),"Cannot render expected midpoint.");sg_commit();const auto midpoint=ReadImage(surface.ColorImage(),Size,Size);std::size_t changed=0;for (std::size_t i=0;i<midpoint.size();++i) {changed+=midpoint[i] != blended[i];}
+    Check(changed<10,"GPU blend midpoint matches independently authored half-translation and half-rotation pose");
+    player.Resume();scene.UpdateAnimations(.5);const auto finished=render();Check(!player.Blend() && finished != blended,"completed fade releases source and produces final GPU pose");
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -384,7 +413,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }

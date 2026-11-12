@@ -56,6 +56,12 @@ struct AnimationClip {
 };
 struct EvaluatedPose { std::vector<Mat4> Local, Global; };
 enum class PlaybackState { Stopped, Playing, Paused };
+struct AnimationBlendState {
+    std::optional<std::size_t> SourceClip; // Live source; absent means a frozen full SourcePose.
+    double SourceTime = 0;
+    PoseAsset SourcePose;
+    double Duration = 0, Elapsed = 0; // Seconds; 0 <= Elapsed < Duration.
+};
 
 // Invalid data/compatibility/numerics throw std::invalid_argument.
 void ValidateSkeleton(const SkeletonAsset& skeleton);
@@ -78,8 +84,12 @@ public:
     bool Loop() const noexcept { return loop_; }
     PlaybackState State() const noexcept { return state_; }
     const PoseAsset& Overrides() const noexcept { return overrides_; }
+    const std::optional<AnimationBlendState>& Blend() const noexcept { return blend_; }
+    float BlendWeight() const noexcept; // Target weight; 1 when no transition is active.
     bool NeedsEvaluation() const noexcept;
     void Play(std::size_t clip, bool restart = true);
+    void CrossFade(std::size_t clip, double durationSeconds = .3); // Restarts target; zero switches immediately.
+    void RestoreBlend(const AnimationBlendState& state); // Validated Scene restore on a selected, non-stopped target.
     void Pause() noexcept;
     void Resume();
     void Stop() noexcept; // Keeps clip; returns to its first frame, retains overrides.
@@ -102,6 +112,10 @@ private:
     bool loop_ = true;
     PlaybackState state_ = PlaybackState::Stopped;
     PoseAsset overrides_;
+    std::optional<AnimationBlendState> blend_;
+    std::vector<Transform> EvaluateClip(std::optional<std::size_t> clip,double time) const;
+    std::vector<Transform> EvaluateBase() const;
+    void ValidateBlend(const AnimationBlendState& state) const;
     std::vector<Transform> EvaluateLocal() const;
 };
 } // namespace lv

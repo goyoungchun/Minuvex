@@ -15,9 +15,11 @@ int main(int argc, char** argv) {
         if (!opened) {std::fprintf(stderr,"%s\n",opened.Error().Message.c_str());return 1;}
         if (!doc.SetLocalLights({{{0,2,0},{1,1,1},1,5}}, {})) {return 1;}
         if (!doc.ReimportModel(doc.GetScene().GetObject(opened.Value()).Model->Id)) {return 1;}
+        auto camera=doc.GetScene().MainCamera;camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=8;
+        if (!doc.SetCamera(camera) || !doc.Undo() || !doc.Redo()) {return 1;}
         const auto file=output/"Example.mvxscene.json";
-        if (!doc.Save(file)) {return 1;}
-        lv::EditorDocument reopened;if (!reopened.Open(file) || reopened.GetScene().Size() != 1 || reopened.GetScene().PointLights.size() != 1) {return 1;}
+        if (!doc.Save(file) || !doc.ClearUndoHistory() || doc.IsDirty()) {return 1;}
+        lv::EditorDocument reopened;if (!reopened.Open(file) || reopened.GetScene().Size() != 1 || reopened.GetScene().PointLights.size() != 1 || reopened.GetScene().MainCamera.Projection != lv::CameraProjection::Orthographic) {return 1;}
         auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);
         if (!lv::SaveQuality(low,output/"Low.mvxquality.json") || !lv::LoadQuality(output/"Low.mvxquality.json")) {return 1;}
         lv::QualityCapabilities caps;caps.GraphicsAvailable=true;

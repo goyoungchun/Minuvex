@@ -59,6 +59,7 @@ void EditorUI::AnimationDebugger() {
             const auto& instance=Document.GetScene().GetObject(object);const auto& player=instance.Animation;const auto& model=*instance.Model;
             ImGui::TextWrapped("Animation: %s",player.Clip() ? model.Animations.at(*player.Clip()).Name.c_str():"Reference pose");
             ImGui::Text("Time: %.6f | speed: %.2f | state: %d",player.Time(),player.Speed(),static_cast<int>(player.State()));ImGui::Text("Pose: %s | overrides: %zu",player.Overrides().Name.c_str(),player.Overrides().Joints.size());
+            if (player.Blend()) {ImGui::Text("Cross-fade: %.1f%% | source: %s",100.0f*player.BlendWeight(),player.Blend()->SourceClip ? model.Animations.at(*player.Blend()->SourceClip).Name.c_str():"frozen pose");}
             if (model.Skeleton.Joints.empty()) {ImGui::TextWrapped("No skeleton nodes available.");}
             else {
                 int joint=boneObject_ == object && bone_ < model.Skeleton.Joints.size() ? static_cast<int>(bone_):0;

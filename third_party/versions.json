@@ -1,4 +1,15 @@
 {
+  "imguizmo": {
+    "source": "https://github.com/CedricGuillemet/ImGuizmo",
+    "revision": "105e4fde45e4e74aae8973d98750820ef7aca7e2",
+    "license": "MIT (imguizmo/LICENSE)",
+    "build": "Editor only; not linked into or installed with the public SDK",
+    "sha256": {
+      "ImGuizmo.cpp": "ca7112cef944d20c47e352b351bd5f9936e9378fcd20bfbf12bc4d6ea2de1544",
+      "ImGuizmo.h": "364b73d46f457ca09293cfc63a66fbbbe9b2e75f981d7afd6dc458ac80d5dba6",
+      "LICENSE": "b957968be18bbc4fde7705cfcbda10bea1a71614e62361ace0473bb97dd0b700"
+    }
+  },
   "meshoptimizer": {
     "source": "https://github.com/zeux/meshoptimizer",
     "version": "v1.3",

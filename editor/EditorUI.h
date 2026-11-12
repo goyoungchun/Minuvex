@@ -47,6 +47,9 @@ public:
     void ResetQualityDraft() {qualityDraft_=Viewport.Quality().Requested;}
     const std::optional<QualityEstimate>& SelectedQualityEstimate() const noexcept {return selectedEstimate_;}
     void ShowDebuggers() noexcept {renderDebugger_=animationDebugger_=true;}
+    std::array<float,4> ViewportArea() const noexcept {return viewportRect_;}
+    bool GizmoVisible() const noexcept {return gizmoVisible_;}
+    int TransformTool() const noexcept {return transformTool_;}
     // Queue from UI actions after Image commands exist; commit at the next Draw entry.
     void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
@@ -65,6 +68,13 @@ private:
     float assetRect_[4]{};
     ObjectId deleteObject_=NoObject;
     std::string filter_;
+    std::string hierarchyFilter_;
+    std::array<float,4> viewportRect_{};
+    int transformTool_=0;
+    float crossFadeSeconds_=.3f;
+    bool grid_=true,gizmoVisible_=false,gizmoBlockInput_=false,gizmoEditing_=false,gizmoSuppressed_=false;
+    bool cameraEditing_=false;
+    ObjectId gizmoObject_=NoObject;
     AssetId selectedAsset_ = 0;
     bool quit_ = false, resetLayout_ = false, cameraDrag_ = false;
     bool hierarchy_ = true, inspector_ = true, assets_ = true, viewport_ = true;
@@ -126,6 +136,8 @@ private:
     void ReimportAsset(AssetId asset);
     void CancelPreviewJob();
     void ViewportPanel();
+    void TransformTools(float x,float y,float width,float height,bool enabled);
+    void StopCameraEdit(bool cancel);
     void Dialogs();
     template<typename T> bool Report(const Result<T>& result,ObjectId object=NoObject) {
         if (!result) { ShowError(result.Error(),object); return false; } return true;

@@ -120,7 +120,7 @@ void AnimationPlayer::Bind(ModelHandle model) {
         }
     }
     model_ = std::move(model); clip_.reset(); time_ = 0; speed_ = 1; loop_ = true; state_ = PlaybackState::Stopped;
-    overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
+    blend_.reset();overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
 }
 bool AnimationPlayer::NeedsEvaluation() const noexcept { return model_ && (clip_.has_value() || !overrides_.Joints.empty() || !model_->Skins.empty()); }
 void AnimationPlayer::Rebind(ModelHandle model) {
@@ -140,6 +140,10 @@ void AnimationPlayer::Rebind(ModelHandle model) {
     }
     if (!overrides_.Joints.empty()) {next.ApplyPose(overrides_);}
     else {next.overrides_.Name = overrides_.Name;}
+    if (blend_) {
+        if (blend_->SourceClip) {const auto source=*blend_->SourceClip;Require(source<next.model_->Animations.size() && next.model_->Animations[source].Name == model_->Animations[source].Name,"Reimport changed the blend source clip identity.");}
+        next.RestoreBlend(*blend_);
+    }
     (void)next.Evaluate();
     *this = std::move(next);
 }
@@ -147,24 +151,57 @@ void AnimationPlayer::Play(std::size_t clip, bool restart) {
     Require(model_ && clip < model_->Animations.size(),"Animation clip does not belong to the bound model.");
     ValidateAnimation(model_->Skeleton,model_->Animations[clip]);
     if (restart || clip_ != clip) { time_ = speed_ < 0 ? model_->Animations[clip].Duration : 0; }
-    clip_ = clip; state_ = PlaybackState::Playing;
+    clip_ = clip; state_ = PlaybackState::Playing;blend_.reset();
 }
+float AnimationPlayer::BlendWeight() const noexcept {return blend_ ? static_cast<float>(blend_->Elapsed/blend_->Duration):1.0f;}
+void AnimationPlayer::CrossFade(std::size_t clip,double duration) {
+    Require(std::isfinite(duration) && duration>=0,"Blend duration must be finite and nonnegative.");
+    if (duration == 0) {Play(clip);return;}
+    Require(bool(model_),"Bind a model before blending clips.");
+    AnimationBlendState state;state.Duration=duration;
+    if (!blend_ && clip_ && state_ == PlaybackState::Playing) {state.SourceClip=clip_;state.SourceTime=time_;}
+    else {const auto base=EvaluateBase();state.SourcePose.Name="Blend source";state.SourcePose.SkeletonSignature=SkeletonSignature(model_->Skeleton);for (std::size_t i=0;i<base.size();++i) {if (model_->Skeleton.Joints[i].Editable) {state.SourcePose.Joints.push_back({static_cast<JointId>(i),base[i]});}}}
+    auto next=*this;next.Play(clip);next.RestoreBlend(state);*this=std::move(next);
+}
+void AnimationPlayer::ValidateBlend(const AnimationBlendState& state) const {
+    Require(model_ && clip_ && state_ != PlaybackState::Stopped,"Blend restore requires a selected, playing or paused target clip.");
+    Require(std::isfinite(state.Duration) && state.Duration>0 && std::isfinite(state.Elapsed) && state.Elapsed>=0 && state.Elapsed<state.Duration,"Invalid blend duration/progress.");
+    Require(std::isfinite(state.SourceTime) && state.SourceTime>=0,"Invalid blend source time.");
+    if (state.SourceClip) {
+        Require(*state.SourceClip<model_->Animations.size() && state.SourcePose.Joints.empty(),"Blend source must be one live clip or one frozen pose.");
+        const auto& clip=model_->Animations[*state.SourceClip];ValidateAnimation(model_->Skeleton,clip);Require(state.SourceTime<=clip.Duration,"Blend source time exceeds clip duration.");
+    }else {
+        ValidatePose(model_->Skeleton,state.SourcePose);const auto count=std::count_if(model_->Skeleton.Joints.begin(),model_->Skeleton.Joints.end(),[](const auto& joint){return joint.Editable;});
+        Require(state.SourceTime == 0 && state.SourcePose.Joints.size() == static_cast<std::size_t>(count),"Frozen blend source requires a complete pose and zero source time.");
+    }
+    auto source=EvaluateClip(state.SourceClip,state.SourceTime);if (!state.SourceClip) {for (const auto& joint:state.SourcePose.Joints) {source[joint.Joint]=joint.Local;}}
+    const auto target=EvaluateClip(clip_,time_);
+    const auto signs=[](Vec3 a,Vec3 b) {return std::signbit(a.X) == std::signbit(b.X) && std::signbit(a.Y) == std::signbit(b.Y) && std::signbit(a.Z) == std::signbit(b.Z);};
+    for (std::size_t i=0;i<source.size();++i) {if (model_->Skeleton.Joints[i].Editable) {Require(signs(source[i].Scale,target[i].Scale),"Blend cannot cross a singular zero scale.");}}
+    const auto check=[&](std::size_t clip) {for (const auto& track:model_->Animations[clip].Tracks) {if (track.Path == AnimationPath::Scale) {for (const auto& value:track.Values) {Require(signs(source[track.Joint].Scale,{value[0],value[1],value[2]}),"Blend clips must retain compatible scale signs.");}}}};
+    check(*clip_);if (state.SourceClip) {check(*state.SourceClip);}
+}
+void AnimationPlayer::RestoreBlend(const AnimationBlendState& state) {ValidateBlend(state);auto candidate=state;blend_=std::move(candidate);}
 void AnimationPlayer::Pause() noexcept { if (state_ == PlaybackState::Playing) { state_ = PlaybackState::Paused; } }
 void AnimationPlayer::Resume() { Require(model_ && clip_.has_value(),"Select an animation clip before resuming."); state_ = PlaybackState::Playing; }
-void AnimationPlayer::Stop() noexcept { time_ = 0; state_ = PlaybackState::Stopped; }
+void AnimationPlayer::Stop() noexcept { time_ = 0; state_ = PlaybackState::Stopped;blend_.reset(); }
 void AnimationPlayer::Seek(double seconds) {
     Require(model_ && clip_.has_value() && std::isfinite(seconds) && seconds >= 0,"Seek requires a clip and finite nonnegative time.");
     time_ = std::min(seconds,model_->Animations[*clip_].Duration);
+    blend_.reset();
 }
 void AnimationPlayer::SetSpeed(double speed) { Require(std::isfinite(speed) && std::abs(speed) <= 100,"Playback speed must be finite and in [-100,100]."); speed_ = speed; }
 void AnimationPlayer::Update(double deltaSeconds) {
     Require(std::isfinite(deltaSeconds) && deltaSeconds >= 0,"Animation delta time must be finite and nonnegative.");
     if (state_ != PlaybackState::Playing || !model_ || !clip_ || speed_ == 0 || deltaSeconds == 0) { return; }
-    const auto duration = model_->Animations[*clip_].Duration;
-    if (duration == 0) { time_ = 0; state_ = PlaybackState::Stopped; return; }
-    const double next = time_+deltaSeconds*speed_; Require(std::isfinite(next),"Animation time advance exceeds numeric range.");
-    if (loop_) { time_ = std::fmod(next,duration); if (time_ < 0) { time_ += duration; } }
-    else { time_ = std::clamp(next,0.0,duration); if ((speed_ > 0 && next >= duration) || (speed_ < 0 && next <= 0)) { state_ = PlaybackState::Stopped; } }
+    const double shift=deltaSeconds*speed_;Require(std::isfinite(shift),"Animation time advance exceeds numeric range.");
+    const auto advance=[&](std::size_t clip,double time) {const double duration=model_->Animations[clip].Duration;if (duration == 0) {return 0.0;}const double next=time+shift;Require(std::isfinite(next),"Animation time advance exceeds numeric range.");if (!loop_) {return std::clamp(next,0.0,duration);}auto wrapped=std::fmod(next,duration);return wrapped<0 ? wrapped+duration:wrapped;};
+    const auto next=advance(*clip_,time_);double source=0,elapsed=0;
+    if (blend_) {if (blend_->SourceClip) {source=advance(*blend_->SourceClip,blend_->SourceTime);}elapsed=blend_->Elapsed+std::min(deltaSeconds,blend_->Duration-blend_->Elapsed);}
+    time_=next;
+    if (blend_) {blend_->SourceTime=source;blend_->Elapsed=elapsed;if (elapsed>=blend_->Duration) {blend_.reset();}}
+    const auto duration=model_->Animations[*clip_].Duration;
+    if (!blend_ && (duration == 0 || (!loop_ && ((speed_>0 && time_>=duration) || (speed_<0 && time_<=0))))) {state_=PlaybackState::Stopped;}
 }
 void AnimationPlayer::ApplyPose(const PoseAsset& pose) {
     Require(bool(model_),"Bind a model before applying a pose."); ValidatePose(model_->Skeleton,pose); overrides_ = pose;
@@ -178,18 +215,18 @@ void AnimationPlayer::ClearJointOverride(JointId joint) {
     std::erase_if(overrides_.Joints,[&](const auto& p) { return p.Joint == joint; });
 }
 void AnimationPlayer::ClearOverrides() noexcept { overrides_.Joints.clear(); }
-void AnimationPlayer::ResetPose() noexcept { clip_.reset(); time_ = 0; state_ = PlaybackState::Stopped; ClearOverrides(); }
-std::vector<Transform> AnimationPlayer::EvaluateLocal() const {
+void AnimationPlayer::ResetPose() noexcept { clip_.reset(); time_ = 0; state_ = PlaybackState::Stopped;blend_.reset();ClearOverrides(); }
+std::vector<Transform> AnimationPlayer::EvaluateClip(std::optional<std::size_t> clip,double time) const {
     Require(bool(model_),"Bind a model before evaluating its pose.");
     std::vector<Transform> local; local.reserve(model_->Skeleton.Joints.size());
     for (const auto& joint : model_->Skeleton.Joints) { local.push_back(joint.ReferenceLocal); }
-    if (clip_) {
-        for (const auto& track : model_->Animations[*clip_].Tracks) {
-            const auto end = std::upper_bound(track.Times.begin(),track.Times.end(),time_);
+    if (clip) {
+        for (const auto& track : model_->Animations[*clip].Tracks) {
+            const auto end = std::upper_bound(track.Times.begin(),track.Times.end(),time);
             const auto left = end == track.Times.begin() ? 0 : static_cast<std::size_t>(end-track.Times.begin()-1);
             const auto right = std::min(left+1,track.Times.size()-1);
-            const float factor = track.Interpolation == AnimationInterpolation::Step || right == left || time_ <= track.Times.front() ? 0 :
-                static_cast<float>(std::clamp((time_-track.Times[left])/(double(track.Times[right])-track.Times[left]),0.0,1.0));
+            const float factor = track.Interpolation == AnimationInterpolation::Step || right == left || time <= track.Times.front() ? 0 :
+                static_cast<float>(std::clamp((time-track.Times[left])/(double(track.Times[right])-track.Times[left]),0.0,1.0));
             const auto& a = track.Values[left]; const auto& b = track.Values[right]; auto& t = local[track.Joint];
             if (track.Path == AnimationPath::Rotation) { t.Rotation = Slerp({a[0],a[1],a[2],a[3]},{b[0],b[1],b[2],b[3]},factor); }
             else {
@@ -198,9 +235,16 @@ std::vector<Transform> AnimationPlayer::EvaluateLocal() const {
             }
         }
     }
-    for (const auto& joint : overrides_.Joints) { local[joint.Joint] = joint.Local; }
     return local;
 }
+std::vector<Transform> AnimationPlayer::EvaluateBase() const {
+    auto local=EvaluateClip(clip_,time_);if (!blend_) {return local;}
+    auto source=EvaluateClip(blend_->SourceClip,blend_->SourceTime);if (!blend_->SourceClip) {for (const auto& joint:blend_->SourcePose.Joints) {source[joint.Joint]=joint.Local;}}
+    const auto weight=BlendWeight();const auto lerp=[&](Vec3 a,Vec3 b) {return Vec3{std::lerp(a.X,b.X,weight),std::lerp(a.Y,b.Y,weight),std::lerp(a.Z,b.Z,weight)};};
+    for (std::size_t i=0;i<local.size();++i) {if (model_->Skeleton.Joints[i].Editable) {local[i]={lerp(source[i].Position,local[i].Position),Slerp(source[i].Rotation,local[i].Rotation,weight),lerp(source[i].Scale,local[i].Scale)};}}
+    return local;
+}
+std::vector<Transform> AnimationPlayer::EvaluateLocal() const {auto local=EvaluateBase();for (const auto& joint:overrides_.Joints) {local[joint.Joint]=joint.Local;}return local;}
 PoseAsset AnimationPlayer::CapturePose(std::string name) const {
     const auto local = EvaluateLocal(); PoseAsset pose; pose.Name = std::move(name); pose.SkeletonSignature = SkeletonSignature(model_->Skeleton);
     for (std::size_t i=0;i<local.size();++i) { if (model_->Skeleton.Joints[i].Editable) { pose.Joints.push_back({static_cast<JointId>(i),local[i]}); } }

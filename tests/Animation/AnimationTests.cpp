@@ -91,6 +91,55 @@ void DataAndPlayer() {
     Check(bool(viewer.PauseAnimation(object.Value())) && bool(viewer.StopAnimation(object.Value())) && bool(viewer.SetPose(object.Value(),partial)) && bool(viewer.ResetPose(object.Value())),"Viewer pose and playback facade");
     Check(!viewer.PlayAnimation(999,0) && !viewer.PlayAnimation(object.Value(),999),"Viewer animation errors are Results");
 }
+void Blending() {
+    lv::AssetRegistry registry;const auto model=registry.LoadModel(Fixture("AnimatedRibbon.gltf"));lv::AnimationPlayer player;player.Bind(model);
+    player.CrossFade(0,1);player.Update(.5);auto pose=player.CapturePose();
+    Check(player.Blend() && !player.Blend()->SourceClip && Near(player.BlendWeight(),.5f) && Near(pose.Joints[1].Local.Position.X,.125f) && Near(pose.Joints[2].Local.Rotation.Z,std::sin(std::numbers::pi_v<float>/16)),"reference to clip cross-fade interpolates translation and shortest-arc rotation");
+    player.Pause();player.Update(1);Check(player.Time() == .5 && player.Blend()->Elapsed == .5,"Pause freezes both clip and fade clock");
+    player.Resume();player.SetSpeed(0);player.Update(1);Check(player.Blend()->Elapsed == .5,"zero speed freezes fade clock");player.SetSpeed(1);
+    const auto before=player.Evaluate();player.CrossFade(2,1);MatrixNear(player.Evaluate().Global[2],before.Global[2],"interrupted fade starts from current base pose without popping");
+    auto local=model->Skeleton.Joints[2].ReferenceLocal;local.Position.X=2;player.SetJointOverride(2,local);player.Update(.5);
+    Check(Near(player.CapturePose().Joints[2].Local.Position.X,2) && Near(player.CapturePose().Joints[2].Local.Scale.X,1),"manual full-TRS overrides run after blending");
+    player.ClearOverrides();Check(Near(player.CapturePose().Joints[2].Local.Scale.X,1.125f),"scale interpolation remains available after clearing override");
+    player.Update(.5);Check(!player.Blend() && Near(player.CapturePose().Joints[2].Local.Scale.X,1.5f),"completed transition releases source and evaluates target alone");
+    player.Play(0);player.Seek(.5);player.CrossFade(1,1);player.Update(.5);
+    Check(player.Blend()->SourceClip == 0 && player.Blend()->SourceTime == 1 && player.Time() == .5 && Near(player.CapturePose().Joints[1].Local.Position.X,.25f),"live source and incoming STEP clip advance on independent playheads");
+    auto copy=player;copy.Update(.25);Check(player.Blend()->Elapsed == .5 && copy.Blend()->Elapsed == .75,"copied transitions retain independent clocks");
+    player.Rebind(std::make_shared<lv::ModelAsset>(*model));Check(player.Blend()->SourceTime == 1,"compatible rebind preserves transition");
+    auto changed=std::make_shared<lv::ModelAsset>(*model);changed->Animations[0].Name="Different source";Rejects([&]{player.Rebind(changed);},"rebind checks live source identity as well as target");
+    Rejects([&]{player.CrossFade(999,1);},"foreign blend target rejected");Rejects([&]{player.CrossFade(0,-1);},"negative blend duration rejected");Rejects([&]{player.CrossFade(0,std::numeric_limits<double>::infinity());},"nonfinite blend duration rejected");
+    auto invalid=*player.Blend();invalid.Elapsed=invalid.Duration;Rejects([&]{player.RestoreBlend(invalid);},"completed progress cannot be restored as an active blend");
+    Check(player.Clip() == 1 && player.Blend()->Elapsed == .5,"failed transitions preserve existing state");
+    player.Seek(.5);Check(!player.Blend(),"scrubbing clears transition");player.CrossFade(0,1);player.Stop();Check(!player.Blend(),"Stop clears transition");
+    player.CrossFade(1,1);player.ResetPose();Check(!player.Blend() && !player.Clip(),"reference reset clears transition");player.CrossFade(0,0);Check(!player.Blend() && player.Clip() == 0,"zero duration switches immediately");
+    player.SetLoop(false);player.SetSpeed(-1);player.Play(0);player.CrossFade(1,3);player.Update(2);
+    Check(player.Time() == 0 && player.State() == lv::PlaybackState::Playing && player.Blend(),"reverse non-looping target holds endpoint until fade completes");player.Update(1);
+    Check(!player.Blend() && player.State() == lv::PlaybackState::Stopped && player.Time() == 0,"fade completion stops a non-looping endpoint");
+    auto reflected=std::make_shared<lv::ModelAsset>(*model);for (auto& value:reflected->Animations[2].Tracks[0].Values) {value[0]=-value[0];}player.Bind(reflected);
+    Rejects([&]{player.CrossFade(2,1);},"opposite scale signs cannot blend through singular zero");Check(!player.Clip(),"failed scale validation preserves reference state");
+    lv::Viewer viewer;const auto id=viewer.AddModel(Fixture("AnimatedRibbon.gltf")).Value();
+    Check(bool(viewer.CrossFadeAnimation(id,0,.5)) && viewer.GetScene().GetObject(id).Animation.Blend() && !viewer.CrossFadeAnimation(id,999,.5),"Viewer exposes validated cross-fade Results before native initialization");
+}
+void BlendPersistence() {
+    TemporaryDirectory temp;lv::EditorDocument doc;const auto asset=doc.ImportModel(Fixture("AnimatedRibbon.gltf")).Value(),id=doc.PlaceModel(asset).Value();
+    Check(bool(doc.PlayAnimation(id,0)) && bool(doc.SeekAnimation(id,.5)),"prepare blend source");Check(bool(doc.CrossFadeAnimation(id,1,1)) && doc.IsDirty(),"Editor cross-fade records an undoable edit");
+    Check(bool(doc.Undo()) && !doc.GetScene().GetObject(id).Animation.Blend() && bool(doc.Redo()) && doc.GetScene().GetObject(id).Animation.Blend(),"Undo/Redo restores transition state");
+    Check(bool(doc.UpdateAnimations(.25)) && bool(doc.PauseAnimation(id)),"pause blend preview");const auto file=temp.File("Blend.mvxscene.json");Check(bool(doc.Save(file)),"active transition saves");
+    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 6 && bool(loaded.Open(file)),"Scene v6 restores active live-source blend");
+    const auto other=loaded.GetScene().ObjectIds()[0];const auto& restored=loaded.GetScene().GetObject(other).Animation;
+    Check(restored.State() == lv::PlaybackState::Paused && restored.Blend()->SourceClip == 0 && restored.Blend()->SourceTime == .75 && restored.Time() == .25 && restored.Blend()->Elapsed == .25,"paused transition clocks and clip identities survive serialization");
+    MatrixNear(restored.Evaluate().Global[2],doc.GetScene().GetObject(id).Animation.Evaluate().Global[2],"live blend roundtrip preserves evaluated pose");
+    Check(bool(loaded.CrossFadeAnimation(other,2,1)) && bool(loaded.UpdateAnimations(.5)) && bool(loaded.PauseAnimation(other)) && bool(loaded.Save(file)),"persist interrupted blend");lv::EditorDocument frozen;
+    Check(bool(frozen.Open(file)) && !frozen.GetScene().GetObject(frozen.GetScene().ObjectIds()[0]).Animation.Blend()->SourceClip,"interrupted transition persists complete frozen source pose");
+    MatrixNear(frozen.GetScene().GetObject(frozen.GetScene().ObjectIds()[0]).Animation.Evaluate().Global[2],loaded.GetScene().GetObject(other).Animation.Evaluate().Global[2],"frozen source roundtrip preserves evaluated pose");
+    auto legacy=original;legacy["version"]=5;legacy["objects"][0]["animation"].erase("blend");Write(file,legacy.dump());
+    Check(bool(frozen.Open(file)) && !frozen.GetScene().GetObject(frozen.GetScene().ObjectIds()[0]).Animation.Blend(),"Scene v5 without transition field remains readable");
+    const auto rejects=[&](Json changed,const char* label) {Write(file,changed.dump());Check(!loaded.Open(file) && loaded.GetScene().Contains(other) && loaded.GetScene().GetObject(other).Animation.Blend(),label);};
+    auto bad=original;bad["objects"][0]["animation"]["blend"]["sourceClipName"]="Changed";rejects(bad,"stale blend source identity is rejected without replacing document");
+    bad=original;bad["objects"][0]["animation"]["blend"]["elapsed"]=1;rejects(bad,"invalid transition clock rejected");
+    bad=original;bad["objects"][0]["animation"]["state"]=0;rejects(bad,"stopped active transition rejected");
+    bad=original;bad["objects"][0]["animation"].erase("blend");rejects(bad,"Scene v6 requires explicit transition field");
+}
 void Persistence() {
     TemporaryDirectory temp; lv::EditorDocument doc;
     auto asset = doc.ImportModel(Fixture("AnimatedRibbon.gltf")); auto object = doc.PlaceModel(asset.Value()); const auto id = object.Value();
@@ -183,7 +232,7 @@ void ImportValidation() {
 }
 }
 int main() {
-    try { DataAndPlayer(); Persistence(); ImportValidation(); Reimport(); }
+    try { DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

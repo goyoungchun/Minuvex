@@ -102,6 +102,7 @@ public:
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> FrameScene();
     Result<void> PlayAnimation(ObjectId id, std::size_t clip);
+    Result<void> CrossFadeAnimation(ObjectId id, std::size_t clip, double durationSeconds = .3);
     Result<void> PauseAnimation(ObjectId id);
     Result<void> StopAnimation(ObjectId id);
     Result<void> SetPose(ObjectId id, const PoseAsset& pose); // Manual override after animation.

@@ -1,4 +1,4 @@
-// Headless public SDK example: import, independent playback, Pose IO and reset.
+// Headless public SDK example: import, playback/cross-fade, Pose IO and reset.
 #include <minuvex/Scene.h>
 #include <minuvex/PoseIO.h>
 #include <cstdio>
@@ -30,7 +30,14 @@ int main(int argc,char** argv) {
         }}
         second.ResetPose();
         if (second.Clip() || !second.Overrides().Joints.empty()) {throw std::runtime_error("ResetPose must restore reference playback state.");}
-        std::printf("Animation/Pose: %zu nodes, %.3f seconds; independent instances and Pose IO passed.\n",model->Skeleton.Joints.size(),player.Time());
+        player.CrossFade(model->Animations.size()>1 ? 1:0,.5);
+        scene.UpdateAnimations(.25);
+        if (!player.Blend() || std::abs(player.BlendWeight()-.5f)>1e-6f) {throw std::runtime_error("Cross-fade must reach half weight after half its duration.");}
+        player.Pause();scene.UpdateAnimations(.25);
+        if (std::abs(player.BlendWeight()-.5f)>1e-6f) {throw std::runtime_error("Pause must freeze the transition.");}
+        player.Resume();scene.UpdateAnimations(.25);
+        if (player.Blend()) {throw std::runtime_error("Cross-fade must finish at its duration.");}
+        std::printf("Animation/Pose: %zu nodes, %.3f seconds; independent instances, Pose IO and cross-fade passed.\n",model->Skeleton.Joints.size(),player.Time());
         return 0;
     }catch (const std::exception& error) {std::fprintf(stderr,"%s\n",error.what());return 1;}
 }

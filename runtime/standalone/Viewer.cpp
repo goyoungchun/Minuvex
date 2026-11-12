@@ -11,8 +11,8 @@ Error CurrentException(ErrorCode fallback, const char* hint) {
     catch (const ImportError& error) {
         switch (error.Code) {
         case ImportErrorCode::Io: return {ErrorCode::AssetLoad, error.what(), "Check the model path and referenced resource files.", {}};
-        case ImportErrorCode::InvalidData: return {ErrorCode::InvalidData, error.what(), "Validate the glTF/GLB file and its buffer/image data.", {}};
-        case ImportErrorCode::UnsupportedFeature: return {ErrorCode::UnsupportedFeature, error.what(), "Export a static TRIANGLES glTF 2.0 model with supported materials.", {}};
+        case ImportErrorCode::InvalidData: return {ErrorCode::InvalidData, error.what(), "Validate the GLB/glTF, OBJ or FBX source and its dependencies.", {}};
+        case ImportErrorCode::UnsupportedFeature: return {ErrorCode::UnsupportedFeature, error.what(), "Use supported GLB/glTF, OBJ or FBX mesh/material/animation features; inspect the import warnings.", {}};
         case ImportErrorCode::ResourceLimit: return {ErrorCode::InsufficientResource, error.what(), "Reduce the asset size or adjust ImportSettings limits.", {}};
         }
         return {fallback, error.what(), hint, {}};
@@ -157,6 +157,11 @@ Result<void> Viewer::PlayAnimation(ObjectId id, std::size_t clip) {
     auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
     try { state_->World.GetAnimation(id).Play(clip); return Result<void>::Success(); }
     catch (...) { return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use an animation clip from this model.")); }
+}
+Result<void> Viewer::CrossFadeAnimation(ObjectId id,std::size_t clip,double duration) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}
+    try {state_->World.GetAnimation(id).CrossFade(clip,duration);return Result<void>::Success();}
+    catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid animation clip, nonnegative duration and compatible scale signs."));}
 }
 Result<void> Viewer::PauseAnimation(ObjectId id) {
     auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }

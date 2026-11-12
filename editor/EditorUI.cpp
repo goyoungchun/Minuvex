@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <numbers>
 #include <unordered_map>
+#include <unordered_set>
+#include <ImGuizmo.h>
 
 namespace lv::editor {
 namespace {
@@ -209,6 +211,12 @@ void EditorUI::Menu() {
             if (ImGui::MenuItem("Reset debug display")) {Report(Viewport.SetDebugOptions({}));editorDebugDraw_.Clear();Report(Viewport.SetDebugDraw(editorDebugDraw_));}
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Edit")) {
+            if (ImGui::MenuItem("Undo","Ctrl+Z",false,Document.CanUndo())) {Report(Document.Undo());}
+            if (ImGui::MenuItem("Redo","Ctrl+Y / Ctrl+Shift+Z",false,Document.CanRedo())) {Report(Document.Redo());}
+            if (ImGui::MenuItem("Clear Undo History",nullptr,false,Document.CanUndo() || Document.CanRedo())) {Report(Document.ClearUndoHistory());}
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Window")) {
             ImGui::MenuItem("Viewport",nullptr,&viewport_); ImGui::MenuItem("Hierarchy",nullptr,&hierarchy_);
             ImGui::MenuItem("Inspector",nullptr,&inspector_); ImGui::MenuItem("Asset Browser",nullptr,&assets_);
@@ -228,6 +236,8 @@ void EditorUI::Menu() {
     }
     const auto& io = ImGui::GetIO();
     if ((io.KeyCtrl || io.KeySuper) && !io.WantTextInput && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Z,false)) {if (io.KeyShift) {if (Document.CanRedo()) {Report(Document.Redo());}}else if (Document.CanUndo()) {Report(Document.Undo());}}
+        if (ImGui::IsKeyPressed(ImGuiKey_Y,false) && Document.CanRedo()) {Report(Document.Redo());}
         if (ImGui::IsKeyPressed(ImGuiKey_S,false)) {
             if (io.KeyShift || Document.Path().empty()) { FileDialog(Dialog::Save); } else { Save(Document.Path()); }
         }
@@ -278,16 +288,22 @@ void EditorUI::Hierarchy() {
         ImGui::Separator();
         std::unordered_map<ObjectId,std::vector<ObjectId>> children;
         for (auto id : Document.GetScene().ObjectIds()) { children[Document.GetScene().GetObject(id).Parent].push_back(id); }
+        ImGui::InputTextWithHint("##hierarchy-search","Search object names...",&hierarchyFilter_);
+        const auto lower=[](std::string value) {for (auto& c:value) {c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));}return value;};
+        std::unordered_set<ObjectId> matched;
+        if (!hierarchyFilter_.empty()) {const auto query=lower(hierarchyFilter_);for (auto id:Document.GetScene().ObjectIds()) {if (lower(Document.GetScene().GetObject(id).Name).find(query) != std::string::npos) {for (auto parent=id;parent;parent=Document.GetScene().GetObject(parent).Parent) {matched.insert(parent);}}}}
         std::vector<ObjectId> stack(children[NoObject].rbegin(),children[NoObject].rend());
         while (!stack.empty()) {
             const auto id = stack.back(); stack.pop_back();
             if (!id) { ImGui::TreePop(); continue; }
+            if (!hierarchyFilter_.empty() && !matched.contains(id)) {continue;}
             const auto& object = Document.GetScene().GetObject(id);
             Id(id);
             auto flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
             if (Document.Selection() == id) { flags |= ImGuiTreeNodeFlags_Selected; }
             if (children[id].empty()) { flags |= ImGuiTreeNodeFlags_Leaf; }
             const std::string label = (object.Visible ? "" : "[hidden] ") + (object.Name.empty() ? "Object" : object.Name);
+            if (!hierarchyFilter_.empty()) {ImGui::SetNextItemOpen(true,ImGuiCond_Always);}
             const bool open = ImGui::TreeNodeEx("node",flags,"%s",label.c_str());
             if (ImGui::IsItemClicked()) { Report(Document.Select(id)); }
             if (ImGui::BeginDragDropSource()) {
@@ -327,6 +343,8 @@ void EditorUI::Inspector() {
         if (ImGui::CollapsingHeader("Camera")) {
             auto camera = Document.GetScene().MainCamera;
             bool changed = VecInput("Eye",camera.Position); changed = VecInput("Target",camera.Target) || changed;
+            int projection=static_cast<int>(camera.Projection);if (ImGui::Combo("Projection",&projection,"Perspective\0Orthographic\0")) {camera.Projection=static_cast<CameraProjection>(projection);changed=true;}
+            if (camera.Projection == CameraProjection::Orthographic) {changed=ImGui::DragFloat("Orthographic height",&camera.OrthographicHeight,.05f,.0001f,1e8f) || changed;}
             changed = VecInput("Up",camera.Up) || changed;
             float fov = camera.VerticalFovRadians*180/std::numbers::pi_v<float>;
             if (ImGui::DragFloat("FOV (deg)",&fov,0.2f,1,175)) { camera.VerticalFovRadians = fov*std::numbers::pi_v<float>/180; changed = true; }
@@ -404,27 +422,34 @@ void EditorUI::AnimationControls() {
         const auto object = Document.Selection();
         if (!object || !Document.GetScene().GetObject(object).Model) { ImGui::TextUnformatted("Select a model instance in Hierarchy."); }
         else {
-            const auto& instance = Document.GetScene().GetObject(object); const auto& clips = instance.Model->Animations; const auto& player = instance.Animation;
+            // Failed Document edits restore snapshots, invalidating Scene references.
+            const auto model=Document.GetScene().GetObject(object).Model;const auto& clips=model->Animations;
+            const auto& player=Document.GetScene().GetObject(object).Animation;
+            const auto clip=player.Clip();const auto playback=player.State();const auto overrides=player.Overrides().Joints.size();
+            double time=player.Time();float speed=static_cast<float>(player.Speed());bool loop=player.Loop();
+            const auto blending=player.Blend().has_value();const auto weight=player.BlendWeight();const auto elapsed=blending ? player.Blend()->Elapsed:0,durationBlend=blending ? player.Blend()->Duration:0;
             if (clips.empty()) { ImGui::TextUnformatted("This model has no animation clips. Pose editing remains available."); }
             else {
-                if (ImGui::BeginCombo("Clip",player.Clip() ? clips[*player.Clip()].Name.c_str() : "<none>")) {
+                ImGui::SliderFloat("Cross-fade (s)",&crossFadeSeconds_,0,2,"%.2f");
+                if (ImGui::BeginCombo("Clip",clip ? clips[*clip].Name.c_str() : "<none>")) {
                     for (std::size_t i=0;i<clips.size();++i) { ImGui::PushID(static_cast<int>(i));
-                        if (ImGui::Selectable(clips[i].Name.c_str(),player.Clip() == i)) { Report(Document.PlayAnimation(object,i)); } ImGui::PopID(); }
+                        if (ImGui::Selectable(clips[i].Name.c_str(),clip == i)) { Report(Document.CrossFadeAnimation(object,i,crossFadeSeconds_)); } ImGui::PopID(); }
                     ImGui::EndCombo();
                 }
-                if (ImGui::Button("Play / Restart")) { Report(Document.PlayAnimation(object,player.Clip().value_or(0))); }
-                ImGui::SameLine(); if (ImGui::Button(player.State() == PlaybackState::Playing ? "Pause" : "Resume")) {
-                    if (player.State() == PlaybackState::Playing) { Report(Document.PauseAnimation(object)); }
-                    else if (player.Clip()) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
+                if (ImGui::Button("Play / Restart")) { Report(Document.PlayAnimation(object,clip.value_or(0))); }
+                ImGui::SameLine(); if (ImGui::Button(playback == PlaybackState::Playing ? "Pause" : "Resume")) {
+                    if (playback == PlaybackState::Playing) { Report(Document.PauseAnimation(object)); }
+                    else if (clip) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
                 }
                 ImGui::SameLine(); if (ImGui::Button("Stop")) { Report(Document.StopAnimation(object)); }
-                if (player.Clip()) {
-                    double time = player.Time(), zero = 0, duration = clips[*player.Clip()].Duration;
+                if (clip) {
+                    double zero = 0, duration = clips[*clip].Duration;
                     if (ImGui::SliderScalar("Time",ImGuiDataType_Double,&time,&zero,&duration,"%.3f s")) { Report(Document.SeekAnimation(object,time)); }
                 }
-                float speed = static_cast<float>(player.Speed()); if (ImGui::DragFloat("Speed",&speed,0.05f,-100,100)) { Report(Document.SetAnimationSpeed(object,speed)); }
-                bool loop = player.Loop(); if (ImGui::Checkbox("Loop",&loop)) { Report(Document.SetAnimationLoop(object,loop)); }
-                ImGui::Text("%s | %zu joint overrides",player.State() == PlaybackState::Playing ? "Playing" : player.State() == PlaybackState::Paused ? "Paused" : "Stopped",player.Overrides().Joints.size());
+                if (ImGui::DragFloat("Speed",&speed,0.05f,-100,100)) { Report(Document.SetAnimationSpeed(object,speed)); }
+                if (ImGui::Checkbox("Loop",&loop)) { Report(Document.SetAnimationLoop(object,loop)); }
+                ImGui::Text("%s | %zu joint overrides",playback == PlaybackState::Playing ? "Playing" : playback == PlaybackState::Paused ? "Paused" : "Stopped",overrides);
+                if (blending) {ImGui::ProgressBar(weight);ImGui::Text("Cross-fade: %.2f / %.2f s",elapsed,durationBlend);}
             }
         }
     } ImGui::End();
@@ -552,10 +577,13 @@ void EditorUI::AssetBrowser() {
     ImGui::End();
 }
 void EditorUI::ViewportPanel() {
-    if (!viewport_) { controls_.Reset(); cameraDrag_ = false; Viewport.Resize(0,0); return; }
+    gizmoVisible_=false;viewportRect_={};
+    if (!viewport_) {StopCameraEdit(true);if (gizmoEditing_) {if (Document.IsEditing()) {(void)Document.CancelEdit();}ImGuizmo::Enable(false);gizmoEditing_=false;}Viewport.Resize(0,0);return;}
     if (ImGui::Begin("Viewport",&viewport_)) {
         if (ImGui::Button("Focus selected (F)")) { FrameScene(); }
-        ImGui::SameLine(); ImGui::TextUnformatted("Left: Select  |  Right: Orbit  |  Middle: Pan  |  Wheel: Zoom");
+        ImGui::SameLine();ImGui::BeginDisabled(Document.IsEditing());ImGui::SetNextItemWidth(115);ImGui::Combo("##transform-tool",&transformTool_,"Move (W)\0Rotate (E)\0Scale (R)\0");ImGui::EndDisabled();
+        ImGui::SameLine();ImGui::Checkbox("Grid / Axis",&grid_);
+        ImGui::TextUnformatted("Left: Select / Gizmo | Right: Orbit | Middle: Pan | Wheel: Zoom | Esc: Cancel");
         const auto available = ImGui::GetContentRegionAvail(); const auto& io = ImGui::GetIO();
         if (available.x > 1 && available.y > 1) {
             Viewport.Resize(static_cast<int>(std::min(65536.0f,available.x*sapp_dpi_scale())),static_cast<int>(std::min(65536.0f,available.y*sapp_dpi_scale())));
@@ -568,25 +596,35 @@ void EditorUI::ViewportPanel() {
                 ImGui::EndDragDropTarget();
             }
             const bool modal = ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId) || dialog_ != Dialog::None || pending_ != Action::None;
-            if (io.AppFocusLost || modal) { controls_.Reset(); cameraDrag_ = false; }
+            TransformTools(imageMin.x,imageMin.y,available.x,available.y,!modal);
+            if (io.AppFocusLost || modal) {StopCameraEdit(true);}
             else {
                 auto camera = Document.GetScene().MainCamera;
                 ViewerInputEvent event; event.Shift = io.KeyShift;
                 bool changed = false;
                 for (int button = 1; button < 3; ++button) {
                     event.Button = button == 1 ? ViewerMouseButton::Left : ViewerMouseButton::Middle;
-                    if (hovered && ImGui::IsMouseClicked(button)) { event.Type = ViewerInputType::MouseDown; controls_.Process(camera,event,{},static_cast<int>(available.y)); cameraDrag_ = true; }
+                    if (hovered && !gizmoEditing_ && !gizmoSuppressed_ && ImGui::IsMouseClicked(button)) {if (!Document.IsEditing() && Report(Document.BeginEdit())) {cameraEditing_=true;}event.Type = ViewerInputType::MouseDown; controls_.Process(camera,event,{},static_cast<int>(available.y)); cameraDrag_ = true; }
                     if (ImGui::IsMouseReleased(button)) { event.Type = ViewerInputType::MouseUp; controls_.Process(camera,event,{},static_cast<int>(available.y)); }
                 }
                 if (cameraDrag_) { event.Type = ViewerInputType::MouseMove; event.DeltaX = io.MouseDelta.x; event.DeltaY = io.MouseDelta.y; changed = controls_.Process(camera,event,{},static_cast<int>(available.y)); }
                 if (!io.MouseDown[0] && !io.MouseDown[1] && !io.MouseDown[2]) { cameraDrag_ = false; }
-                if (hovered && io.MouseWheel != 0) { event.Type = ViewerInputType::Scroll; event.ScrollY = io.MouseWheel; changed = controls_.Process(camera,event,{},static_cast<int>(available.y)) || changed; }
+                if (hovered && !gizmoEditing_ && !gizmoSuppressed_ && io.MouseWheel != 0) { event.Type = ViewerInputType::Scroll; event.ScrollY = io.MouseWheel; changed = controls_.Process(camera,event,{},static_cast<int>(available.y)) || changed; }
                 if (changed) { Report(Document.SetCamera(camera)); }
-                if (hovered && !io.WantTextInput && ImGui::IsMouseClicked(0)) {try {Report(Document.Select(detail::PickSceneObject(Document.GetScene(),Viewport.Aspect(),(io.MousePos.x-imageMin.x)/available.x*2-1,1-(io.MousePos.y-imageMin.y)/available.y*2)));ImGui::SetWindowFocus();}catch (const std::exception& e) {ShowError({ErrorCode::InvalidArgument,e.what(),"Check the camera and visible model bounds.",{}});}}
-                if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput) {if (ImGui::IsKeyPressed(ImGuiKey_F,false)) {FrameScene();}if (ImGui::IsKeyPressed(ImGuiKey_Delete,false) && Document.Selection()) {deleteObject_=Document.Selection();}if (ImGui::IsKeyPressed(ImGuiKey_Escape,false)) {Report(Document.Select(NoObject));controls_.Reset();cameraDrag_=false;}}
+                if (!cameraDrag_ && cameraEditing_) {StopCameraEdit(false);}
+                if (hovered && !gizmoBlockInput_ && !io.WantTextInput && ImGui::IsMouseClicked(0)) {try {Report(Document.Select(detail::PickSceneObject(Document.GetScene(),Viewport.Aspect(),(io.MousePos.x-imageMin.x)/available.x*2-1,1-(io.MousePos.y-imageMin.y)/available.y*2)));ImGui::SetWindowFocus();}catch (const std::exception& e) {ShowError({ErrorCode::InvalidArgument,e.what(),"Check the camera and visible model bounds.",{}});}}
+                if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput && !gizmoEditing_ && !gizmoSuppressed_) {
+                    if (cameraEditing_) {if (ImGui::IsKeyPressed(ImGuiKey_Escape,false)) {StopCameraEdit(true);}}
+                    else {
+                        if (!io.KeyCtrl && !io.KeySuper) {if (ImGui::IsKeyPressed(ImGuiKey_W,false)) {transformTool_=0;}if (ImGui::IsKeyPressed(ImGuiKey_E,false)) {transformTool_=1;}if (ImGui::IsKeyPressed(ImGuiKey_R,false)) {transformTool_=2;}}
+                        if (ImGui::IsKeyPressed(ImGuiKey_F,false)) {FrameScene();}
+                        if (ImGui::IsKeyPressed(ImGuiKey_Delete,false) && Document.Selection()) {deleteObject_=Document.Selection();}
+                        if (ImGui::IsKeyPressed(ImGuiKey_Escape,false)) {Report(Document.Select(NoObject));controls_.Reset();cameraDrag_=false;}
+                    }
+                }
             }
-        } else { Viewport.Resize(0,0); }
-    } else { controls_.Reset(); cameraDrag_ = false; Viewport.Resize(0,0); }
+        } else {StopCameraEdit(true);if (gizmoEditing_) {if (Document.IsEditing()) {(void)Document.CancelEdit();}ImGuizmo::Enable(false);gizmoEditing_=false;}Viewport.Resize(0,0);}
+    } else {StopCameraEdit(true);if (gizmoEditing_) {if (Document.IsEditing()) {(void)Document.CancelEdit();}ImGuizmo::Enable(false);gizmoEditing_=false;}Viewport.Resize(0,0);}
     ImGui::End();
 }
 void EditorUI::DropFiles(const std::vector<std::filesystem::path>& paths,float x,float y) {
@@ -654,6 +692,7 @@ void EditorUI::Dialogs() {
     }
 }
 void EditorUI::Draw() {
+    ImGuizmo::BeginFrame();
     PollAssetJobs();
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
     Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();RenderDebugger();AnimationDebugger();Console(); Welcome();ImportPreview(); Dialogs();
