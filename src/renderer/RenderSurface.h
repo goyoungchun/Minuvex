@@ -36,6 +36,7 @@ private:
     std::unique_ptr<ShadowTargets> shadow_;
     std::unique_ptr<GraphicsTelemetry> telemetry_;
     FrameMonitor frameMonitor_;
+    std::optional<std::uint64_t> monitoredAssets_;
     std::optional<FrameStatistics> previousFrames_;
     std::string previousName_;
     QualityState state_;

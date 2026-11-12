@@ -223,7 +223,11 @@ void SmokeAfterDraw(Application& app) {
     if (app.Frames == 5) {const auto* inspector=ImGui::FindWindowByName("Asset Inspector");Require(inspector && inspector->Active && !inspector->Hidden,"Asset Inspector did not render its selected model information.");}
     if (app.QualitySmoke && app.Frames == 4) {app.CachedFrames=ui.Viewport.RenderedFrames();}
     if (app.QualitySmoke && app.Frames == 5) {Require(ui.Viewport.RenderedFrames() == app.CachedFrames,"Static Editor viewport did not reuse its on-demand image.");}
-    if (app.QualitySmoke && app.Frames == 6) {Require(ui.Viewport.RenderedFrames() > app.CachedFrames,"Scene edit failed to wake Editor viewport.");}
+    if (app.QualitySmoke && app.Frames == 6) {
+        Require(ui.Viewport.RenderedFrames() > app.CachedFrames,"Scene edit failed to wake Editor viewport.");
+        const auto* panel=ImGui::FindWindowByName("Quality Settings");const auto* performance=ImGui::FindWindowByName("Performance");
+        Require(panel && !panel->Hidden && performance && performance->Hidden && ui.SelectedQualityEstimate().has_value(),"Quality Settings did not analyze selected cost independently of the hidden Performance panel.");
+    }
     if (app.Frames == 7) {
         Require(ui.Viewport.Texture().id != 0,"Viewport did not resume after suspension.");
         // New/Open/Quit guard is also exercised in the real ImGui frame.
@@ -256,6 +260,10 @@ void Frame(void* user) noexcept {
         if (app.QualitySmoke && app.Frames == 6) {
             const auto prior=app.UI->Viewport.ColorImage().id;auto p=app.UI->Viewport.Quality().Requested;p.AllowFallback=false;p.Overrides.Shadow=lv::ShadowMode::Pcss;
             Require(!app.UI->ApplyQualityProfile(p) && prior == app.UI->Viewport.ColorImage().id,"Editor quality rejection did not retain GPU resources.");
+            const auto applied=app.UI->Viewport.Quality().Requested;const auto dirty=app.UI->Document.IsDirty();
+            auto draft=applied;draft.Overrides.TargetFps=120;app.UI->SetQualityDraft(draft);
+            Require(app.UI->QualityDraft() == draft && app.UI->Viewport.Quality().Requested == applied,"Editing Custom draft applied quality prematurely.");
+            app.UI->ResetQualityDraft();Require(app.UI->QualityDraft() == applied && app.UI->Document.IsDirty() == dirty && prior == app.UI->Viewport.ColorImage().id,"Reset to applied changed Scene dirty state or GPU resources.");
             lv::Transform moved;moved.Position.X=-1.2f;Require(app.UI->Document.SetTransform(app.UI->Document.Selection(),moved));
         }
         if (app.Smoke && app.Frames == 3) {
@@ -268,6 +276,7 @@ void Frame(void* user) noexcept {
         }
         if (app.Smoke && app.Frames == 5) {ImGui::SetWindowFocus("Asset Inspector");}
         if (app.TelemetrySmoke && app.Frames == 1) {ImGui::SetWindowFocus("Performance");}
+        if (app.QualitySmoke && app.Frames == 6) {ImGui::SetWindowFocus("Quality Settings");}
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());
         if (app.Smoke) { SmokeAfterDraw(app); }

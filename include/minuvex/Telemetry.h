@@ -9,16 +9,26 @@ struct FrameStatistics {
     Metric<double> Fps, AverageFps, AverageFrameMs, P95FrameMs, CpuFrameMs, AverageCpuMs, P95CpuMs;
     Metric<double> GpuFrameMs{std::nullopt, MetricStatus::Unsupported, "GPU timestamp collection unavailable"};
     std::uint64_t DrawCalls = 0, Triangles = 0;
+    std::size_t GpuSampleCount = 0;
+    Metric<double> AverageGpuMs{std::nullopt, MetricStatus::Unsupported, "GPU timestamps unavailable"};
+    Metric<double> P95GpuMs{std::nullopt, MetricStatus::Unsupported, "GPU timestamps unavailable"};
+    double CapturedAtSeconds = 0;
+    std::optional<double> LastCpuSampleAtSeconds, LastGpuSampleAtSeconds;
 };
-// Bounded rolling window (240 submissions). Cadence includes pacing/idle; CPU time excludes both.
+// Bounded CPU/GPU windows (240 each), restarted on submissions after >2s idle.
+// Cadence includes pacing; CPU time excludes pacing and presentation. Single-thread owned.
 class FrameMonitor {
 public:
     void Record(double now, double cpuMs, std::uint64_t drawCalls, std::uint64_t triangles);
+    // Submission clock, not query completion time. Record each asynchronous result once, in order.
+    void RecordGpu(double submittedAt, double gpuMs);
     FrameStatistics Snapshot(double now) const;
     void Reset() noexcept;
 private:
     struct Sample { double Time, Cpu; std::uint64_t Draws, Triangles; };
     std::vector<Sample> samples_;
+    struct GpuSample { double Time, Ms; };
+    std::vector<GpuSample> gpuSamples_;
     std::uint64_t total_ = 0;
 };
 struct ResourceCost {
@@ -42,10 +52,11 @@ struct ProfileAssessment {
     ProfileSuitability Suitability = ProfileSuitability::Unsupported;
     std::optional<QualityEstimate> Estimate;
     std::string Reason;
+    bool PerformanceValidated = false; // Recent CPU/GPU window for this exact effective preset only.
 };
 struct QualityRecommendation {
     std::optional<QualityPreset> Preset;
-    bool PerformanceValidated = false; // Initial policy/CPU pressure cannot prove GPU performance.
+    bool PerformanceValidated = false; // Observed scene work within target; excludes GUI/presentation.
     std::string Reason;
     std::vector<ProfileAssessment> Profiles;
 };

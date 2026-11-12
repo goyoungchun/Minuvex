@@ -106,9 +106,12 @@ bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::a
     if (!targets_ || !renderer_ || !state_.Effective || (!bypassPacing && !Due(now))) {return false;}
     auto signature=SceneRenderSignature(scene);for (float value:clear) {signature^=std::bit_cast<std::uint32_t>(value);signature*=1099511628211ull;}
     if (!scheduler_.NeedsRender(state_.Effective->OnDemand,signature,force || bypassPacing || SceneHasActiveAnimation(scene))) {return false;}
-    const auto cpuStart=RenderClockSeconds();telemetry_->BeginGpu();
+    const auto cpuStart=RenderClockSeconds();telemetry_->BeginGpu(cpuStart,frameMonitor_);
     struct EndGpu {GraphicsTelemetry& Telemetry;~EndGpu() {Telemetry.EndGpu();}} gpuScope{*telemetry_};
-    renderer_->Prepare(scene);ShadowSampling shadow;
+    renderer_->Prepare(scene);
+    const auto assets=renderer_->GetStats().ResidentAssetSignature;
+    if (monitoredAssets_ && *monitoredAssets_ != assets) {frameMonitor_.Reset();telemetry_->ResetGpu();}
+    monitoredAssets_=assets;ShadowSampling shadow;
     if (shadow_) {shadow.ViewProjection=renderer_->ShadowViewProjection(scene);shadow.Texture=shadow_->Texture;shadow.Sampler=shadow_->Sampler;shadow.Mode=state_.Effective->Shadow;shadow.Resolution=state_.Effective->ShadowResolution;sg_pass p{};p.attachments.colors[0]=shadow_->ColorView;p.attachments.depth_stencil=shadow_->DepthView;p.action.colors[0].load_action=SG_LOADACTION_CLEAR;p.action.colors[0].clear_value={1,1,1,1};p.action.depth.load_action=SG_LOADACTION_CLEAR;p.action.depth.clear_value=1;sg_begin_pass(p);try {renderer_->DrawShadow(scene,shadow.ViewProjection);}catch (...) {sg_end_pass();throw;}sg_end_pass();}
     sg_pass pass{};pass.attachments.colors[0]=targets_->Attachment;pass.attachments.resolves[0]=targets_->Resolve;pass.attachments.depth_stencil=targets_->DepthAttachment;
     pass.action.colors[0].load_action=SG_LOADACTION_CLEAR;pass.action.colors[0].clear_value={clear[0],clear[1],clear[2],clear[3]};pass.action.depth.load_action=SG_LOADACTION_CLEAR;pass.action.depth.clear_value=1;
@@ -123,12 +126,14 @@ void RenderSurface::Present() const {
     sg_apply_pipeline(presenter_->Pipeline);sg_apply_bindings(bindings);sg_draw(0,3,1);
 }
 TelemetrySnapshot RenderSurface::Telemetry(double now) {
-    TelemetrySnapshot result;result.CapturedAtSeconds=now;result.Live=sg_isvalid();result.Quality=state_;result.Frames=frameMonitor_.Snapshot(now);
-    if (telemetry_) {result.Hardware=telemetry_->Hardware();result.System=telemetry_->Sample(now);result.Frames.GpuFrameMs=telemetry_->GpuTime();}
+    TelemetrySnapshot result;result.CapturedAtSeconds=now;result.Live=sg_isvalid();result.Quality=state_;
+    if (telemetry_) {result.Hardware=telemetry_->Hardware();result.System=telemetry_->Sample(now,frameMonitor_);}
+    result.Frames=frameMonitor_.Snapshot(now);
+    if (telemetry_) {result.Frames.GpuFrameMs=telemetry_->GpuTime();if (!result.Frames.GpuSampleCount) {result.Frames.AverageGpuMs=result.Frames.P95GpuMs=result.Frames.GpuFrameMs;}}
     const auto stats=Stats();result.ResidentAssetSignature=stats.ResidentAssetSignature;result.Resident.TextureBytes=stats.LogicalTextureBytes;result.Resident.BufferBytes=stats.LogicalBufferBytes;
     if (targets_ && state_.Effective) {result.Resident.RenderTargetBytes=RenderTargetBytes(*state_.Effective,state_.RenderWidth,state_.RenderHeight);}
     result.Resident.TotalBytes=result.Resident.TextureBytes+result.Resident.BufferBytes+result.Resident.RenderTargetBytes;
     result.PreviousQualityFrames=previousFrames_;result.PreviousQualityName=previousName_;return result;
 }
-void RenderSurface::Clear() noexcept {targets_.reset();shadow_.reset();renderer_.reset();presenter_.reset();telemetry_.reset();frameMonitor_.Reset();previousFrames_.reset();previousName_.clear();state_.Effective.reset();state_.Applied=false;state_.RenderWidth=state_.RenderHeight=0;scheduler_.Invalidate();}
+void RenderSurface::Clear() noexcept {targets_.reset();shadow_.reset();renderer_.reset();presenter_.reset();telemetry_.reset();frameMonitor_.Reset();monitoredAssets_.reset();previousFrames_.reset();previousName_.clear();state_.Effective.reset();state_.Applied=false;state_.RenderWidth=state_.RenderHeight=0;scheduler_.Invalidate();}
 }

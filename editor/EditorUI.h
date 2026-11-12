@@ -38,6 +38,10 @@ public:
     void ShowError(const Error& error,ObjectId object=NoObject);
     void LoadQualityProfile(const std::filesystem::path& path);
     Result<void> ApplyQualityProfile(const QualityProfile& profile);
+    const QualityProfile& QualityDraft() const noexcept {return qualityDraft_;}
+    void SetQualityDraft(QualityProfile profile) {qualityDraft_=std::move(profile);}
+    void ResetQualityDraft() {qualityDraft_=Viewport.Quality().Requested;}
+    const std::optional<QualityEstimate>& SelectedQualityEstimate() const noexcept {return selectedEstimate_;}
     // Queue from UI actions after Image commands exist; commit at the next Draw entry.
     void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
@@ -75,6 +79,8 @@ private:
     QualityRecommendation recommendation_;
     std::string estimateError_;
     double lastAnalysis_ = -1;
+    TelemetrySnapshot analysisSnapshot_;
+    int analysisFrame_=-1,analysisWidth_=0,analysisHeight_=0;
     ObjectId boneObject_ = NoObject, poseObject_ = NoObject;
     JointId bone_ = NoJoint;
     detail::CameraController controls_;
@@ -96,6 +102,8 @@ private:
     void AnimationControls();
     void QualitySettings();
     void PerformancePanel();
+    const TelemetrySnapshot& RefreshQualityAnalysis();
+    void QualityOverview();
     void AssetBrowser();
     void AssetInspector();
     void ImportPreview();

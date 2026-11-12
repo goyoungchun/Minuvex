@@ -25,6 +25,11 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
         add("system","processCpu",m.ProcessCpuPercent,"percent");add("gpu","utilization",m.GpuUtilizationPercent,"percent");
         add("frame","fps",f.Fps,"fps");add("frame","averageFps",f.AverageFps,"fps");add("frame","averageFrame",f.AverageFrameMs,"ms");add("frame","p95Frame",f.P95FrameMs,"ms");
         add("frame","cpuFrame",f.CpuFrameMs,"ms");add("frame","averageCpu",f.AverageCpuMs,"ms");add("frame","p95Cpu",f.P95CpuMs,"ms");add("frame","gpuFrame",f.GpuFrameMs,"ms");
+        add("frame","averageGpu",f.AverageGpuMs,"ms");add("frame","p95Gpu",f.P95GpuMs,"ms");
+        add("frame","cpuSampleCount",Metric<std::uint64_t>{f.SampleCount,MetricStatus::Measured,"CPU rolling window"},"count");
+        add("frame","gpuSampleCount",Metric<std::uint64_t>{f.GpuSampleCount,MetricStatus::Measured,"Unique valid asynchronous GPU results"},"count");
+        if (!std::isfinite(f.CapturedAtSeconds) || f.CapturedAtSeconds < 0) {throw std::invalid_argument("Invalid frame snapshot timestamp.");}
+        for (const auto t:{f.LastCpuSampleAtSeconds,f.LastGpuSampleAtSeconds}) {if (t && (!std::isfinite(*t) || *t < 0 || *t > f.CapturedAtSeconds)) {throw std::invalid_argument("Invalid frame sample timestamp.");}}
         add("frame","drawCalls",Metric<std::uint64_t>{f.DrawCalls,f.SampleCount ? MetricStatus::Measured:MetricStatus::Estimated,"Latest submitted scene draw count"},"count");
         add("frame","triangles",Metric<std::uint64_t>{f.Triangles,f.SampleCount ? MetricStatus::Measured:MetricStatus::Estimated,"Latest submitted indexed triangles"},"count");
         const char* logical="Engine logical allocation estimate; excludes GUI/swapchain/driver overhead and deferred deletion";
@@ -37,13 +42,17 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
         const Json hardware{{"cpu",h.CpuName},{"gpu",h.GpuName},{"os",h.OperatingSystem},{"osVersion",h.OsVersion},{"architecture",h.Architecture},{"logicalProcessors",h.LogicalProcessors},{"physicalCores",h.PhysicalCores},{"activeGraphicsDevice",h.ActiveGraphicsDevice},{"backend",static_cast<int>(h.Backend)},{"memoryKind",static_cast<int>(h.MemoryKind)}};
         Json root{{"format","MinuvexTelemetry"},{"version",1},{"timestampSeconds",m.TimestampSeconds},{"hardware",hardware},{"cpuScope",s.CpuScope},{"quality",{{"name",s.Quality.Requested.Name},{"basePreset",static_cast<int>(s.Quality.Requested.Base)},{"applied",s.Quality.Applied},{"width",s.Quality.RenderWidth},{"height",s.Quality.RenderHeight}}},{"sampleCount",f.SampleCount},{"totalRenderedFrames",f.TotalRenderedFrames},{"metrics",metrics}};
         root["capturedAtSeconds"]=s.CapturedAtSeconds;root["live"]=s.Live;
+        root["frameWindow"]={{"capturedAtSeconds",f.CapturedAtSeconds},{"gpuSampleCount",f.GpuSampleCount},{"lastCpuSampleAtSeconds",f.LastCpuSampleAtSeconds ? Json(*f.LastCpuSampleAtSeconds):Json(nullptr)},{"lastGpuSampleAtSeconds",f.LastGpuSampleAtSeconds ? Json(*f.LastGpuSampleAtSeconds):Json(nullptr)}};
         root["hardware"]["gpuVendor"]=h.GpuVendor;root["hardware"]["gpuVendorId"]=h.GpuVendorId;root["hardware"]["gpuDeviceId"]=h.GpuDeviceId;
         root["hardware"]["capabilities"]={{"graphicsAvailable",h.Capabilities.GraphicsAvailable},{"sampleCounts",h.Capabilities.SampleCounts},{"maxRenderSize",h.Capabilities.MaxRenderSize},{"maxTextureSize",h.Capabilities.MaxTextureSize},{"maxAnisotropy",h.Capabilities.MaxAnisotropy}};
         root["hardware"]["capabilities"]["shadowMapping"]=h.Capabilities.ShadowMapping;root["hardware"]["capabilities"]["hdrPostProcessing"]=h.Capabilities.HdrPostProcessing;root["hardware"]["capabilities"]["hdrSampleCounts"]=h.Capabilities.HdrSampleCounts;
         root["hardware"]["formats"]=Json::array();for (const auto& formatInfo:h.Formats) {root["hardware"]["formats"].push_back({{"name",formatInfo.Name},{"sampled",formatInfo.Sampled},{"filtered",formatInfo.Filtered},{"renderTarget",formatInfo.RenderTarget},{"msaa",formatInfo.Msaa}});}
         root["quality"]["effective"]=nullptr;
-        if (s.Quality.Effective) {const auto& e=*s.Quality.Effective;root["quality"]["effective"]={{"msaaSamples",e.MsaaSamples},{"maxTextureSize",e.MaxTextureSize},{"anisotropy",e.Anisotropy},{"targetFps",e.TargetFps},{"onDemand",static_cast<int>(e.OnDemand)},{"lighting",static_cast<int>(e.Lighting)},{"frustumCulling",e.FrustumCulling}};}
-        if (s.Quality.Effective) {const auto& e=*s.Quality.Effective;root["quality"]["effective"]["shadow"]=static_cast<int>(e.Shadow);root["quality"]["effective"]["shadowResolution"]=e.ShadowResolution;root["quality"]["effective"]["postProcessing"]=e.PostProcessing;}
+        const auto settings=[](const RenderSettings& e) {if (!std::isfinite(e.ResolutionScale) || !std::isfinite(e.LodBias)) {throw std::invalid_argument("Quality telemetry settings must be finite.");}return Json{{"resolution",static_cast<int>(e.Resolution)},{"resolutionScale",e.ResolutionScale},{"fixedWidth",e.FixedWidth},{"fixedHeight",e.FixedHeight},{"maxRenderHeight",e.MaxRenderHeight},{"msaaSamples",e.MsaaSamples},{"textures",static_cast<int>(e.Textures)},{"maxTextureSize",e.MaxTextureSize},{"anisotropy",e.Anisotropy},{"targetFps",e.TargetFps},{"onDemand",static_cast<int>(e.OnDemand)},{"lighting",static_cast<int>(e.Lighting)},{"frustumCulling",e.FrustumCulling},{"shadow",static_cast<int>(e.Shadow)},{"shadowResolution",e.ShadowResolution},{"lod",e.Lod},{"lodBias",e.LodBias},{"postProcessing",e.PostProcessing}};};
+        root["quality"]["requested"]=settings(s.Quality.RequestedSettings);
+        if (s.Quality.Effective) {root["quality"]["effective"]=settings(*s.Quality.Effective);}
+        root["quality"]["custom"]=s.Quality.Requested.IsCustom();root["quality"]["allowFallback"]=s.Quality.Requested.AllowFallback;
+        root["quality"]["adjustments"]=Json::array();for (const auto& a:s.Quality.Adjustments) {root["quality"]["adjustments"].push_back({{"field",a.Field},{"reason",a.Reason}});}
         const auto validated=root.dump(2); // Validate UTF-8 before any destination modification.
         if (format == TelemetryFormat::Json) {detail::WriteTextFile(validated+'\n',path,1024*1024);}
         else {
@@ -55,6 +64,7 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
             csv+="snapshot,capturedAtSeconds,"+root["capturedAtSeconds"].dump()+",,seconds,steady clock\r\n";
             csv+="snapshot,live,"+root["live"].dump()+",,,\r\n";
             csv+="snapshot,cpuScope,"+Csv(s.CpuScope)+",,,\r\n";
+            for (const auto& [key,value]:root["frameWindow"].items()) {csv+="frameWindow,"+Csv(key)+","+Csv(value.dump())+",,,\r\n";}
             for (const auto& row:metrics) {csv+=Csv(row["section"].get<std::string>())+","+Csv(row["name"].get<std::string>())+","+Csv(row["value"].is_null() ? "":row["value"].dump())+","+Csv(row["status"].get<std::string>())+","+Csv(row["unit"].get<std::string>())+","+Csv(row["source"].get<std::string>())+"\r\n";}
             detail::WriteTextFile(csv,path,1024*1024);
         }

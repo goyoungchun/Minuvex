@@ -9,13 +9,13 @@ public:
     GraphicsTelemetry();
     ~GraphicsTelemetry();
     const HardwareInfo& Hardware() const;
-    SystemSample Sample(double now);
-    void BeginGpu();
+    SystemSample Sample(double now, FrameMonitor& frames);
+    void BeginGpu(double now, FrameMonitor& frames);
     void EndGpu() noexcept;
     void ResetGpu();
     Metric<double> GpuTime() const;
 private:
-    void CollectGpu();
+    void CollectGpu(FrameMonitor& frames);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

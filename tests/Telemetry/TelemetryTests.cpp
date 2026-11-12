@@ -14,11 +14,18 @@ void Frames() {
     m.Record(1.02,4,6,24);m.Record(1.04,6,7,36);auto s=m.Snapshot(1.04);
     Check(std::abs(*s.AverageFps.Value-50) < .001 && std::abs(*s.AverageFrameMs.Value-20) < .001,"FPS uses elapsed submission cadence");
     Check(*s.AverageCpuMs.Value == 4 && *s.P95CpuMs.Value == 6 && s.DrawCalls == 7 && s.Triangles == 36,"CPU mean, P95 and latest rendered counters");
+    m.RecordGpu(1,1);m.RecordGpu(1.02,2);m.RecordGpu(1.04,3);s=m.Snapshot(1.04);
+    Check(s.GpuSampleCount == 3 && *s.AverageGpuMs.Value == 2 && *s.P95GpuMs.Value == 3 && s.LastGpuSampleAtSeconds == 1.04,"GPU statistics count distinct submissions and retain submission time");
+    Rejects([&]{m.RecordGpu(1.04,2);},"duplicate GPU result rejected");Rejects([&]{m.RecordGpu(2,-1);},"negative GPU duration rejected");
+    Rejects([&]{m.Snapshot(1.03);},"snapshot cannot precede asynchronous submission time");
     Check(*m.Snapshot(4).Fps.Value == 0 && *m.Snapshot(4).AverageFps.Value > 0,"idle live FPS drops to zero while history remains");
     Rejects([&]{m.Record(1.03,1,0,0);},"backwards frame time rejected");Rejects([&]{m.Record(1.04,1,0,0);},"duplicate frame time rejected");
     Rejects([&]{m.Record(2,-1,0,0);},"negative CPU time rejected");Rejects([&]{m.Snapshot(std::numeric_limits<double>::quiet_NaN());},"nonfinite sample clock rejected");
     for (int i=0;i<300;++i) {m.Record(2+i*.01,1,0,0);}s=m.Snapshot(5);
-    Check(s.SampleCount == 240 && s.TotalRenderedFrames == 303,"bounded rolling history retains session total");m.Reset();Check(m.Snapshot(0).SampleCount == 0 && m.Snapshot(0).TotalRenderedFrames == 0,"quality history reset separates measurement windows");
+    Check(s.SampleCount == 240 && s.TotalRenderedFrames == 303,"bounded rolling history retains session total");
+    for (int i=0;i<300;++i) {m.RecordGpu(2+i*.01,2);}Check(m.Snapshot(5).GpuSampleCount == 240,"GPU rolling storage is bounded independently of CPU submissions");
+    m.Record(8,1,0,0);m.RecordGpu(8,1);s=m.Snapshot(8);Check(s.SampleCount == 1 && s.GpuSampleCount == 1 && s.TotalRenderedFrames == 304,"resuming after idle discards stale windows without losing frame total");
+    m.Reset();Check(m.Snapshot(0).SampleCount == 0 && m.Snapshot(0).GpuSampleCount == 0 && m.Snapshot(0).TotalRenderedFrames == 0,"quality history reset separates CPU and GPU measurement windows");
 }
 void Resources() {
     const auto caps=Caps();lv::Scene scene;auto p=lv::MakeQualityProfile(lv::QualityPreset::Medium);auto e=lv::EstimateQualityResources(p,caps,scene,100,50);
@@ -56,11 +63,21 @@ void Recommendations() {
     system.GpuMemoryUsage.Value=*system.GpuMemoryBudget.Value;r=lv::RecommendQuality(caps,system,scene,1280,720);Check(!r.Preset && r.Profiles[0].Suitability == lv::ProfileSuitability::PerformanceRisk,"exhausted OS budget yields risk, not imaginary available VRAM");
     system={};caps.SampleCounts=caps.HdrSampleCounts=1u<<1;r=lv::RecommendQuality(caps,system,scene,1280,720);Check(r.Preset == lv::QualityPreset::Medium && r.Profiles[2].Suitability == lv::ProfileSuitability::Unsupported,"unsupported High never silently recommended with fallback");
     system.AvailableSystemMemory={100ull*1024*1024,lv::MetricStatus::Measured,"test RAM"};r=lv::RecommendQuality(caps,system,scene,1280,720);Check(r.Preset == lv::QualityPreset::Low,"low available RAM marks higher presets as risk");
-    system={};auto current=lv::EstimateQualityResources(lv::QualityProfile{},caps,scene,1280,720);lv::FrameStatistics f;f.SampleCount=60;f.P95CpuMs={25,lv::MetricStatus::Measured,"test CPU P95"};
+    system={};auto current=lv::EstimateQualityResources(lv::QualityProfile{},caps,scene,1280,720);current.Value().Quality.Applied=true;
+    lv::FrameMonitor monitor;for (int i=0;i<60;++i) {monitor.Record(i*.016,25,0,0);monitor.RecordGpu(i*.016,25);}auto f=monitor.Snapshot(1);f.GpuSampleCount=0;
     r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Low && !r.PerformanceValidated,"sustained measured CPU cost over target suggests lower preset without GPU guarantee");
     f.SampleCount=2;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Medium,"insufficient timing samples do not trigger CPU pressure policy");
-    f.SampleCount=60;f.P95CpuMs={};f.GpuFrameMs={25,lv::MetricStatus::Measured,"test GPU timestamp"};r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Low && !r.PerformanceValidated,"measured GPU cost above target flags current/higher presets for testing");
-    f.GpuFrameMs.Status=lv::MetricStatus::Unsupported;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Medium,"unsupported GPU counter is excluded from recommendation evidence");
+    f.SampleCount=60;f.P95CpuMs={};f.GpuSampleCount=1;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Medium,"one GPU result cannot stand for sustained pressure despite many CPU samples");
+    f.GpuSampleCount=60;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Low && !r.PerformanceValidated,"measured GPU P95 above target flags current/higher presets for testing");
+    f.P95GpuMs.Status=lv::MetricStatus::Unsupported;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Medium,"unsupported GPU counter is excluded from recommendation evidence");
+    f=monitor.Snapshot(4);r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(r.Preset == lv::QualityPreset::Medium && !r.PerformanceValidated,"idle historical CPU/GPU pressure cannot drive a live recommendation");
+    f=monitor.Snapshot(1);f.P95CpuMs.Value=2;f.P95GpuMs.Value=3;
+    system.GpuMemoryBudget={1024ull*1024*1024,lv::MetricStatus::Measured,"test budget"};system.GpuMemoryUsage={0,lv::MetricStatus::Measured,"test usage"};
+    caps=Caps();r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);
+    Check(r.Preset == lv::QualityPreset::Medium && r.PerformanceValidated && r.Profiles[1].PerformanceValidated && !r.Profiles[2].PerformanceValidated,"retain an observed exact preset rather than claiming an unmeasured High profile");
+    auto custom=lv::QualityProfile{};custom.Overrides.MsaaSamples=2;auto customCurrent=lv::EstimateQualityResources(custom,caps,scene,1280,720);customCurrent.Value().Quality.Applied=true;
+    r=lv::RecommendQuality(caps,system,scene,1280,720,&customCurrent.Value(),&f);Check(!r.PerformanceValidated,"Custom performance does not validate its base preset with different effective settings");
+    ++current.Value().AssetSignature;r=lv::RecommendQuality(caps,system,scene,1280,720,&current.Value(),&f);Check(!r.PerformanceValidated,"changed scene assets invalidate prior preset evidence");
     caps.GraphicsAvailable=false;r=lv::RecommendQuality(caps,system,scene,1280,720);Check(!r.Preset && r.Profiles.size() == 3,"no graphics yields explicit unsupported assessments");
 }
 void SystemAndExport() {
@@ -75,13 +92,17 @@ void SystemAndExport() {
     Check(!monitor.Sample(.5).ProcessCpuPercent.Value,"backward clock rebases the process sampler");Rejects([&]{monitor.Sample(-1);},"negative OS sample clock rejected");
     lv::Viewer viewer;Check(!viewer.GetTelemetry(),"Viewer telemetry is unavailable before its runtime starts");bool wrong=false;std::thread thread([&]{auto r=viewer.GetTelemetry();wrong=!r && r.Error().Code == lv::ErrorCode::WrongThread;});thread.join();Check(wrong,"Viewer telemetry enforces owner thread");
     TemporaryDirectory temp;lv::TelemetrySnapshot s;s.Hardware=hardware;s.System=next;s.Hardware.CpuName="테스트,\"CPU\"\nsecond line";
+    lv::FrameMonitor frames;frames.Record(1,2,1,1);frames.RecordGpu(1,3);s.Frames=frames.Snapshot(1);s.CapturedAtSeconds=1;
+    s.Quality.RequestedSettings.MsaaSamples=4;s.Quality.Effective=lv::RenderSettings{};s.Quality.Adjustments.push_back({"MSAA","test explicit fallback"});
     const auto json=temp.File("telemetry.json"),csv=temp.File("telemetry.csv");Check(bool(lv::SaveTelemetry(s,json)),"telemetry JSON export succeeds without Editor");
     const auto root=nlohmann::json::parse(Read(json));Check(root["format"] == "MinuvexTelemetry" && root["hardware"]["cpu"] == s.Hardware.CpuName,"export preserves UTF-8 metadata");
     Check(root["metrics"][0].contains("status") && root["metrics"][0].contains("source") && root["metrics"][0].contains("unit"),"export retains metric reliability, source and units");
+    Check(root["frameWindow"]["gpuSampleCount"] == 1 && root["frameWindow"]["lastGpuSampleAtSeconds"] == 1 && root["quality"]["requested"]["msaaSamples"] == 4 && root["quality"]["effective"]["msaaSamples"] == 1 && root["quality"]["adjustments"].size() == 1,"export preserves GPU evidence and requested/effective fallback differences");
     Check(bool(lv::SaveTelemetry(s,csv,lv::TelemetryFormat::Csv)) && Read(csv).find("\"테스트,\"\"CPU\"\"\nsecond line\"") != std::string::npos,"CSV quotes commas, quotes and newlines");
     const auto before=Read(json);s.Frames.Fps={std::numeric_limits<double>::infinity(),lv::MetricStatus::Measured,"bad"};Check(!lv::SaveTelemetry(s,json) && Read(json) == before,"invalid values leave previous export intact");
     s.Frames.Fps={0,lv::MetricStatus::Unsupported,"bad"};Check(!lv::SaveTelemetry(s,json),"unsupported numeric zero cannot masquerade as a measurement");
-    s.Frames.Fps={};const auto fail=lv::SaveTelemetry(s,temp.File("missing/telemetry.json"));Check(!fail && fail.Error().Code == lv::ErrorCode::TelemetryIo,"export IO failure carries distinct error and path");
+    s.Frames.Fps={};s.Frames.LastGpuSampleAtSeconds=2;Check(!lv::SaveTelemetry(s,json) && Read(json) == before,"future GPU sample metadata is rejected before replacing export");s.Frames.LastGpuSampleAtSeconds=1;
+    const auto fail=lv::SaveTelemetry(s,temp.File("missing/telemetry.json"));Check(!fail && fail.Error().Code == lv::ErrorCode::TelemetryIo,"export IO failure carries distinct error and path");
     std::size_t files=0;for (const auto& entry:std::filesystem::directory_iterator(temp.Path)) {(void)entry;++files;}Check(files == 2,"failed atomic export leaves no temporary files");
 }
 }

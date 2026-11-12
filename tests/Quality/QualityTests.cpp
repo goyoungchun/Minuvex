@@ -13,7 +13,7 @@ void Policy() {
     auto low=lv::MakeQualityProfile(lv::QualityPreset::Low),medium=lv::MakeQualityProfile(lv::QualityPreset::Medium),high=lv::MakeQualityProfile(lv::QualityPreset::High);
     auto l=lv::ExpandQuality(low),m=lv::ExpandQuality(medium),h=lv::ExpandQuality(high);
     Check(l && l.Value().MaxRenderHeight == 720 && l.Value().TargetFps == 30 && l.Value().MaxTextureSize == 512 && l.Value().MsaaSamples == 1,"Low profile reduces render/texture load without disabling skinning");
-    Check(m && m.Value().MaxRenderHeight == 1080 && m.Value().MaxTextureSize == 2048 && m.Value().TargetFps == 60 && m.Value().Lighting == lv::LightingMode::Advanced && m.Value().Shadow == lv::ShadowMode::Pcf && !m.Value().PostProcessing,"Medium enables advanced lighting and PCF without HDR");
+    Check(m && m.Value().MaxRenderHeight == 1080 && m.Value().MaxTextureSize == 2048 && m.Value().TargetFps == 60 && m.Value().Lighting == lv::LightingMode::Advanced && m.Value().Shadow == lv::ShadowMode::Basic && !m.Value().PostProcessing,"Medium enables standard material lighting and Basic shadow without HDR");
     Check(h && h.Value().MsaaSamples == 4 && h.Value().Anisotropy == 8 && h.Value().MaxTextureSize == 8192 && h.Value().PostProcessing && h.Value().ShadowResolution == 2048,"High enables HDR, larger shadows and MSAA/texture/sampling features");
     Check(!low.IsCustom() && !medium.IsCustom() && !high.IsCustom(),"Custom is explicit overrides, not a fourth base preset");
     low.Overrides.TargetFps=0;low.Overrides.FrustumCulling=false;Check(low.IsCustom() && lv::ExpandQuality(low).Value().TargetFps == 0 && !lv::ExpandQuality(low).Value().FrustumCulling,"zero/false overrides are retained");

@@ -424,8 +424,12 @@ void EditorUI::QualitySettings() {
     if (!quality_) {return;}
     if (ImGui::Begin("Quality Settings",&quality_)) {
         ImGui::InputText("Profile name",&qualityDraft_.Name);
-        int base=static_cast<int>(qualityDraft_.Base);
-        if (ImGui::Combo("Base preset",&base,"Low\0Medium\0High\0")) {qualityDraft_=MakeQualityProfile(static_cast<QualityPreset>(base));}
+        int mode=qualityDraft_.IsCustom() ? 3:static_cast<int>(qualityDraft_.Base);
+        if (ImGui::Combo("Profile",&mode,"Low\0Medium\0High\0Custom\0")) {
+            if (mode < 3) {qualityDraft_=MakeQualityProfile(static_cast<QualityPreset>(mode));}
+            else {const auto s=ExpandQuality(qualityDraft_);if (s) {qualityDraft_.Name="Custom";qualityDraft_.Overrides.TargetFps=s.Value().TargetFps;}}
+        }
+        if (qualityDraft_.IsCustom()) {int base=static_cast<int>(qualityDraft_.Base);if (ImGui::Combo("Inherit preset",&base,"Low\0Medium\0High\0")) {qualityDraft_.Base=static_cast<QualityPreset>(base);}}
         const auto expanded=ExpandQuality(qualityDraft_);
         if (expanded) {
             auto s=expanded.Value();auto& o=qualityDraft_.Overrides;
@@ -448,12 +452,15 @@ void EditorUI::QualitySettings() {
             int shadow=static_cast<int>(s.Shadow);if (ImGui::Combo("Sun shadow",&shadow,"Off\0Basic\0PCF (3x3)\0PCSS (unavailable)\0")) {o.Shadow=static_cast<ShadowMode>(shadow);}
             int shadowSize=s.ShadowResolution == 512 ? 0:s.ShadowResolution == 1024 ? 1:s.ShadowResolution == 2048 ? 2:3;if (ImGui::Combo("Shadow size",&shadowSize,"512\0 1024\0 2048\0 4096\0")) {o.ShadowResolution=512<<shadowSize;}
             if (ImGui::Checkbox("HDR + FXAA + Reinhard",&s.PostProcessing)) {o.PostProcessing=s.PostProcessing;}
+            if (ImGui::Checkbox("LOD (unavailable)",&s.Lod)) {o.Lod=s.Lod;}
+            if (ImGui::SliderFloat("LOD bias (unavailable)",&s.LodBias,-4,4,"%.2f")) {o.LodBias=s.LodBias;}
             ImGui::TextWrapped("PCSS and LOD are not implemented. Shadow applies to the sun only.");
         } else {ImGui::TextWrapped("%s",expanded.Error().Message.c_str());}
         ImGui::Checkbox("Allow supported fallback",&qualityDraft_.AllowFallback);
         ImGui::TextUnformatted(qualityDraft_.IsCustom() ? "Custom overrides":"Preset defaults");
         if (ImGui::Button("Clear overrides")) {qualityDraft_.Overrides={};}
         ImGui::SameLine();if (ImGui::Button("Apply")) {if (Report(Viewport.SetQuality(qualityDraft_,Document.GetScene()))) {status_="Quality applied";}}
+        ImGui::SameLine();if (ImGui::Button("Reset to applied")) {ResetQualityDraft();}
         if (ImGui::Button("Save profile...")) {FileDialog(Dialog::QualitySave);}ImGui::SameLine();if (ImGui::Button("Load profile...")) {FileDialog(Dialog::QualityLoad);}
         const auto& q=Viewport.Quality();ImGui::Separator();
         ImGui::Text("Applied: %s",q.Applied ? "yes":"pending visible viewport");
@@ -463,6 +470,9 @@ void EditorUI::QualitySettings() {
             ImGui::Text("MSAA requested / effective: %d / %d",q.RequestedSettings.MsaaSamples,effective.MsaaSamples);
             ImGui::Text("Texture limit: %d / %d",q.RequestedSettings.MaxTextureSize,effective.MaxTextureSize);
             ImGui::Text("Anisotropy: %d / %d",q.RequestedSettings.Anisotropy,effective.Anisotropy);
+            ImGui::Text("Shadow mode / size requested: %d / %d | effective: %d / %d",static_cast<int>(q.RequestedSettings.Shadow),q.RequestedSettings.ShadowResolution,static_cast<int>(effective.Shadow),effective.ShadowResolution);
+            ImGui::Text("Post requested / effective: %s / %s",q.RequestedSettings.PostProcessing ? "on":"off",effective.PostProcessing ? "on":"off");
+            ImGui::Text("LOD bias requested / effective: %.2f / %.2f",q.RequestedSettings.LodBias,effective.LodBias);
             ImGui::Text("FPS target: %d | culling: %s",effective.TargetFps,effective.FrustumCulling ? "on":"off");
             const auto mask=effective.PostProcessing ? q.Capabilities.HdrSampleCounts:q.Capabilities.SampleCounts;
             ImGui::Text("Supported %s MSAA: 1%s%s%s",effective.PostProcessing ? "HDR":"LDR",mask&(1u<<2)?", 2":"",mask&(1u<<4)?", 4":"",mask&(1u<<8)?", 8":"");
@@ -470,6 +480,7 @@ void EditorUI::QualitySettings() {
             for (const auto& a:q.Adjustments) {ImGui::TextWrapped("%s: %s",a.Field.c_str(),a.Reason.c_str());}
         }
         if (q.LastError) {ImGui::TextWrapped("Previous quality retained: %s",q.LastError->Message.c_str());}
+        QualityOverview();
     }ImGui::End();
 }
 void EditorUI::AssetBrowser() {

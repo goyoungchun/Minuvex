@@ -29,7 +29,7 @@ RenderSettings QualityPresetSettings(QualityPreset preset) {
     RenderSettings s;
     switch (preset) {
     case QualityPreset::Low: s.MaxRenderHeight=720; s.TargetFps=30; s.Textures=TextureQuality::Low; s.OnDemand=OnDemandMode::Auto; break;
-    case QualityPreset::Medium: s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Pcf;break;
+    case QualityPreset::Medium: s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Basic;break;
     case QualityPreset::High: s.MaxRenderHeight=2160; s.MsaaSamples=4; s.Textures=TextureQuality::High; s.Anisotropy=8;s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Pcf;s.ShadowResolution=2048;s.PostProcessing=true;break;
     default: throw std::invalid_argument("Invalid base quality preset.");
     }

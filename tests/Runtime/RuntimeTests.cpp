@@ -51,7 +51,10 @@ int main(int argc, char* argv[]) {
                 Check(estimate && estimate.Value().Cost.TotalBytes == s.Resident.TotalBytes && estimate.Value().Cost.TextureBytes == s.Resident.TextureBytes,"public estimate matches resident renderer logical allocation accounting");
                 Check(!s.System.GpuMemoryUsage.Value || s.System.GpuMemoryUsage.Status == lv::MetricStatus::Measured,"native memory availability is explicit rather than fabricated");
             }
-            if (info.FrameNumber == 40) {auto p=lv::MakeQualityProfile(lv::QualityPreset::Low);Require(v.SetQuality(p));auto changed=v.GetTelemetry();Check(changed && changed.Value().PreviousQualityFrames && changed.Value().Frames.SampleCount == 0,"successful quality change retains before history and resets current timing window");}
+            if (info.FrameNumber == 25) {const auto old=v.GetScene().GetObject(modelId).Model;v.GetScene().ReplaceModel(old,std::make_shared<lv::ModelAsset>(*old));}
+            if (info.FrameNumber == 26) {Check(t.Value().Frames.SampleCount == 1 && t.Value().Frames.GpuSampleCount == 0,"replacing resident scene assets starts fresh evidence and discards the in-flight old generation");}
+            if (info.FrameNumber == 35) {const auto& f=t.Value().Frames;Check(f.GpuFrameMs.Status == lv::MetricStatus::Unsupported || (f.GpuSampleCount > 0 && f.GpuSampleCount <= f.TotalRenderedFrames && f.AverageGpuMs.Value && f.P95GpuMs.Value && f.LastGpuSampleAtSeconds && *f.LastGpuSampleAtSeconds <= f.CapturedAtSeconds),"native asynchronous GPU results populate bounded statistics with submission timestamps");}
+            if (info.FrameNumber == 40) {auto p=lv::MakeQualityProfile(lv::QualityPreset::Low);Require(v.SetQuality(p));auto changed=v.GetTelemetry();Check(changed && changed.Value().PreviousQualityFrames && changed.Value().Frames.SampleCount == 0 && changed.Value().Frames.GpuSampleCount == 0,"successful quality change retains before history and resets CPU/GPU windows without old pending results");}
         }
         if (mode == "quality") {
             auto caps=v.GetQualityCapabilities();Check(caps && caps.Value().GraphicsAvailable,"Viewer exposes active graphics capabilities");

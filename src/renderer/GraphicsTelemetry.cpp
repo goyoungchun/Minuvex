@@ -2,6 +2,7 @@
 #include "GraphicsQuality.h"
 #include <sokol_gfx.h>
 #include <array>
+#include <algorithm>
 #if defined(_WIN32)
 #include <d3d11.h>
 #include <dxgi1_4.h>
@@ -24,6 +25,7 @@ struct GraphicsTelemetry::Impl {
         Microsoft::WRL::ComPtr<ID3D11Query> Disjoint,Start,End;
         bool Pending=false;
         std::uint64_t Generation=0,Serial=0;
+        double SubmittedAt=0;
     };
     std::array<Query,4> Queries;
     ID3D11DeviceContext* Context=nullptr;
@@ -90,35 +92,38 @@ struct GraphicsTelemetry::Impl {
 GraphicsTelemetry::GraphicsTelemetry():impl_(std::make_unique<Impl>()) {}
 GraphicsTelemetry::~GraphicsTelemetry()=default;
 const HardwareInfo& GraphicsTelemetry::Hardware() const {return impl_->Hardware;}
-SystemSample GraphicsTelemetry::Sample(double now) {
-    CollectGpu();
+SystemSample GraphicsTelemetry::Sample(double now,FrameMonitor& frames) {
+    CollectGpu(frames);
     auto result=impl_->Monitor.Sample(now);impl_->PollGpu(now);const auto& g=impl_->Gpu;
     result.GpuMemoryUsage=g.GpuMemoryUsage;result.GpuMemoryBudget=g.GpuMemoryBudget;result.GpuNonLocalUsage=g.GpuNonLocalUsage;result.GpuNonLocalBudget=g.GpuNonLocalBudget;return result;
 }
-void GraphicsTelemetry::CollectGpu() {
+void GraphicsTelemetry::CollectGpu(FrameMonitor& frames) {
 #if defined(_WIN32)
     auto& p=*impl_;if (!p.Timing || p.Active) {return;}
-    for (auto& q:p.Queries) {
+    std::array<Impl::Query*,4> ordered;for (std::size_t i=0;i<ordered.size();++i) {ordered[i]=&p.Queries[i];}
+    std::sort(ordered.begin(),ordered.end(),[](const auto* a,const auto* b) {return a->Serial < b->Serial;});
+    for (auto* query:ordered) {
+        auto& q=*query;
         if (!q.Pending) {continue;}
         D3D11_QUERY_DATA_TIMESTAMP_DISJOINT d{};UINT64 start=0,end=0;
         const auto disjoint=p.Context->GetData(q.Disjoint.Get(),&d,sizeof(d),D3D11_ASYNC_GETDATA_DONOTFLUSH);
         if (disjoint == S_FALSE) {continue;}
-        if (FAILED(disjoint)) {q.Pending=false;p.Time={std::nullopt,MetricStatus::Unavailable,"GPU timestamp read failed"};continue;}
+        if (FAILED(disjoint)) {q.Pending=false;if (q.Generation == p.Generation && q.Serial > p.LatestSerial) {p.LatestSerial=q.Serial;p.Time={std::nullopt,MetricStatus::Unavailable,"GPU timestamp read failed"};}continue;}
         const auto a=p.Context->GetData(q.Start.Get(),&start,sizeof(start),D3D11_ASYNC_GETDATA_DONOTFLUSH),b=p.Context->GetData(q.End.Get(),&end,sizeof(end),D3D11_ASYNC_GETDATA_DONOTFLUSH);
         if (a == S_FALSE || b == S_FALSE) {continue;}q.Pending=false;
         if (q.Generation == p.Generation && q.Serial > p.LatestSerial) {
             p.LatestSerial=q.Serial;
-            if (a == S_OK && b == S_OK && !d.Disjoint && d.Frequency && end >= start) {p.Time={double(end-start)/double(d.Frequency)*1000,MetricStatus::Measured,"Asynchronous D3D11 scene GPU timestamps; excludes GUI/presentation"};}
+            if (a == S_OK && b == S_OK && !d.Disjoint && d.Frequency && end >= start) {const auto ms=double(end-start)/double(d.Frequency)*1000;p.Time={ms,MetricStatus::Measured,"Asynchronous D3D11 scene GPU timestamps; excludes GUI/presentation"};frames.RecordGpu(q.SubmittedAt,ms);}
             else {p.Time={std::nullopt,MetricStatus::Unavailable,"Disjoint or invalid GPU timestamp sample discarded"};}
         }
     }
 #endif
 }
-void GraphicsTelemetry::BeginGpu() {
-    CollectGpu();
+void GraphicsTelemetry::BeginGpu(double now,FrameMonitor& frames) {
+    CollectGpu(frames);
 #if defined(_WIN32)
     auto& p=*impl_;if (!p.Timing || p.Active) {return;}
-    for (auto& q:p.Queries) {if (!q.Pending) {q.Generation=p.Generation;q.Serial=++p.Serial;p.Active=&q;p.Context->Begin(q.Disjoint.Get());p.Context->End(q.Start.Get());break;}}
+    for (auto& q:p.Queries) {if (!q.Pending) {q.Generation=p.Generation;q.Serial=++p.Serial;q.SubmittedAt=now;p.Active=&q;p.Context->Begin(q.Disjoint.Get());p.Context->End(q.Start.Get());break;}}
 #endif
 }
 void GraphicsTelemetry::EndGpu() noexcept {
@@ -128,7 +133,7 @@ void GraphicsTelemetry::EndGpu() noexcept {
 }
 void GraphicsTelemetry::ResetGpu() {
 #if defined(_WIN32)
-    auto& p=*impl_;++p.Generation;if (p.Timing) {p.Time={std::nullopt,MetricStatus::Unavailable,"D3D11 scene GPU timestamp pending after quality change"};}
+    auto& p=*impl_;++p.Generation;if (p.Timing) {p.Time={std::nullopt,MetricStatus::Unavailable,"D3D11 scene GPU timestamp pending after quality/workload change"};}
 #endif
 }
 Metric<double> GraphicsTelemetry::GpuTime() const {return impl_->Time;}

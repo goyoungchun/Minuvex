@@ -48,14 +48,31 @@ ResourceCost Cost(const Scene& scene,const QualityState& quality,std::uint64_t& 
 void FrameMonitor::Record(double now,double cpuMs,std::uint64_t draws,std::uint64_t triangles) {
     Time(now);Time(cpuMs);
     if (!samples_.empty() && now <= samples_.back().Time) {throw std::invalid_argument("Frame timestamps must strictly increase.");}
+    if (!samples_.empty() && now-samples_.back().Time > 2) {samples_.clear();}
     if (samples_.size() == 240) {samples_.erase(samples_.begin());}
     samples_.push_back({now,cpuMs,draws,triangles});++total_;
 }
+void FrameMonitor::RecordGpu(double now,double ms) {
+    Time(now);Time(ms);
+    if (!gpuSamples_.empty() && now <= gpuSamples_.back().Time) {throw std::invalid_argument("GPU submission timestamps must strictly increase.");}
+    if (!gpuSamples_.empty() && now-gpuSamples_.back().Time > 2) {gpuSamples_.clear();}
+    if (gpuSamples_.size() == 240) {gpuSamples_.erase(gpuSamples_.begin());}
+    gpuSamples_.push_back({now,ms});
+}
 FrameStatistics FrameMonitor::Snapshot(double now) const {
-    Time(now);FrameStatistics result;result.TotalRenderedFrames=total_;result.SampleCount=samples_.size();
+    Time(now);FrameStatistics result;result.CapturedAtSeconds=now;result.TotalRenderedFrames=total_;result.SampleCount=samples_.size();
+    if (!gpuSamples_.empty()) {
+        if (now < gpuSamples_.back().Time) {throw std::invalid_argument("Snapshot time precedes the latest GPU submission.");}
+        result.GpuSampleCount=gpuSamples_.size();result.LastGpuSampleAtSeconds=gpuSamples_.back().Time;
+        double total=0;std::vector<double> values;values.reserve(gpuSamples_.size());
+        for (const auto& sample:gpuSamples_) {total+=sample.Ms;values.push_back(sample.Ms);}
+        result.GpuFrameMs=Measured(gpuSamples_.back().Ms,"Latest asynchronous scene GPU timestamp");
+        result.AverageGpuMs=Measured(total/gpuSamples_.size(),"Rolling mean asynchronous scene GPU ms");
+        result.P95GpuMs=Measured(Percentile(values),"Nearest-rank rolling P95 asynchronous scene GPU ms");
+    }
     if (samples_.empty()) {return result;}
     if (now < samples_.back().Time) {throw std::invalid_argument("Snapshot time precedes the latest frame.");}
-    const auto& last=samples_.back();result.DrawCalls=last.Draws;result.Triangles=last.Triangles;
+    const auto& last=samples_.back();result.LastCpuSampleAtSeconds=last.Time;result.DrawCalls=last.Draws;result.Triangles=last.Triangles;
     result.CpuFrameMs=Measured(last.Cpu,"CPU scene submission wall clock");
     double total=0;std::vector<double> cpu,periods;cpu.reserve(samples_.size());
     for (std::size_t i=0;i<samples_.size();++i) {const auto& s=samples_[i];total+=s.Cpu;cpu.push_back(s.Cpu);if (i) {periods.push_back((s.Time-samples_[i-1].Time)*1000);}}
@@ -68,7 +85,7 @@ FrameStatistics FrameMonitor::Snapshot(double now) const {
     } else if (now-last.Time > 2) {result.Fps=Measured(0,"No submissions for 2 seconds");}
     return result;
 }
-void FrameMonitor::Reset() noexcept {samples_.clear();total_=0;}
+void FrameMonitor::Reset() noexcept {samples_.clear();gpuSamples_.clear();total_=0;}
 Result<QualityEstimate> EstimateQualityResources(const QualityProfile& p,const QualityCapabilities& caps,const Scene& scene,int w,int h,const QualityEstimate* current) {
     auto resolved=ResolveQuality(p,caps,w,h);if (!resolved) {return Result<QualityEstimate>::Failure(resolved.Error());}
     try {
@@ -97,9 +114,14 @@ QualityRecommendation RecommendQuality(const QualityCapabilities& caps,const Sys
         (system.GpuMemoryBudget.Status == MetricStatus::Measured || system.GpuMemoryBudget.Status == MetricStatus::Estimated) && system.GpuMemoryUsage.Status == MetricStatus::Measured;
     const auto headroom=budget && *system.GpuMemoryBudget.Value > *system.GpuMemoryUsage.Value ? *system.GpuMemoryBudget.Value-*system.GpuMemoryUsage.Value:0;
     const bool lowRam=system.AvailableSystemMemory.Value && (system.AvailableSystemMemory.Status == MetricStatus::Measured || system.AvailableSystemMemory.Status == MetricStatus::Estimated) && *system.AvailableSystemMemory.Value < 512ull*1024*1024;
-    const bool cpuPressure=current && current->Quality.Effective && frames && frames->SampleCount >= 30 && frames->P95CpuMs.Value && frames->P95CpuMs.Status == MetricStatus::Measured && std::isfinite(*frames->P95CpuMs.Value) && current->Quality.Effective->TargetFps > 0 &&
-        *frames->P95CpuMs.Value > 1000.0/current->Quality.Effective->TargetFps;
-    const bool gpuPressure=current && current->Quality.Effective && frames && frames->SampleCount >= 30 && frames->GpuFrameMs.Value && frames->GpuFrameMs.Status == MetricStatus::Measured && std::isfinite(*frames->GpuFrameMs.Value) && current->Quality.Effective->TargetFps > 0 && *frames->GpuFrameMs.Value > 1000.0/current->Quality.Effective->TargetFps;
+    const auto recent=[&](std::optional<double> time) {return frames && time && std::isfinite(*time) && *time >= 0 && std::isfinite(frames->CapturedAtSeconds) && frames->CapturedAtSeconds >= *time && frames->CapturedAtSeconds-*time <= 2;};
+    const auto measured=[](const Metric<double>& m) {return m.Status == MetricStatus::Measured && m.Value && std::isfinite(*m.Value) && *m.Value >= 0;};
+    const bool cpuEvidence=frames && frames->SampleCount >= 30 && recent(frames->LastCpuSampleAtSeconds) && measured(frames->P95CpuMs);
+    const bool gpuEvidence=frames && frames->GpuSampleCount >= 30 && recent(frames->LastGpuSampleAtSeconds) && measured(frames->P95GpuMs);
+    const double target=current && current->Quality.Effective && current->Quality.Effective->TargetFps > 0 ? 1000.0/current->Quality.Effective->TargetFps:0;
+    const bool cpuPressure=target > 0 && cpuEvidence && *frames->P95CpuMs.Value > target;
+    const bool gpuPressure=target > 0 && gpuEvidence && *frames->P95GpuMs.Value > target;
+    std::optional<QualityPreset> observedPreset;
     for (const auto preset:{QualityPreset::Low,QualityPreset::Medium,QualityPreset::High}) {
         ProfileAssessment a;a.Preset=preset;
         auto estimate=EstimateQualityResources(MakeQualityProfile(preset),caps,scene,w,h,current);
@@ -108,15 +130,22 @@ QualityRecommendation RecommendQuality(const QualityCapabilities& caps,const Sys
             a.Estimate=std::move(estimate).Value();a.Suitability=ProfileSuitability::Supported;
             const bool memoryRisk=budget && a.Estimate->AdditionalBytes > headroom/2;
             const bool frameRisk=(cpuPressure || gpuPressure) && preset >= current->Quality.Requested.Base;
-            if (memoryRisk || frameRisk || (lowRam && preset != QualityPreset::Low)) {a.Suitability=ProfileSuitability::PerformanceRisk;a.Reason=memoryRisk ? "Transient allocations consume more than half the reported memory headroom.":frameRisk ? (cpuPressure ? "Measured CPU P95 exceeds the current target interval; test the lower preset.":"Latest measured GPU scene time exceeds the current target interval; test the lower preset."):"Available system RAM is below 512 MiB.";}
+            if (memoryRisk || frameRisk || (lowRam && preset != QualityPreset::Low)) {a.Suitability=ProfileSuitability::PerformanceRisk;a.Reason=memoryRisk ? "Transient allocations consume more than half the reported memory headroom.":frameRisk ? (cpuPressure ? "Measured CPU P95 exceeds the current target interval; test the lower preset.":"Measured GPU P95 exceeds the current target interval; test the lower preset."):"Available system RAM is below 512 MiB.";}
             else {a.Reason="Capabilities supported. Runtime performance testing is still required.";}
+            if (a.Suitability == ProfileSuitability::Supported && target > 0 && cpuEvidence && gpuEvidence && !cpuPressure && !gpuPressure &&
+                *current->Quality.Effective == *a.Estimate->Quality.Effective && current->Quality.Applied &&
+                current->Quality.RenderWidth == a.Estimate->Quality.RenderWidth && current->Quality.RenderHeight == a.Estimate->Quality.RenderHeight && current->AssetSignature == a.Estimate->AssetSignature) {
+                a.PerformanceValidated=true;observedPreset=preset;
+                a.Reason="Recent CPU/GPU scene P95 fits this exact effective preset's target. GUI/presentation and future workloads still need validation.";
+            }
             if (a.Suitability == ProfileSuitability::Supported && (budget || preset != QualityPreset::High)) {result.Preset=preset;}
         }
         result.Profiles.push_back(std::move(a));
     }
-    result.Reason=result.Preset ? (budget ? "Initial capability and memory-headroom policy; not a benchmark guarantee.":"Memory budget unavailable: conservative supported Medium/Low; runtime testing required."):"No preset fits the supported capabilities and current memory/CPU policy. Review the profile assessments.";
+    if (observedPreset) {result.Preset=observedPreset;result.PerformanceValidated=true;}
+    result.Reason=result.PerformanceValidated ? "Retain the preset observed within the CPU/GPU scene target in the recent window; this is not an end-to-end FPS guarantee.":result.Preset ? (budget ? "Initial capability and memory-headroom policy; runtime validation required.":"Memory budget unavailable: conservative supported Medium/Low; runtime testing required."):"No preset fits the supported capabilities and current memory/frame policy. Review the profile assessments.";
     if (cpuPressure) {result.Reason+=" Current CPU submission pressure was observed; lower quality may help but needs testing.";}
-    if (gpuPressure) {result.Reason+=" Latest GPU scene time exceeded the current target; this observation is not a benchmark of other presets.";}
+    if (gpuPressure) {result.Reason+=" Recent GPU P95 exceeded the current target; this observation is not a benchmark of other presets.";}
     return result;
 }
 } // namespace lv
