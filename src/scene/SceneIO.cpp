@@ -97,6 +97,13 @@ BlendTreeHandle TreeDefinition(const Json& json,const ModelAsset& model) {
 }
 using TreeIds=std::unordered_map<const BlendTreeAsset*,std::size_t>;
 using Trees=std::unordered_map<std::uint64_t,BlendTreeHandle>;
+Json Events(const AnimationPlayer& player) {
+    Json result=Json::array();for (const auto& track:player.EventOverrides()) {Json events=Json::array();for (const auto& event:track.Events) {events.push_back({{"time",event.TimeSeconds},{"name",String(event.Name)},{"payload",String(event.Payload)}});}result.push_back({{"clip",track.Clip},{"clipName",String(player.Model()->Animations.at(track.Clip).Name)},{"events",std::move(events)}});}return result;
+}
+void Events(const Json& json,AnimationPlayer& player) {
+    Require(json.is_array() && json.size()<=MaxAnimationEventTracks,"Invalid event overlay list.");std::unordered_set<std::size_t> clips;
+    for (const auto& track:json) {const auto clip=static_cast<std::size_t>(UInt(track.at("clip")));Require(clip<player.Model()->Animations.size() && clips.insert(clip).second && String(track.at("clipName"))==player.Model()->Animations[clip].Name,"Unknown/duplicate event overlay clip or stale identity.");const auto& saved=track.at("events");Require(saved.is_array() && saved.size()<=MaxAnimationEvents,"Invalid event marker count.");std::vector<AnimationEvent> events;for (const auto& event:saved) {events.push_back({Number(event.at("time")),String(event.at("name")),String(event.at("payload"))});}player.SetAnimationEvents(clip,events);}
+}
 Json Additive(const AdditiveAnimationState& a,const ModelAsset& model) {
     return {{"clip",a.Clip},{"clipName",String(model.Animations.at(a.Clip).Name)},{"time",a.Time},{"speed",a.Speed},{"loop",a.Loop},{"weight",a.Weight},{"state",static_cast<unsigned>(a.State)},{"reference",Pose(a.Reference,model.Skeleton)},{"mask",a.JointMask}};
 }
@@ -115,7 +122,7 @@ Json Animation(const SceneObject& object,const TreeIds& trees) {
     Require(player.Model() == object.Model,"Scene player was rebound to a foreign model; use Scene::SetModel.");
     (void)player.Evaluate();
     Json json{{"clip",nullptr},{"clipName",""},{"time",player.Time()},{"speed",player.Speed()},{"loop",player.Loop()},
-        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"tree",nullptr},{"additive",nullptr},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
+        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"tree",nullptr},{"additive",nullptr},{"eventOverrides",Events(player)},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
     if (player.Additive()) {json["additive"]=Additive(*player.Additive(),*object.Model);}
     if (player.Tree()) {const auto& state=*player.Tree();ValidateBlendTree(*object.Model,*state.Tree);json["tree"]={{"id",trees.at(state.Tree.get())},{"phase",state.Phase},{"x",state.X},{"y",state.Y}};}
     if (player.Clip()) { json["clip"] = *player.Clip(); json["clipName"] = String(object.Model->Animations.at(*player.Clip()).Name); }
@@ -127,10 +134,11 @@ Json Animation(const SceneObject& object,const TreeIds& trees) {
     }
     return json;
 }
-void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph,const Trees* trees,bool restoreAdditive) {
+void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph,const Trees* trees,bool restoreAdditive,bool restoreEvents) {
     const auto& object = scene.GetObject(id);
     if (!object.Model) { Require(json.is_null(),"Empty object cannot have animation state."); return; }
     auto& player = scene.GetAnimation(id);
+    if (restoreEvents) {Events(json.at("eventOverrides"),player);}
     player.SetSpeed(Number(json.at("speed"))); player.SetLoop(json.at("loop").get<bool>());
     const auto state = UInt(json.at("state"),2); const auto time = Number(json.at("time"));
     Require(std::isfinite(time) && time >= 0,"Invalid playback time.");
@@ -224,7 +232,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinvexScene"},{"version",10},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
+        Json root{{"format","MinvexScene"},{"version",11},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
         TreeIds trees;
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
@@ -269,7 +277,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(detail::MatchesDocumentFormat(root.at("format"), "MinvexScene") && (version >= 1 && version <= 10),"Unsupported scene format/version.");
+        Require(detail::MatchesDocumentFormat(root.at("format"), "MinvexScene") && (version >= 1 && version <= 11),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -332,7 +340,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
-            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8,version>=9 ? &trees:nullptr,version>=10); }
+            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8,version>=9 ? &trees:nullptr,version>=10,version>=11); }
             if (version>=7) {Materials(object.at("materials"),scene,ids.at(UInt(object.at("id"))));}
         }
         ValidateScene(scene);

@@ -59,7 +59,12 @@ int main(int argc,char** argv) {
             for (std::size_t node=0;node<evaluated.Global.size();++node) {for (std::size_t element=0;element<16;++element) {if (std::abs(finalPose.Global[node].Elements[element]-evaluated.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("Additive player and standalone composition disagree.");}}}
             auto layerCopy=player;layerCopy.SetAdditiveWeight(0);if (player.Additive()->Weight!=.25f) {throw std::runtime_error("Additive state must be independent per instance.");}player.ClearAdditiveAnimation();
         }
-        std::printf("Animation/Pose: %zu nodes; PoseBuffer, Blend Tree, Additive, independent instances and Pose IO passed.\n",model->Skeleton.Joints.size());
+        if (model->Animations[0].Duration>0) {
+            const auto time=std::min(.1,model->Animations[0].Duration*.5);const std::array<lv::AnimationEvent,1> events{{{time,"SDK event","{}"}}};player.SetAnimationEvents(0,events);player.Play(0);player.SetSpeed(1);player.SetLoop(false);player.Update(time);
+            const auto polled=scene.PollAnimationEvents();if (polled.size()!=1 || polled[0].Object!=animated || polled[0].Occurrence.Event.Name!="SDK event") {throw std::runtime_error("Event polling lost clip/instance provenance.");}
+            player.Seek(0);player.Update(time);std::size_t received=0;const auto count=scene.DispatchAnimationEvents([&](const lv::SceneAnimationEvent& event){if (event.Object!=animated || event.Occurrence.Event.Payload!="{}") {throw std::runtime_error("Invalid event payload.");}++received;});if (count!=1 || received!=1) {throw std::runtime_error("Event dispatch must consume exactly one snapshot.");}
+        }
+        std::printf("Animation/Pose: %zu nodes; PoseBuffer, Blend Tree, Additive, Events and independent instances passed.\n",model->Skeleton.Joints.size());
         return 0;
     }catch (const std::exception& error) {std::fprintf(stderr,"%s\n",error.what());return 1;}
 }

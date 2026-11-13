@@ -476,6 +476,7 @@ void EditorUI::AnimationControls() {
                 if (blending) {ImGui::ProgressBar(weight);ImGui::Text("Cross-fade: %.2f / %.2f s",elapsed,durationBlend);}
                 BlendTreeControls(object,model);
                 AdditiveControls(object,model);
+                EventControls(object,model);
             }
         }
     } ImGui::End();
@@ -747,6 +748,7 @@ void EditorUI::Dialogs() {
 void EditorUI::Draw() {
     ImGuizmo::BeginFrame();
     PollAssetJobs();
+    PollAnimationEvents();
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
     Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();RenderDebugger();AnimationDebugger();Console(); Welcome();ImportPreview(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {

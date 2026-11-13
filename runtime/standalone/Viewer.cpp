@@ -17,6 +17,8 @@ Error CurrentException(ErrorCode fallback, const char* hint) {
         }
         return {fallback, error.what(), hint, {}};
     }
+    catch (const AnimationEventOverflow& error) {return {ErrorCode::InsufficientResource,error.what(),"Poll or clear animation events before retrying the update.",{}};}
+    catch (const AnimationEventCallbackError& error) {return {ErrorCode::CallbackFailure,error.what(),"Inspect the callback exception; the snapshot was attempted once.",{}};}
     catch (const std::bad_alloc& error) { return {ErrorCode::InsufficientResource, error.what(), "Reduce memory usage and retry.", {}}; }
     catch (const std::exception& error) { return {fallback, error.what(), hint, {}}; }
     catch (...) { return {fallback, "Operation failed with a non-standard exception.", hint, {}}; }
@@ -169,8 +171,26 @@ Result<void> Viewer::PlayBlendTree(ObjectId id,BlendTreeHandle tree,bool restart
 Result<void> Viewer::SetBlendParameter(ObjectId id,std::string_view name,float value) {
     auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetBlendParameter(name,value);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a tree parameter name and finite value."));}
 }
-Result<void> Viewer::SeekBlendTree(ObjectId id,double phase) {
-    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SeekBlendTree(phase);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a normalized tree phase in [0,1]."));}
+Result<void> Viewer::SeekBlendTree(ObjectId id,double phase,AnimationSeekEvents events) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SeekBlendTree(phase,events);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a normalized tree phase in [0,1]."));}
+}
+Result<void> Viewer::SeekAnimation(ObjectId id,double seconds,AnimationSeekEvents events) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).Seek(seconds,events);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Select a clip and use a nonnegative time."));}
+}
+Result<void> Viewer::SetAnimationEvents(ObjectId id,std::size_t clip,std::span<const AnimationEvent> events) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetAnimationEvents(clip,events);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use sorted events within clip duration and text budgets."));}
+}
+Result<void> Viewer::ResetAnimationEvents(ObjectId id,std::size_t clip) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).ResetAnimationEvents(clip);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use an event clip in this instance."));}
+}
+Result<std::vector<SceneAnimationEvent>> Viewer::PollAnimationEvents() {
+    auto ready=Ready(*state_);if (!ready) {return Result<std::vector<SceneAnimationEvent>>::Failure(ready.Error());}try {return Result<std::vector<SceneAnimationEvent>>::Success(state_->World.PollAnimationEvents());}catch (...) {return Result<std::vector<SceneAnimationEvent>>::Failure(detail::CurrentException(ErrorCode::InvalidState,"Cannot collect animation events."));}
+}
+Result<std::size_t> Viewer::DispatchAnimationEvents(std::function<void(const SceneAnimationEvent&)> callback) {
+    auto ready=Ready(*state_);if (!ready) {return Result<std::size_t>::Failure(ready.Error());}try {return Result<std::size_t>::Success(state_->World.DispatchAnimationEvents(std::move(callback)));}catch (...) {return Result<std::size_t>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Provide a valid animation event callback."));}
+}
+Result<void> Viewer::ClearAnimationEventQueues() {
+    auto ready=Ready(*state_);if (!ready) {return ready;}state_->World.ClearAnimationEventQueues();return Result<void>::Success();
 }
 Result<void> Viewer::SetAdditiveAnimation(ObjectId id,std::size_t clip,float weight,const PoseAsset& reference,std::span<const float> mask) {
     auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetAdditiveAnimation(clip,weight,reference,mask);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a TRS clip, compatible reference pose and weights in [0,1]."));}

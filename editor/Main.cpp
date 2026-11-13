@@ -162,6 +162,7 @@ void Init(void* user) noexcept {
                 auto local = doc.GetScene().GetObject(left.Value()).Model->Skeleton.Joints[1].ReferenceLocal; local.Position.X = .25f;
                 Require(doc.SetJointPose(left.Value(),1,local));
                 Require(doc.SetAdditiveAnimation(left.Value(),2,.25f));
+                const std::array<lv::AnimationEvent,1> events{{{.00001,"EditorEvent","smoke"}}};Require(doc.SetAnimationEvents(left.Value(),0,events));
             }
             Require(doc.SetCamera(lv::detail::FitSceneCamera(doc.GetScene(),1.5f)));
         }
@@ -212,6 +213,7 @@ void SmokeAfterDraw(Application& app) {
             const auto id = doc.GetScene().ObjectIds()[1]; Require(doc.Select(id));
             Require(doc.GetScene().GetObject(id).Animation.State() == lv::PlaybackState::Playing && doc.GetScene().GetObject(id).Animation.Overrides().Joints.size() == 1,"Editor Scene did not restore animation and pose.");
             Require(doc.GetScene().GetObject(id).Animation.Additive() && doc.GetScene().GetObject(id).Animation.Additive()->Clip==2,"Editor Scene did not restore its additive preview layer.");
+            Require(doc.GetScene().GetObject(id).Animation.AnimationEvents(0).size()==1,"Editor Scene did not restore its event markers.");
         }
     }
     if (app.AnimationSmoke && app.Frames == 0) { app.PreviousTime = doc.GetScene().GetObject(doc.Selection()).Animation.Time(); }
@@ -246,6 +248,7 @@ void SmokeAfterDraw(Application& app) {
         Require(doc.CreateObject("Unsaved object")); ui.RequestQuit();
     }
     if (app.Frames == 8) {
+        if (app.AnimationSmoke) {Require(std::any_of(ui.ConsoleEntries().begin(),ui.ConsoleEntries().end(),[](const auto& entry){return entry.Message.find("EditorEvent")!=std::string::npos;}),"Editor did not consume animation events into its log.");}
         Require(!ui.QuitRequested() && ImGui::IsPopupOpen("Unsaved changes"),"Unsaved document quit was not guarded.");
         std::printf("Editor %s smoke: docked panels, shared offscreen rendering, resize/suspend/resume, save/reopen and unsaved guard passed.\n",app.AnimationSmoke ? "animation/pose" : "scene");
     }
@@ -270,7 +273,7 @@ void Frame(void* user) noexcept {
         if (app.Smoke && app.Frames == 4) {ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,true);}
         simgui_new_frame(frame);
         const auto advanced = app.UI->Document.UpdateAnimations(frame.delta_time);
-        if (!advanced) { throw std::runtime_error(advanced.Error().Message); }
+        if (!advanced) {if (advanced.Error().Code==lv::ErrorCode::InsufficientResource) {app.UI->Record(lv::editor::ConsoleLevel::Error,advanced.Error().Message);}else {throw std::runtime_error(advanced.Error().Message);}}
         if (app.QualitySmoke && app.Frames == 2) {
             auto high=lv::MakeQualityProfile(lv::QualityPreset::High);high.AllowFallback=true;high.Overrides.TargetFps=0;Require(app.UI->ApplyQualityProfile(high));
             const auto file=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/"profile.mvxquality.json";Require(lv::SaveQuality(high,file));app.UI->LoadQualityProfile(file);

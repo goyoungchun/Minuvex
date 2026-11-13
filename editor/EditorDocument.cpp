@@ -11,6 +11,10 @@ auto Edit(Function function) -> Result<decltype(function())> {
     try {
         if constexpr (std::is_void_v<T>) { function(); return Result<void>::Success(); }
         else { return Result<T>::Success(function()); }
+    } catch (const AnimationEventOverflow& e) {
+        return Result<T>::Failure({ErrorCode::InsufficientResource,e.what(),"Poll animation events before retrying the update.",{}});
+    } catch (const AnimationEventCallbackError& e) {
+        return Result<T>::Failure({ErrorCode::CallbackFailure,e.what(),"The callback snapshot was attempted once.",{}});
     } catch (const std::bad_alloc& e) {
         return Result<T>::Failure({ErrorCode::InsufficientResource,e.what(),"Reduce the document size and import budgets.",{}});
     } catch (const ImportError& e) {
@@ -33,7 +37,7 @@ void EditorDocument::Restore(std::unique_ptr<Snapshot> s) noexcept {
     registry_=std::move(s->Registry);world_=std::move(s->World);library_=std::move(s->Library);selection_=s->Selection;revision_=s->Revision;dirty_=revision_ != savedRevision_;
 }
 void EditorDocument::KeepUndo(std::unique_ptr<Snapshot> s) noexcept {
-    undo_.push_back(std::move(s));if (undo_.size()>32) {undo_.erase(undo_.begin());}redo_.clear();
+    s->World.ClearAnimationEventQueues();undo_.push_back(std::move(s));if (undo_.size()>32) {undo_.erase(undo_.begin());}redo_.clear();
 }
 void EditorDocument::ClearHistory() noexcept {undo_.clear();redo_.clear();pendingEdit_.reset();revision_=savedRevision_=nextRevision_=0;}
 template<class Function> auto EditorDocument::Change(Function function) -> Result<decltype(function())> {
@@ -50,9 +54,9 @@ template<class Function> auto EditorDocument::Change(Function function) -> Resul
 template<class Function> Result<void> EditorDocument::ChangeAnimation(ObjectId object,Function function) {return Change([&] {function(world_.GetAnimation(object));MarkChanged();});}
 Result<void> EditorDocument::BeginEdit() {return Edit([&] {if (pendingEdit_) {throw std::logic_error("An edit group is already active.");}auto before=Capture();undo_.reserve(undo_.size()+1);pendingEdit_=std::move(before);});}
 Result<void> EditorDocument::CommitEdit() {return Edit([&] {if (!pendingEdit_) {throw std::logic_error("No edit group is active.");}if (revision_ != pendingEdit_->Revision) {KeepUndo(std::move(pendingEdit_));}pendingEdit_.reset();});}
-Result<void> EditorDocument::CancelEdit() {return Edit([&] {if (!pendingEdit_) {throw std::logic_error("No edit group is active.");}Restore(std::move(pendingEdit_));});}
-Result<void> EditorDocument::Undo() {return Edit([&] {if (!CanUndo()) {throw std::logic_error("No committed edit is available to undo.");}auto current=Capture();redo_.reserve(redo_.size()+1);redo_.push_back(std::move(current));auto before=std::move(undo_.back());undo_.pop_back();Restore(std::move(before));});}
-Result<void> EditorDocument::Redo() {return Edit([&] {if (!CanRedo()) {throw std::logic_error("No committed edit is available to redo.");}auto current=Capture();undo_.reserve(undo_.size()+1);undo_.push_back(std::move(current));auto after=std::move(redo_.back());redo_.pop_back();Restore(std::move(after));});}
+Result<void> EditorDocument::CancelEdit() {return Edit([&] {if (!pendingEdit_) {throw std::logic_error("No edit group is active.");}Restore(std::move(pendingEdit_));world_.ClearAnimationEventQueues();});}
+Result<void> EditorDocument::Undo() {return Edit([&] {if (!CanUndo()) {throw std::logic_error("No committed edit is available to undo.");}auto current=Capture();current->World.ClearAnimationEventQueues();redo_.reserve(redo_.size()+1);redo_.push_back(std::move(current));auto before=std::move(undo_.back());undo_.pop_back();Restore(std::move(before));world_.ClearAnimationEventQueues();});}
+Result<void> EditorDocument::Redo() {return Edit([&] {if (!CanRedo()) {throw std::logic_error("No committed edit is available to redo.");}auto current=Capture();current->World.ClearAnimationEventQueues();undo_.reserve(undo_.size()+1);undo_.push_back(std::move(current));auto after=std::move(redo_.back());redo_.pop_back();Restore(std::move(after));world_.ClearAnimationEventQueues();});}
 Result<void> EditorDocument::ClearUndoHistory() {return Edit([&] {if (pendingEdit_) {throw std::logic_error("Finish the active edit before clearing history.");}undo_.clear();redo_.clear();});}
 void EditorDocument::New() {
     world_ = Scene{}; library_.clear(); registry_.Clear(); path_.clear(); selection_ = NoObject; dirty_ = false;
@@ -187,7 +191,11 @@ Result<void> EditorDocument::PlayAnimation(ObjectId object, std::size_t clip) { 
 Result<void> EditorDocument::CrossFadeAnimation(ObjectId object,std::size_t clip,double duration) {return ChangeAnimation(object,[&](auto& p) {p.CrossFade(clip,duration);});}
 Result<void> EditorDocument::PlayBlendTree(ObjectId object,BlendTreeHandle tree,bool restart) {return ChangeAnimation(object,[&](auto& p){p.PlayBlendTree(std::move(tree),restart);});}
 Result<void> EditorDocument::SetBlendParameter(ObjectId object,std::string_view name,float value) {return ChangeAnimation(object,[&](auto& p){p.SetBlendParameter(name,value);});}
-Result<void> EditorDocument::SeekBlendTree(ObjectId object,double phase) {return ChangeAnimation(object,[&](auto& p){p.SeekBlendTree(phase);});}
+Result<void> EditorDocument::SeekBlendTree(ObjectId object,double phase,AnimationSeekEvents events) {return ChangeAnimation(object,[&](auto& p){p.SeekBlendTree(phase,events);});}
+Result<void> EditorDocument::SetAnimationEvents(ObjectId object,std::size_t clip,std::span<const AnimationEvent> events) {return ChangeAnimation(object,[&](auto& p){p.SetAnimationEvents(clip,events);});}
+Result<void> EditorDocument::ResetAnimationEvents(ObjectId object,std::size_t clip) {return ChangeAnimation(object,[&](auto& p){p.ResetAnimationEvents(clip);});}
+Result<std::vector<SceneAnimationEvent>> EditorDocument::PollAnimationEvents() {return Edit([&]{return world_.PollAnimationEvents();});}
+Result<std::size_t> EditorDocument::DispatchAnimationEvents(std::function<void(const SceneAnimationEvent&)> callback) {return Edit([&]{return world_.DispatchAnimationEvents(std::move(callback));});}
 Result<void> EditorDocument::SetAdditiveAnimation(ObjectId object,std::size_t clip,float weight,const PoseAsset& reference,std::span<const float> mask) {return ChangeAnimation(object,[&](auto& p){p.SetAdditiveAnimation(clip,weight,reference,mask);});}
 Result<void> EditorDocument::RestoreAdditiveAnimation(ObjectId object,const AdditiveAnimationState& state) {return ChangeAnimation(object,[&](auto& p){p.RestoreAdditiveAnimation(state);});}
 Result<void> EditorDocument::SetAdditiveWeight(ObjectId object,float weight) {return ChangeAnimation(object,[&](auto& p){p.SetAdditiveWeight(weight);});}
@@ -201,7 +209,7 @@ Result<void> EditorDocument::ClearMorphWeights(ObjectId object,JointId node) {re
 Result<void> EditorDocument::PauseAnimation(ObjectId object) { return ChangeAnimation(object,[](auto& p) { p.Pause(); }); }
 Result<void> EditorDocument::ResumeAnimation(ObjectId object) { return ChangeAnimation(object,[](auto& p) { p.Resume(); }); }
 Result<void> EditorDocument::StopAnimation(ObjectId object) { return ChangeAnimation(object,[](auto& p) { p.Stop(); }); }
-Result<void> EditorDocument::SeekAnimation(ObjectId object, double seconds) { return ChangeAnimation(object,[&](auto& p) { p.Seek(seconds); }); }
+Result<void> EditorDocument::SeekAnimation(ObjectId object, double seconds,AnimationSeekEvents events) { return ChangeAnimation(object,[&](auto& p) { p.Seek(seconds,events); }); }
 Result<void> EditorDocument::SetAnimationSpeed(ObjectId object, double speed) { return ChangeAnimation(object,[&](auto& p) { p.SetSpeed(speed); }); }
 Result<void> EditorDocument::SetAnimationLoop(ObjectId object, bool loop) { return ChangeAnimation(object,[&](auto& p) { p.SetLoop(loop); }); }
 Result<void> EditorDocument::SetJointPose(ObjectId object, JointId joint, const Transform& local) { return ChangeAnimation(object,[&](auto& p) { p.SetJointOverride(joint,local); }); }

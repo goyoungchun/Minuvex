@@ -81,6 +81,11 @@ private:
     std::size_t additiveClip_=0,additiveReferenceClip_=0;
     int additiveReferenceKind_=0;
     double additiveReferenceTime_=0;
+    ObjectId eventObject_=NoObject;
+    ModelHandle eventModel_;
+    std::size_t eventClip_=0,eventIndex_=0;
+    bool collectEventSeek_=false;
+    std::vector<SceneAnimationEvent> eventLog_;
     bool grid_=true,gizmoVisible_=false,gizmoBlockInput_=false,gizmoEditing_=false,gizmoSuppressed_=false;
     bool cameraEditing_=false;
     ObjectId gizmoObject_=NoObject;
@@ -134,6 +139,8 @@ private:
     void AnimationControls();
     void BlendTreeControls(ObjectId object,ModelHandle model);
     void AdditiveControls(ObjectId object,ModelHandle model);
+    void EventControls(ObjectId object,ModelHandle model);
+    void PollAnimationEvents();
     void QualitySettings();
     void PerformancePanel();
     const TelemetrySnapshot& RefreshQualityAnalysis();

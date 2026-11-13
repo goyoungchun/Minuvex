@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <functional>
+#include <exception>
+#include <stdexcept>
+#include <utility>
 #include <optional>
 #include <span>
 #include <string>
@@ -59,11 +63,29 @@ struct MorphTrack {
     std::vector<float> Times, Values; // Sample-major scalar weights, Times.size()*TargetCount.
 };
 struct MorphPose { JointId Node = NoJoint; std::vector<float> Weights; };
+inline constexpr std::size_t MaxAnimationEvents = 1024, MaxAnimationEventQueue = 1024;
+inline constexpr std::size_t MaxAnimationEventBytes = 1024*1024, MaxAnimationEventTracks = 256;
+struct AnimationEvent { double TimeSeconds = 0; std::string Name, Payload; };
+struct AnimationEventTrack { std::size_t Clip = 0; std::vector<AnimationEvent> Events; };
+struct AnimationEventOccurrence {
+    std::uint64_t Model = 0;
+    std::size_t Clip = 0, EventIndex = 0;
+    std::string ClipName;
+    AnimationEvent Event; // Owned snapshot; safe after track edits/model replacement.
+    bool Reverse = false;
+};
+enum class AnimationSeekEvents { Silent, Collect };
+class AnimationEventOverflow : public std::length_error {public: using std::length_error::length_error;};
+struct AnimationEventCallbackError : std::runtime_error {
+    explicit AnimationEventCallbackError(std::exception_ptr cause) : std::runtime_error("Animation event callback failed."), Cause(std::move(cause)) {}
+    std::exception_ptr Cause;
+};
 struct AnimationClip {
     std::string Name;
     double Duration = 0;
     std::vector<AnimationTrack> Tracks;
     std::vector<MorphTrack> MorphTracks;
+    std::vector<AnimationEvent> Events;
 };
 enum class PoseChannels : std::uint8_t { None = 0, Translation = 1, Rotation = 2, Scale = 4, All = 7 };
 constexpr PoseChannels operator|(PoseChannels a, PoseChannels b) noexcept {
@@ -141,6 +163,7 @@ void ValidateSkeleton(const SkeletonAsset& skeleton);
 std::uint64_t SkeletonSignature(const SkeletonAsset& skeleton);
 void ValidatePose(const SkeletonAsset& skeleton, const PoseAsset& pose);
 void ValidateAnimation(const SkeletonAsset& skeleton, const AnimationClip& clip);
+void ValidateAnimationEvents(double duration, std::span<const AnimationEvent> events);
 PoseAsset ReferencePose(const SkeletonAsset& skeleton);
 Quaternion Slerp(Quaternion from, Quaternion to, float amount);
 void ValidatePoseBuffer(const SkeletonAsset& skeleton, const PoseBuffer& pose);
@@ -179,7 +202,7 @@ public:
     void Play(std::size_t clip, bool restart = true);
     void PlayBlendTree(BlendTreeHandle tree, bool restart = true);
     void SetBlendParameter(std::string_view name, float value);
-    void SeekBlendTree(double phase);
+    void SeekBlendTree(double phase, AnimationSeekEvents events = AnimationSeekEvents::Silent);
     std::vector<float> BlendWeights() const;
     double BlendTreeDuration() const; // Weighted cycle duration in seconds at current parameters.
     void SetAdditiveAnimation(std::size_t clip, float weight = 1, const PoseAsset& reference = {}, std::span<const float> jointMask = {});
@@ -193,7 +216,7 @@ public:
     void Pause() noexcept;
     void Resume();
     void Stop() noexcept; // Keeps clip; returns to its first frame, retains overrides.
-    void Seek(double seconds); // Clamped [0, duration], even in loop mode.
+    void Seek(double seconds, AnimationSeekEvents events = AnimationSeekEvents::Silent); // Clamped, no wrapping.
     void SetSpeed(double speed); // Finite [-100,100], including reverse playback.
     void SetLoop(bool loop) noexcept { loop_ = loop; }
     void Update(double deltaSeconds); // Nonnegative; explicit update for headless use.
@@ -213,7 +236,17 @@ public:
     void ClearMorphWeights(JointId node);
     void ClearMorphOverrides() noexcept { morphOverrides_.clear(); }
     const std::vector<MorphPose>& MorphOverrides() const noexcept { return morphOverrides_; }
+    void SetAnimationEvents(std::size_t clip, std::span<const AnimationEvent> events); // Replace instance overlay; empty suppresses asset events.
+    void ResetAnimationEvents(std::size_t clip); // Resume immutable Clip events.
+    const std::vector<AnimationEventTrack>& EventOverrides() const noexcept { return eventOverrides_; }
+    std::span<const AnimationEvent> AnimationEvents(std::size_t clip) const;
+    std::optional<std::size_t> PrimaryEventClip() const; // Target Clip, or greatest Tree weight (tie: sample order).
+    std::span<const AnimationEventOccurrence> PendingAnimationEvents() const noexcept { return eventQueue_; }
+    std::vector<AnimationEventOccurrence> PollAnimationEvents();
+    std::size_t DispatchAnimationEvents(std::function<void(const AnimationEventOccurrence&)> callback);
+    void ClearAnimationEventQueue() noexcept { eventQueue_.clear(); }
 private:
+    friend class Scene; // Preflight bounded queues before advancing any scene player.
     ModelHandle model_;
     std::optional<std::size_t> clip_;
     double time_ = 0, speed_ = 1;
@@ -224,6 +257,11 @@ private:
     std::optional<BlendTreeState> tree_;
     std::optional<AdditiveAnimationState> additive_;
     std::vector<MorphPose> morphOverrides_;
+    std::vector<AnimationEventTrack> eventOverrides_;
+    std::vector<AnimationEventOccurrence> eventQueue_;
+    void CollectEvents(std::size_t clip, double oldTime, double newTime, bool loop, std::vector<AnimationEventOccurrence>* output, bool normalized = false) const;
+    void CollectUpdateEvents(double deltaSeconds, std::vector<AnimationEventOccurrence>* output) const;
+    void QueueEvents(std::vector<AnimationEventOccurrence> events);
     std::vector<float> EvaluateMorphClip(JointId node, std::optional<std::size_t> clip, double time) const;
     std::vector<float> EvaluateMorphBase(JointId node) const;
     PoseBuffer EvaluateClip(std::optional<std::size_t> clip,double time) const;

@@ -54,7 +54,11 @@ public:
     Result<void> CrossFadeAnimation(ObjectId object, std::size_t clip, double durationSeconds = .3);
     Result<void> PlayBlendTree(ObjectId object, BlendTreeHandle tree, bool restart = true);
     Result<void> SetBlendParameter(ObjectId object, std::string_view name, float value);
-    Result<void> SeekBlendTree(ObjectId object, double phase);
+    Result<void> SeekBlendTree(ObjectId object, double phase, AnimationSeekEvents events = AnimationSeekEvents::Silent);
+    Result<void> SetAnimationEvents(ObjectId object, std::size_t clip, std::span<const AnimationEvent> events);
+    Result<void> ResetAnimationEvents(ObjectId object, std::size_t clip);
+    Result<std::vector<SceneAnimationEvent>> PollAnimationEvents();
+    Result<std::size_t> DispatchAnimationEvents(std::function<void(const SceneAnimationEvent&)> callback);
     Result<void> SetAdditiveAnimation(ObjectId object, std::size_t clip, float weight = 1, const PoseAsset& reference = {}, std::span<const float> jointMask = {});
     Result<void> RestoreAdditiveAnimation(ObjectId object, const AdditiveAnimationState& state);
     Result<void> SetAdditiveWeight(ObjectId object, float weight);
@@ -64,7 +68,7 @@ public:
     Result<void> PauseAnimation(ObjectId object);
     Result<void> ResumeAnimation(ObjectId object);
     Result<void> StopAnimation(ObjectId object);
-    Result<void> SeekAnimation(ObjectId object, double seconds);
+    Result<void> SeekAnimation(ObjectId object, double seconds, AnimationSeekEvents events = AnimationSeekEvents::Silent);
     Result<void> SetAnimationSpeed(ObjectId object, double speed);
     Result<void> SetAnimationLoop(ObjectId object, bool loop);
     Result<void> SetJointPose(ObjectId object, JointId joint, const Transform& local);

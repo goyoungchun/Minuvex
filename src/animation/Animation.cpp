@@ -77,6 +77,7 @@ PoseAsset ReferencePose(const SkeletonAsset& skeleton) {
     return pose;
 }
 void ValidateAnimation(const SkeletonAsset& skeleton, const AnimationClip& clip) {
+    ValidateAnimationEvents(clip.Duration,clip.Events);
     Require(std::isfinite(clip.Duration) && clip.Duration >= 0 && clip.Tracks.size() <= skeleton.Joints.size()*3,"Invalid animation duration/track count.");
     std::unordered_set<std::uint64_t> seen;
     for (const auto& track : clip.Tracks) {
@@ -151,7 +152,7 @@ void AnimationPlayer::Bind(ModelHandle model) {
         }
     }
     if (model) {ValidateMorphModel(*model);}
-    morphOverrides_.clear();
+    morphOverrides_.clear();eventOverrides_.clear();eventQueue_.clear();
     model_ = std::move(model); clip_.reset(); time_ = 0; speed_ = 1; loop_ = true; state_ = PlaybackState::Stopped;
     blend_.reset();tree_.reset();additive_.reset();overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
 }
@@ -181,6 +182,7 @@ void AnimationPlayer::Rebind(ModelHandle model) {
         next.RestoreBlend(*blend_);
     }
     if (additive_) {const auto clip=additive_->Clip;Require(clip<next.model_->Animations.size() && next.model_->Animations[clip].Name==model_->Animations[clip].Name,"Reimport changed the additive clip identity.");next.RestoreAdditiveAnimation(*additive_);}
+    for (const auto& track:eventOverrides_) {Require(track.Clip<next.model_->Animations.size() && next.model_->Animations[track.Clip].Name==model_->Animations[track.Clip].Name,"Reimport changed an event overlay clip identity.");next.SetAnimationEvents(track.Clip,track.Events);}next.eventQueue_=eventQueue_;
     (void)next.Evaluate();
     *this = std::move(next);
 }
@@ -226,14 +228,15 @@ void AnimationPlayer::RestoreBlend(const AnimationBlendState& state) {ValidateBl
 void AnimationPlayer::Pause() noexcept { if (state_ == PlaybackState::Playing) { state_ = PlaybackState::Paused; }if (additive_ && additive_->State==PlaybackState::Playing) {additive_->State=PlaybackState::Paused;} }
 void AnimationPlayer::Resume() { Require(model_ && (clip_ || tree_ || additive_),"Select an animation clip, tree or additive layer before resuming.");if (clip_ || tree_) {state_=PlaybackState::Playing;}if (additive_) {additive_->State=model_->Animations[additive_->Clip].Duration==0 ? PlaybackState::Stopped:PlaybackState::Playing;} }
 void AnimationPlayer::Stop() noexcept { time_ = 0;if (tree_) {tree_->Phase=0;}if (additive_) {additive_->Time=0;additive_->State=PlaybackState::Stopped;}state_ = PlaybackState::Stopped;blend_.reset(); }
-void AnimationPlayer::Seek(double seconds) {
+void AnimationPlayer::Seek(double seconds,AnimationSeekEvents events) {
     Require(model_ && clip_.has_value() && std::isfinite(seconds) && seconds >= 0,"Seek requires a clip and finite nonnegative time.");
-    time_ = std::min(seconds,model_->Animations[*clip_].Duration);
+    Require(events==AnimationSeekEvents::Silent || events==AnimationSeekEvents::Collect,"Unknown event seek policy.");const auto next=std::min(seconds,model_->Animations[*clip_].Duration);std::vector<AnimationEventOccurrence> collected;if (events==AnimationSeekEvents::Collect) {CollectEvents(*clip_,time_,next,false,&collected);}QueueEvents(std::move(collected));time_=next;
     blend_.reset();
 }
 void AnimationPlayer::SetSpeed(double speed) { Require(std::isfinite(speed) && std::abs(speed) <= 100,"Playback speed must be finite and in [-100,100]."); speed_ = speed; }
 void AnimationPlayer::Update(double deltaSeconds) {
     Require(std::isfinite(deltaSeconds) && deltaSeconds >= 0,"Animation delta time must be finite and nonnegative.");
+    std::vector<AnimationEventOccurrence> collected;CollectUpdateEvents(deltaSeconds,&collected);
     double additiveTime=additive_ ? additive_->Time:0;auto additiveState=additive_ ? additive_->State:PlaybackState::Stopped;
     if (additive_ && additiveState==PlaybackState::Playing && speed_!=0 && additive_->Speed!=0 && deltaSeconds!=0) {
         const auto duration=model_->Animations[additive_->Clip].Duration;const auto shift=deltaSeconds*speed_*additive_->Speed;Require(std::isfinite(shift),"Additive time advance exceeds numeric range.");const auto next=additiveTime+shift;Require(std::isfinite(next),"Additive time advance exceeds numeric range.");
@@ -241,16 +244,16 @@ void AnimationPlayer::Update(double deltaSeconds) {
     }
     const auto commitAdditive=[&] {if (additive_) {additive_->Time=additiveTime;additive_->State=additiveState;}};
     if (tree_) {
-        if (state_!=PlaybackState::Playing || speed_==0 || deltaSeconds==0) {commitAdditive();return;}const auto duration=BlendTreeDuration();if (duration==0) {tree_->Phase=0;state_=PlaybackState::Stopped;commitAdditive();return;}
+        if (state_!=PlaybackState::Playing || speed_==0 || deltaSeconds==0) {QueueEvents(std::move(collected));commitAdditive();return;}const auto duration=BlendTreeDuration();if (duration==0) {QueueEvents(std::move(collected));tree_->Phase=0;state_=PlaybackState::Stopped;commitAdditive();return;}
         const auto next=tree_->Phase+deltaSeconds*speed_/duration;Require(std::isfinite(next),"Tree phase advance exceeds numeric range.");
-        if (loop_) {auto phase=std::fmod(next,1.0);tree_->Phase=phase<0 ? phase+1:phase;}else {tree_->Phase=std::clamp(next,0.0,1.0);if ((speed_>0 && next>=1) || (speed_<0 && next<=0)) {state_=PlaybackState::Stopped;}}commitAdditive();return;
+        QueueEvents(std::move(collected));if (loop_) {auto phase=std::fmod(next,1.0);tree_->Phase=phase<0 ? phase+1:phase;}else {tree_->Phase=std::clamp(next,0.0,1.0);if ((speed_>0 && next>=1) || (speed_<0 && next<=0)) {state_=PlaybackState::Stopped;}}commitAdditive();return;
     }
-    if (state_ != PlaybackState::Playing || !model_ || !clip_ || speed_ == 0 || deltaSeconds == 0) {commitAdditive();return;}
+    if (state_ != PlaybackState::Playing || !model_ || !clip_ || speed_ == 0 || deltaSeconds == 0) {QueueEvents(std::move(collected));commitAdditive();return;}
     const double shift=deltaSeconds*speed_;Require(std::isfinite(shift),"Animation time advance exceeds numeric range.");
     const auto advance=[&](std::size_t clip,double time) {const double duration=model_->Animations[clip].Duration;if (duration == 0) {return 0.0;}const double next=time+shift;Require(std::isfinite(next),"Animation time advance exceeds numeric range.");if (!loop_) {return std::clamp(next,0.0,duration);}auto wrapped=std::fmod(next,duration);return wrapped<0 ? wrapped+duration:wrapped;};
     const auto next=advance(*clip_,time_);double source=0,elapsed=0;
     if (blend_) {if (blend_->SourceClip) {source=advance(*blend_->SourceClip,blend_->SourceTime);}elapsed=blend_->Elapsed+std::min(deltaSeconds,blend_->Duration-blend_->Elapsed);}
-    time_=next;
+    QueueEvents(std::move(collected));time_=next;
     if (blend_) {blend_->SourceTime=source;blend_->Elapsed=elapsed;if (elapsed>=blend_->Duration) {blend_.reset();}}
     const auto duration=model_->Animations[*clip_].Duration;
     if (!blend_ && (duration == 0 || (!loop_ && ((speed_>0 && time_>=duration) || (speed_<0 && time_<=0))))) {state_=PlaybackState::Stopped;}

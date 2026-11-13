@@ -7,7 +7,7 @@
 
 namespace lv {
 
-// Writes version 10 with per-player Additive state; reads versions 1..10.
+// Writes version 11 with instance event overlays (queues excluded); reads versions 1..11.
 // External model references, library, hierarchy, TRS, camera, lights, animation/pose.
 // Runtime ObjectId/AssetId values are remapped when opening an archive.
 struct SceneArchive {

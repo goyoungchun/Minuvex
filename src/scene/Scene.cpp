@@ -113,7 +113,16 @@ AnimationPlayer& Scene::GetAnimation(ObjectId id) {
 }
 void Scene::UpdateAnimations(double deltaSeconds) {
     if (!std::isfinite(deltaSeconds) || deltaSeconds < 0) { throw std::invalid_argument("Animation delta must be finite and nonnegative."); }
+    for (auto id:order_) {if (objects_.at(id).Model) {objects_.at(id).Animation.CollectUpdateEvents(deltaSeconds,nullptr);}}
     for (auto id : order_) { if (objects_.at(id).Model) { objects_.at(id).Animation.Update(deltaSeconds); } }
+}
+std::vector<SceneAnimationEvent> Scene::PollAnimationEvents() {
+    std::vector<SceneAnimationEvent> result;for (auto id:order_) {const auto& player=objects_.at(id).Animation;for (const auto& event:player.PendingAnimationEvents()) {result.push_back({id,event});}}ClearAnimationEventQueues();return result;
+}
+void Scene::ClearAnimationEventQueues() noexcept {for (auto& [id,object]:objects_) {object.Animation.ClearAnimationEventQueue();}}
+std::size_t Scene::DispatchAnimationEvents(std::function<void(const SceneAnimationEvent&)> callback) {
+    if (!callback) {throw std::invalid_argument("Event dispatch requires a callback.");}const auto events=PollAnimationEvents();std::exception_ptr failure;
+    for (const auto& event:events) {try {callback(event);}catch (...) {if (!failure) {failure=std::current_exception();}}}if (failure) {throw AnimationEventCallbackError(failure);}return events.size();
 }
 
 std::size_t Scene::ReplaceModel(ModelHandle previous, ModelHandle replacement) {

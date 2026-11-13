@@ -8,6 +8,7 @@ namespace lv {
 
 using ObjectId = std::uint64_t;
 inline constexpr ObjectId NoObject = 0;
+struct SceneAnimationEvent { ObjectId Object = NoObject; AnimationEventOccurrence Occurrence; };
 
 enum class CameraProjection { Perspective, Orthographic };
 struct Camera {
@@ -88,6 +89,9 @@ public:
     std::size_t ReplaceModel(ModelHandle previous, ModelHandle replacement); // All matching instances, transactional; preserves compatible animation/pose.
     AnimationPlayer& GetAnimation(ObjectId id); // Model instance state; throws for empty objects.
     void UpdateAnimations(double deltaSeconds);
+    std::vector<SceneAnimationEvent> PollAnimationEvents(); // Scene order, then each player's traversal order.
+    std::size_t DispatchAnimationEvents(std::function<void(const SceneAnimationEvent&)> callback);
+    void ClearAnimationEventQueues() noexcept;
     Mat4 GetWorldTransform(ObjectId id) const;
     std::vector<RenderItem> CollectRenderItems() const;
 

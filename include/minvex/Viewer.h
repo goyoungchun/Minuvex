@@ -109,7 +109,13 @@ public:
     Result<void> CrossFadeAnimation(ObjectId id, std::size_t clip, double durationSeconds = .3);
     Result<void> PlayBlendTree(ObjectId id, BlendTreeHandle tree, bool restart = true);
     Result<void> SetBlendParameter(ObjectId id, std::string_view name, float value);
-    Result<void> SeekBlendTree(ObjectId id, double phase);
+    Result<void> SeekBlendTree(ObjectId id, double phase, AnimationSeekEvents events = AnimationSeekEvents::Silent);
+    Result<void> SeekAnimation(ObjectId id, double seconds, AnimationSeekEvents events = AnimationSeekEvents::Silent);
+    Result<void> SetAnimationEvents(ObjectId id, std::size_t clip, std::span<const AnimationEvent> events);
+    Result<void> ResetAnimationEvents(ObjectId id, std::size_t clip);
+    Result<std::vector<SceneAnimationEvent>> PollAnimationEvents();
+    Result<std::size_t> DispatchAnimationEvents(std::function<void(const SceneAnimationEvent&)> callback);
+    Result<void> ClearAnimationEventQueues();
     Result<void> SetAdditiveAnimation(ObjectId id, std::size_t clip, float weight = 1, const PoseAsset& reference = {}, std::span<const float> jointMask = {});
     Result<void> RestoreAdditiveAnimation(ObjectId id, const AdditiveAnimationState& state);
     Result<void> SetAdditiveWeight(ObjectId id, float weight);
