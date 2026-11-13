@@ -231,6 +231,7 @@ public:
     PoseBuffer EvaluatePose() const; // Current blended local TRS plus manual overrides; Morph stays separate.
     EvaluatedPose Evaluate() const;
     Bounds GetBounds() const; // Current deformed geometry bounds, for camera fitting.
+    Bounds GetBounds(const EvaluatedPose& pose) const; // Explicit model-node pose; retains this player's morph weights.
     std::vector<float> EvaluateMorphWeights(JointId node) const;
     void SetMorphWeights(JointId node, std::span<const float> weights);
     void ClearMorphWeights(JointId node);

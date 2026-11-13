@@ -29,6 +29,7 @@ cmake --build --preset windows-release --parallel 4
 # 금속/비금속·거칠기 비교 예제
 ./out/build/windows-release/bin/minvex_rendering_enhancement.exe --pbr
 ./out/build/windows-release/bin/minvex_rendering_enhancement.exe --morph
+./out/build/windows-release/bin/minvex_equipment.exe
 ```
 
 ### macOS
@@ -63,16 +64,16 @@ cmake --build build
 | 분야 | 현재 지원 기능 |
 |---|---|
 | **Asset** | glTF/GLB, OBJ/MTL, FBX(Static·Skin·Animation·Blend Shape Bake), 검사·재임포트·Hot Reload·비동기 로딩 |
-| **Scene** | 객체 계층·Transform, 모델 인스턴스 공유, Scene 저장·불러오기 |
+| **Scene** | 객체 계층·Transform, 모델 인스턴스 공유, 소켓·부착 노드, Scene v12 저장·불러오기 |
 | **Mesh** | Static/Skeletal Mesh, GPU Skinning, 정점당 최대 4개 Bone 영향 |
 | **Morph** | Morph Target, GPU Morph, 노드별 독립 Weight, Weight Animation |
 | **Material·Lighting** | Base Color·Texture·Normal Map, Directional/Point/Spot Light, Basic/PCF/PCSS Shadow, HDR·FXAA |
 | **PBR** | Metallic/Roughness Material·Texture |
 | **Camera** | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking |
-| **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기 |
+| **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기, Shared Skeleton·Leader Pose 의상/파츠 동기화 |
 | **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Blend1D/Blend2D, Additive Animation·Joint Mask, Animation Event, Clip Cross-fade, Timeline Scrubbing |
 | **실행 방식** | Standalone Viewer, Embedded Runtime, Editor |
-| **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Blend Tree·Additive·Event Track 편집, Undo/Redo |
+| **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Blend Tree·Additive·Event Track·Leader Pose·소켓 편집, Undo/Redo |
 | **Debugging** | Wireframe, Normal·UV·Depth, Skeleton·Bone Weight, Shadow Map·Blocker·Penumbra·Visibility, Bounding Box, GPU Resource Inspector |
 | **Quality** | Low·Medium·High·Custom, 프로파일 저장·불러오기, 지원 기능 검사·Fallback |
 | **Hardware·Performance** | CPU/GPU/OS 정보, FPS·Frame Time, 메모리 사용량·예산, 품질 추천 |

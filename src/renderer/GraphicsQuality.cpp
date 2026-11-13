@@ -67,6 +67,7 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
         integer(item.Object);integer(reinterpret_cast<std::uintptr_t>(item.Model.get()));
         if (item.MaterialOverrides) {integer(item.MaterialOverrides->size());for (std::size_t index=0;index<item.Model->Materials.size();++index) {const auto found=item.MaterialOverrides->find(index);if (found == item.MaterialOverrides->end()) {continue;}integer(index);const auto& m=found->second;for (auto value:m.BaseColor) {scalar(value);}scalar(m.AlphaCutoff);scalar(m.NormalScale);scalar(m.MetallicFactor);scalar(m.RoughnessFactor);integer(static_cast<unsigned>(m.Shading));integer(m.Unlit);integer(m.DoubleSided);for (auto texture:{m.BaseColorTexture,m.NormalTexture,m.MetallicRoughnessTexture}) {integer(texture.has_value());integer(texture.value_or(0));}}}
         for (auto value:item.WorldTransform.Elements) {scalar(value);}
+        if (item.Pose) { for (const auto& matrix : item.Pose->Global) { for (auto value : matrix.Elements) { scalar(value); } } }
         if (item.Animation) {
             integer(item.Animation->Clip().has_value());integer(item.Animation->Clip().value_or(0));integer(std::bit_cast<std::uint64_t>(item.Animation->Time()));
             integer(item.Animation->Tree().has_value());if (const auto& tree=item.Animation->Tree()) {integer(tree->Tree->Signature());integer(std::bit_cast<std::uint64_t>(tree->Phase));scalar(tree->X);scalar(tree->Y);}
@@ -80,6 +81,15 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
     } return hash;
 }
 bool SceneHasActiveAnimation(const Scene& scene) {
-    for (const auto& item:scene.CollectRenderItems()) {if (!item.Animation || item.Animation->Speed()==0) {continue;}if (item.Animation->State()==PlaybackState::Playing) {return true;}if (const auto& a=item.Animation->Additive();a && a->State==PlaybackState::Playing && a->Speed!=0 && a->Weight>0 && (a->JointMask.empty() || std::any_of(a->JointMask.begin(),a->JointMask.end(),[](float weight){return weight>0;}))) {return true;}}return false;
+    for (const auto& item : scene.CollectRenderItems()) {
+        auto driver = item.Object;
+        while (scene.GetObject(driver).LeaderPose) { driver = scene.GetObject(driver).LeaderPose; }
+        const auto& player = scene.GetObject(driver).Animation;
+        if (player.Speed() == 0) { continue; }
+        if (player.State() == PlaybackState::Playing) { return true; }
+        if (const auto& a = player.Additive(); a && a->State == PlaybackState::Playing && a->Speed != 0 && a->Weight > 0 &&
+            (a->JointMask.empty() || std::any_of(a->JointMask.begin(), a->JointMask.end(), [](float weight) { return weight > 0; }))) { return true; }
+    }
+    return false;
 }
 }

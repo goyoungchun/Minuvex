@@ -20,9 +20,9 @@ void DebugRenderer::Prepare(const Scene& scene,const DebugOptions& o,const Debug
     DebugDraw draw=commands;
     if (o.ShowSkeleton || o.ShowBounds || o.ShowReferencePose || o.View == DebugView::Skeleton || o.View == DebugView::BoundingBox) {
         for (const auto& item:scene.CollectRenderItems()) {
-            if (o.ShowSkeleton || o.View == DebugView::Skeleton) {const auto pose=item.Animation->Evaluate();draw.DrawSkeleton(item.Model->Skeleton,pose,item.WorldTransform,{1,.8f,0,1});for (std::size_t i=0;i<item.Model->Skeleton.Joints.size();++i) {if (item.Model->Skeleton.Joints[i].IsJoint) {draw.DrawAxis(item.WorldTransform*pose.Global[i],.05f);}}}
+            if (o.ShowSkeleton || o.View == DebugView::Skeleton) {const auto pose=item.Pose ? *item.Pose : scene.EvaluatePose(item.Object);draw.DrawSkeleton(item.Model->Skeleton,pose,item.WorldTransform,{1,.8f,0,1});for (std::size_t i=0;i<item.Model->Skeleton.Joints.size();++i) {if (item.Model->Skeleton.Joints[i].IsJoint) {draw.DrawAxis(item.WorldTransform*pose.Global[i],.05f);}}}
             if (o.ShowReferencePose) {AnimationPlayer reference;reference.Bind(item.Model);draw.DrawSkeleton(item.Model->Skeleton,reference.Evaluate(),item.WorldTransform,{0,1,1,1});}
-            if (o.ShowBounds || o.View == DebugView::BoundingBox) {draw.DrawBoundingBox(item.Animation->GetBounds(),{0,1,0,1},item.WorldTransform);}
+            if (o.ShowBounds || o.View == DebugView::BoundingBox) {draw.DrawBoundingBox(scene.GetModelBounds(item.Object),{0,1,0,1},item.WorldTransform);}
         }
     }
     std::vector<Vertex> vertices;vertices.reserve(draw.Lines().size()*2);for (const auto& l:draw.Lines()) {vertices.push_back({l.Start,l.Color});vertices.push_back({l.End,l.Color});}

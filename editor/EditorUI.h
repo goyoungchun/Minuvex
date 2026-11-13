@@ -72,6 +72,9 @@ private:
     std::array<float,4> viewportRect_{};
     int transformTool_=0;
     float crossFadeSeconds_=.3f;
+    ObjectId equipmentObject_=NoObject, socketParent_=NoObject;
+    SkeletonSocket socketDraft_{"Socket", ""};
+    std::string attachmentDraft_;
     ObjectId treeObject_=NoObject;
     ModelHandle treeModel_;
     BlendTreeHandle treeDraftSource_;
@@ -135,6 +138,7 @@ private:
     void Menu();
     void Hierarchy();
     void Inspector();
+    void EquipmentControls(ObjectId object);
     void BoneInspector();
     void AnimationControls();
     void BlendTreeControls(ObjectId object,ModelHandle model);

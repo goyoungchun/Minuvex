@@ -7,7 +7,7 @@
 
 namespace lv {
 
-// Writes version 11 with instance event overlays (queues excluded); reads versions 1..11.
+// Writes version 12 with Shared Skeleton/Leader Pose/sockets; reads versions 1..12.
 // External model references, library, hierarchy, TRS, camera, lights, animation/pose.
 // Runtime ObjectId/AssetId values are remapped when opening an archive.
 struct SceneArchive {

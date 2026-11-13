@@ -40,6 +40,13 @@ public:
     Result<void> RemoveObject(ObjectId object); // Entire subtree; clears removed selection.
     Result<void> RenameObject(ObjectId object, std::string name);
     Result<void> SetParent(ObjectId object, ObjectId parent); // Keeps local TRS.
+    Result<void> SetSharedSkeleton(ObjectId object, SharedSkeletonHandle skeleton);
+    Result<void> SetLeaderPose(ObjectId follower, ObjectId leader);
+    Result<void> SetSocket(ObjectId object, const SkeletonSocket& socket);
+    Result<void> RemoveSocket(ObjectId object, std::string_view name);
+    Result<ObjectId> CreateAttachmentNode(ObjectId parent, std::string socket, const Transform& relative = {}, std::string name = {});
+    Result<void> AttachToSocket(ObjectId object, ObjectId parent, std::string socket, const Transform& relative = {});
+    Result<void> DetachFromSocket(ObjectId object, bool keepWorld = true);
     Result<void> SetTransform(ObjectId object, const Transform& transform);
     Result<void> SetWorldTransform(ObjectId object, const Mat4& world); // Reject local shear.
     Result<void> SetVisible(ObjectId object, bool visible);

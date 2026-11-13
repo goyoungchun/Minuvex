@@ -191,7 +191,7 @@ void CompatibilityDocument() {
     lv::ImportSettings settings;settings.ImportAnimations=false;settings.ImportMaterials=false;settings.AnimationBakeRate=24;settings.MaxAnimationSamples=1000;
     auto fbx=doc.PreviewModel(Fixture("Compatibility.fbx"),settings);Check(bool(fbx) && bool(doc.OpenPreparedModel(fbx.Value())) && doc.Path().empty() && doc.IsDirty(),"FBX preview can replace the document through Quick Open");
     const auto file=temp.File("modern.mvxscene.json");Check(bool(doc.Save(file)),"Scene v4 saves extended import settings");
-    auto json=Json::parse(Read(file));Check(json["version"] == 11 && json["assets"][0]["import"]["importAnimations"] == false,"Scene v7 retains explicit import flags");
+    auto json=Json::parse(Read(file));Check(json["version"] == 12 && json["assets"][0]["import"]["importAnimations"] == false,"Scene v7 retains explicit import flags");
     lv::EditorDocument reopened;Check(bool(reopened.Open(file)) && reopened.Assets().front()->Settings == settings && reopened.Assets().front()->Animations.empty(),"FBX import settings round trip without enabling unwanted clips/materials");
     json["version"]=3;for (const auto* field:{"importAnimations","importMaterials","animationBakeRate","maxAnimationSamples","textureDirectory"}) {json["assets"][0]["import"].erase(field);}Write(file,json.dump());
     Check(bool(reopened.Open(file)) && reopened.Assets().front()->Settings.ImportAnimations && !reopened.Assets().front()->Animations.empty(),"legacy Scene v3 restores default import options");
@@ -231,7 +231,7 @@ void MaterialOverrides() {
     Check(bool(doc.SetMaterial(a,0,material)) && doc.GetScene().GetMaterial(a,0).RoughnessFactor == .2f && doc.GetScene().GetMaterial(b,0).RoughnessFactor == original.RoughnessFactor,"material overrides are independent across shared instances");
     Check(bool(doc.Undo()) && doc.GetScene().GetObject(a).MaterialOverrides.empty() && bool(doc.Redo()) && doc.GetScene().GetMaterial(a,0).DoubleSided,"material edits support Undo/Redo");
     const auto path=temp.File("Pbr.mvxscene.json");Check(bool(doc.Save(path)),"material Scene saves");const auto saved=Json::parse(Read(path));lv::EditorDocument loaded;
-    Check(saved["version"] == 11 && bool(loaded.Open(path)),"Scene v7 material overrides load");const auto first=loaded.GetScene().ObjectIds()[0];
+    Check(saved["version"] == 12 && bool(loaded.Open(path)),"Scene v7 material overrides load");const auto first=loaded.GetScene().ObjectIds()[0];
     Check(loaded.GetScene().GetMaterial(first,0).MetallicFactor == .8f && loaded.GetScene().GetMaterial(first,0).RoughnessFactor == .2f && loaded.GetScene().GetMaterial(first,0).DoubleSided,"PBR shading/factors/rasterization round-trip");
     auto bad=material;bad.MetallicFactor=2;Check(!loaded.SetMaterial(first,0,bad) && !loaded.IsDirty() && loaded.GetScene().GetMaterial(first,0).MetallicFactor == .8f,"failed material edit preserves state and savepoint");
     auto corrupt=saved;corrupt["objects"][0]["materials"][0]["sourceName"]="stale";Write(path,corrupt.dump());Check(!loaded.Open(path) && loaded.GetScene().GetMaterial(first,0).RoughnessFactor == .2f,"stale material identity cannot replace document");

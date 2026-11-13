@@ -4,6 +4,7 @@
 #include "renderer/RenderSurface.h"
 #include "renderer/TextureData.h"
 #include "OptimizationFixture.h"
+#include "EquipmentFixture.h"
 
 #include <sokol_gfx.h>
 #include <sokol_app.h>
@@ -26,6 +27,8 @@ constexpr int Size = 128;
 using Pixel = std::array<std::uint8_t, 4>;
 bool failed = false;
 bool ran = false;
+bool socketTests = false;
+bool leaderTests = false;
 bool animationTests = false;
 bool treeTests = false;
 bool additiveTests = false;
@@ -530,6 +533,88 @@ void RunMorph() {
     scene.MainCamera.Position.X=scene.MainCamera.Target.X=0;player.SetMorphWeights(3,weights);(void)render(scene);const auto bytes=surface.Stats().LogicalBufferBytes;lv::Transform offset;offset.Position.X=-1.3f;const auto second=scene.AddModel(model,offset);scene.GetAnimation(second).SetMorphWeights(3,std::array<float,2>{0,0});const auto both=render(scene);scene.GetAnimation(second).SetMorphWeights(3,std::array<float,2>{1,0});const auto changed=render(scene);bool independent=true;for (int y=0;y<Size;++y) {for (int x=Size/2;x<Size;++x) {independent &= both[y*Size+x] == changed[y*Size+x];}}
     Check(independent && both!=changed && surface.Stats().ResidentModels == 1 && surface.Stats().LogicalBufferBytes == bytes && surface.Stats().LastDrawCalls == 2,"instances share morph GPU data while retaining independent weights");
 }
+void RunSockets() {
+    lv::AssetRegistry assets;
+    const auto bodyModel = assets.LoadModel(Fixture("AnimatedRibbon.gltf"));
+    const auto weaponModel = assets.LoadModel(Fixture("SharedBox.glb"));
+    lv::Scene scene, expected;
+    scene.MainCamera.Position = {0, 1, 5}; scene.MainCamera.Target = {0, 1, 0};
+    scene.MainCamera.Projection = lv::CameraProjection::Orthographic; scene.MainCamera.OrthographicHeight = 4;
+    expected.MainCamera = scene.MainCamera;
+    const auto body = scene.AddModel(bodyModel), refBody = expected.AddModel(bodyModel);
+    const auto joint = bodyModel->Skins[0].Joints.back();
+    lv::SkeletonSocket socket{"Hand", bodyModel->Skeleton.Joints[joint].Name}; socket.LocalTransform.Position.X = .4f;
+    scene.SetSocket(body, socket);
+    const auto node = scene.CreateAttachmentNode(body, "Hand");
+    lv::Transform scale; scale.Scale = {.2f, .2f, .2f};
+    scene.AddModel(weaponModel, scale, node); const auto refWeapon = expected.AddModel(weaponModel);
+    auto profile = lv::MakeQualityProfile(lv::QualityPreset::Medium);
+    profile.Overrides.Shadow = lv::ShadowMode::Off; profile.Overrides.TargetFps = 0; profile.Overrides.OnDemand = lv::OnDemandMode::On;
+    lv::detail::RenderSurface surface; Require(bool(surface.ApplyQuality(profile, scene, Size, Size)), "Cannot prepare socket rendering.");
+    double clock = 1;
+    const auto render = [&](const lv::Scene& world) { Require(surface.Render(world, clock++, false, {0,0,0,1}), "Socket edit did not wake rendering."); sg_commit(); return ReadImage(surface.ColorImage(), Size, Size); };
+    scene.GetAnimation(body).Play(0); expected.GetAnimation(refBody).Play(0);
+    std::vector<Pixel> first;
+    for (double time : {0.0, .5, 1.0}) {
+        scene.GetAnimation(body).Seek(time); expected.GetAnimation(refBody).Seek(time);
+        const auto world = scene.GetAnimation(body).Evaluate().Global.at(joint) * socket.LocalTransform.Matrix() * scale.Matrix();
+        expected.SetTransform(refWeapon, lv::DecomposeTRS(world));
+        const auto actual = render(scene); const auto reference = render(expected);
+        Check(actual == reference, "socket equipment GPU pixels equal independently positioned equipment");
+        if (first.empty()) { first = actual; } else { Check(actual != first, "animated socket moves actual GPU pixels"); }
+    }
+    scene.GetAnimation(body).Pause(); (void)render(scene);
+    Check(!surface.Render(scene, clock++, false, {0,0,0,1}), "unchanged paused equipment retains cached image");
+    socket.LocalTransform.Position.X += .3f; scene.SetSocket(body, socket); (void)render(scene);
+    scene.SetVisible(body, false); const auto hidden = render(scene);
+    Check(std::none_of(hidden.begin(), hidden.end(), [](const auto& pixel) { return pixel[0] || pixel[1] || pixel[2]; }), "hiding body hides attached equipment pixels");
+}
+void RunLeaderPose() {
+    lv::AssetRegistry assets;
+    const auto model = assets.LoadModel(Fixture("AnimatedRibbon.gltf")), clothing = EquipmentFollower(model);
+    const auto shared = lv::CreateSharedSkeleton(model->Skeleton, {{"Hand", "Tip"}});
+    lv::Scene scene, expected;
+    scene.MainCamera.Position = {0, 1, 5}; scene.MainCamera.Target = {0, 1, 0};
+    scene.MainCamera.Projection = lv::CameraProjection::Orthographic; scene.MainCamera.OrthographicHeight = 4;
+    expected.MainCamera = scene.MainCamera;
+    const auto body = scene.AddModel(model), follower = scene.AddModel(clothing), reference = expected.AddModel(clothing);
+    scene.SetSharedSkeleton(body, shared); scene.SetSharedSkeleton(follower, shared); scene.SetLeaderPose(follower, body);
+    scene.SetVisible(body, false); // Hidden leaders still drive visible modular parts.
+    const auto node = scene.CreateAttachmentNode(follower, "Hand");
+    const auto weaponModel = assets.LoadModel(Fixture("SharedBox.glb"));
+    lv::Transform scale; scale.Scale = {.2f, .2f, .2f};
+    scene.AddModel(weaponModel, scale, node); const auto refWeapon = expected.AddModel(weaponModel);
+    auto profile = lv::MakeQualityProfile(lv::QualityPreset::Medium);
+    profile.Overrides.Shadow = lv::ShadowMode::Off; profile.Overrides.TargetFps = 0; profile.Overrides.OnDemand = lv::OnDemandMode::On;
+    lv::detail::RenderSurface surface; Require(bool(surface.ApplyQuality(profile, scene, Size, Size)), "Cannot prepare Leader Pose rendering.");
+    double clock = 1;
+    const auto render = [&](const lv::Scene& world) { Require(surface.Render(world, clock++, false, {0,0,0,1}), "Leader pose change did not wake rendering."); sg_commit(); return ReadImage(surface.ColorImage(), Size, Size); };
+    const auto compare = [](const auto& a, const auto& b) { std::size_t count = 0; for (std::size_t i = 0; i < a.size(); ++i) { for (int c = 0; c < 3; ++c) { if (std::abs(int(a[i][c]) - int(b[i][c])) > 3) { ++count; break; } } } return count; };
+    scene.GetAnimation(body).Play(0); scene.GetAnimation(body).Pause();
+    std::vector<Pixel> first;
+    for (double time : {0.0, .5, 1.0}) {
+        scene.GetAnimation(body).Seek(time);
+        const auto source = scene.GetAnimation(body).Evaluate();
+        auto pose = lv::ReferencePose(clothing->Skeleton);
+        for (auto& joint : pose.Joints) { joint.Local = lv::DecomposeTRS(source.Local[lv::FindSkeletonJoint(model->Skeleton, clothing->Skeleton.Joints[joint.Joint].Name)]); }
+        expected.GetAnimation(reference).ApplyPose(pose);
+        expected.SetTransform(refWeapon, lv::DecomposeTRS(source.Global[lv::FindSkeletonJoint(model->Skeleton, "Tip")] * scale.Matrix()));
+        const auto actual = render(scene), independent = render(expected);
+        Check(compare(actual, independent) < 10, "GPU Leader Pose with reordered nodes, own inverse binds and follower socket matches independent pose");
+        if (first.empty()) { first = actual; } else { Check(actual != first, "hidden leader changes visible clothing and weapon pixels"); }
+    }
+    (void)render(scene);
+    Check(!surface.Render(scene, clock++, false, {0,0,0,1}), "paused unchanged Leader Pose retains cached image");
+    lv::Transform movedPose; movedPose.Position.X = 25; scene.GetAnimation(body).SetJointOverride(1, movedPose);
+    scene.MainCamera.Position.X = scene.MainCamera.Target.X = 25;
+    const auto outside = render(scene);
+    Check(std::count_if(outside.begin(), outside.end(), [](const auto& p) { return p[0] + p[1] + p[2] > 20; }) > 30, "leader pose drives culling bounds outside follower reference bounds");
+    profile.Overrides.Shadow = lv::ShadowMode::Pcf;
+    Require(bool(surface.ApplyQuality(profile, scene, Size, Size)), "Cannot enable equipment shadows."); (void)render(scene);
+    std::size_t shadowDraws = 0;
+    for (const auto& asset : {clothing, weaponModel}) { for (const auto& part : asset->Parts) { shadowDraws += asset->Meshes.at(part.MeshIndex).Primitives.size(); } }
+    Check(surface.Stats().LastShadowDrawCalls == shadowDraws, "clothing and every socket equipment primitive participate in shadow pass");
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -553,6 +638,11 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
+    if (socketTests || leaderTests) {
+        try { Require(sg_isvalid(), "Sokol initialization failed."); if (socketTests) { RunSockets(); } else { RunLeaderPose(); } }
+        catch (const std::exception& error) { Check(false, error.what()); }
+        sapp_request_quit(); return;
+    }
     try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunTree();RunAdditive();RunPbr();RunMorph();RunPcss();} else if (pcssTests) {RunPcss();}else if (additiveTests) {RunAdditive();}else if (treeTests) {RunTree();}else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
@@ -561,6 +651,8 @@ void Cleanup() { if (sg_isvalid()) { sg_shutdown(); } }
 } // namespace
 
 int main(int argc, char** argv) {
+    leaderTests = argc > 1 && std::strcmp(argv[1],"--equipment-leader") == 0;
+    socketTests = argc > 1 && std::strcmp(argv[1],"--equipment-sockets") == 0;
     animationTests = argc > 1 && std::strcmp(argv[1],"--animation") == 0;
     treeTests = argc > 1 && std::strcmp(argv[1],"--tree") == 0;
     additiveTests = argc > 1 && std::strcmp(argv[1],"--additive") == 0;

@@ -55,6 +55,44 @@ Transform Local(const Json& j) {
     Transform t{Vector(j.at("position")),{Float(q[0]),Float(q[1]),Float(q[2]),Float(q[3])},Vector(j.at("scale"))};
     (void)t.Matrix().NormalMatrix(); return t;
 }
+Json Sockets(std::span<const SkeletonSocket> sockets) {
+    Json result = Json::array();
+    for (const auto& socket : sockets) {
+        auto value = Local(socket.LocalTransform); value["name"] = String(socket.Name); value["joint"] = String(socket.Joint); result.push_back(std::move(value));
+    }
+    return result;
+}
+std::vector<SkeletonSocket> Sockets(const Json& json) {
+    Require(json.is_array() && json.size() <= 256, "Invalid socket array.");
+    std::vector<SkeletonSocket> result; std::unordered_set<std::string> names;
+    for (const auto& value : json) {
+        SkeletonSocket socket{String(value.at("name")), String(value.at("joint")), Local(value)};
+        Require(names.insert(socket.Name).second, "Duplicate socket name."); result.push_back(std::move(socket));
+    }
+    return result;
+}
+Json SharedSkeleton(const SharedSkeletonAsset& shared) {
+    Json nodes = Json::array();
+    for (const auto& joint : shared.Skeleton().Joints) {
+        auto node = Local(joint.ReferenceLocal);
+        node["name"] = String(joint.Name); node["parent"] = joint.Parent;
+        node["editable"] = joint.Editable; node["bone"] = joint.IsJoint; node["matrixAuthored"] = joint.MatrixAuthored;
+        node["matrix"] = joint.ReferenceMatrix.Elements; nodes.push_back(std::move(node));
+    }
+    return {{"nodes", nodes}, {"sockets", Sockets(shared.Sockets())}};
+}
+SharedSkeletonHandle SharedSkeleton(const Json& json) {
+    const auto& nodes = json.at("nodes"); Require(nodes.is_array() && nodes.size() <= 65536, "Invalid shared skeleton node array.");
+    SkeletonAsset skeleton;
+    for (const auto& node : nodes) {
+        SkeletonJoint joint; joint.Name = String(node.at("name")); joint.Parent = static_cast<JointId>(UInt(node.at("parent"), NoJoint));
+        joint.ReferenceLocal = Local(node); joint.Editable = node.at("editable").get<bool>(); joint.IsJoint = node.at("bone").get<bool>(); joint.MatrixAuthored = node.at("matrixAuthored").get<bool>();
+        const auto& matrix = node.at("matrix"); Require(matrix.is_array() && matrix.size() == 16, "Invalid skeleton reference matrix.");
+        for (std::size_t i = 0; i < 16; ++i) { joint.ReferenceMatrix.Elements[i] = Float(matrix[i]); }
+        skeleton.Joints.push_back(std::move(joint));
+    }
+    return CreateSharedSkeleton(std::move(skeleton), Sockets(json.at("sockets")));
+}
 Json Pose(const PoseAsset& pose, const SkeletonAsset& skeleton) {
     ValidatePose(skeleton,pose); char signature[17]; std::snprintf(signature,sizeof(signature),"%016llx",static_cast<unsigned long long>(pose.SkeletonSignature));
     Json json{{"name",String(pose.Name)},{"skeleton",signature},{"joints",Json::array()}};
@@ -209,6 +247,10 @@ void ValidateScene(const Scene& scene) {
         for (auto current = id; current; current = scene.GetObject(current).Parent) {
             Require(++depth <= MaxDepth,"Scene hierarchy exceeds 256 levels.");
         }
+        depth = 0;
+        for (auto current = id; current; current = scene.GetObject(current).LeaderPose) {
+            Require(++depth <= MaxDepth, "Scene Leader Pose chain exceeds 256 levels.");
+        }
         (void)scene.GetWorldTransform(id).NormalMatrix();
         (void)Materials(scene.GetObject(id));
     }
@@ -234,8 +276,9 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
         // Model sources are canonical. Resolve directory aliases (e.g. macOS
         // /var -> /private/var) before computing portable relative references.
         const auto base = std::filesystem::weakly_canonical(std::filesystem::absolute(path).parent_path());
-        Json root{{"format","MinvexScene"},{"version",11},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
+        Json root{{"format","MinvexScene"},{"version",12},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()},{"sharedSkeletons",Json::array()}};
         TreeIds trees;
+        std::unordered_map<const SharedSkeletonAsset*, std::size_t> skeletons;
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -256,12 +299,19 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
         for (auto id : objects) { ids.emplace(id,ids.size()+1); }
         for (auto id : objects) {
             const auto& object = scene.GetObject(id); const auto& t = object.LocalTransform;
+            if (object.SharedSkeleton && !skeletons.contains(object.SharedSkeleton.get())) {
+                Require(skeletons.size() < 1024, "Scene Shared Skeleton limit exceeded.");
+                const auto sharedId = skeletons.size() + 1; skeletons.emplace(object.SharedSkeleton.get(), sharedId);
+                root["sharedSkeletons"].push_back({{"id", sharedId}, {"definition", SharedSkeleton(*object.SharedSkeleton)}});
+            }
             if (object.Model) { addAsset(object.Model); }
             if (object.Model && object.Animation.Tree()) {const auto& tree=object.Animation.Tree()->Tree;if (!trees.contains(tree.get())) {Require(trees.size()<1024,"Scene tree limit exceeded.");const auto treeId=trees.size()+1;trees.emplace(tree.get(),treeId);root["blendTrees"].push_back({{"id",treeId},{"model",assetIds.at(object.Model.get())},{"definition",TreeDefinition(*tree)}});}}
             const Json rotation = Json::array({t.Rotation.X,t.Rotation.Y,t.Rotation.Z,t.Rotation.W});
             root["objects"].push_back({{"id",ids.at(id)},{"parent",object.Parent ? ids.at(object.Parent) : 0},
                 {"name",String(object.Name)},{"visible",object.Visible},{"asset",object.Model ? assetIds.at(object.Model.get()) : 0},
-                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object,trees)},{"materials",Materials(object)}});
+                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object,trees)},{"materials",Materials(object)},
+                {"sharedSkeleton", object.SharedSkeleton ? skeletons.at(object.SharedSkeleton.get()) : 0},
+                {"leaderPose", object.LeaderPose ? ids.at(object.LeaderPose) : 0}, {"sockets", Sockets(object.Sockets)}, {"attachmentSocket", String(object.AttachmentSocket)}});
         }
         const auto& c = scene.MainCamera; const auto& l = scene.Sun;
         root["camera"] = {{"position",Vector(c.Position)},{"target",Vector(c.Target)},{"up",Vector(c.Up)},
@@ -279,7 +329,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(detail::MatchesDocumentFormat(root.at("format"), "MinvexScene") && (version >= 1 && version <= 11),"Unsupported scene format/version.");
+        Require(detail::MatchesDocumentFormat(root.at("format"), "MinvexScene") && (version >= 1 && version <= 12),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -344,6 +394,33 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
             if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8,version>=9 ? &trees:nullptr,version>=10,version>=11); }
             if (version>=7) {Materials(object.at("materials"),scene,ids.at(UInt(object.at("id"))));}
+        }
+        if (version >= 12) {
+            std::unordered_map<std::uint64_t, SharedSkeletonHandle> skeletons;
+            const auto& definitions = root.at("sharedSkeletons"); Require(definitions.is_array() && definitions.size() <= 1024, "Invalid shared skeleton list.");
+            for (const auto& value : definitions) {
+                const auto id = UInt(value.at("id")); Require(id && !skeletons.contains(id), "Duplicate/zero Shared Skeleton ID.");
+                skeletons.emplace(id, SharedSkeleton(value.at("definition")));
+            }
+            std::unordered_map<std::uint64_t, std::uint64_t> leaders;
+            for (const auto& object : objects) {
+                const auto savedId = UInt(object.at("id")), id = ids.at(savedId), shared = UInt(object.at("sharedSkeleton")), leader = UInt(object.at("leaderPose"));
+                Require(!shared || skeletons.contains(shared), "Unknown Shared Skeleton ID."); Require(!leader || ids.contains(leader), "Unknown Leader Pose object ID.");
+                if (shared) { scene.SetSharedSkeleton(id, skeletons.at(shared)); }
+                for (const auto& socket : Sockets(object.at("sockets"))) { scene.SetSocket(id, socket); }
+                leaders.emplace(savedId, leader);
+            }
+            for (const auto& [id, leader] : leaders) {
+                std::size_t depth = 0;
+                for (auto current = id; current; current = leaders.at(current)) { Require(++depth <= MaxDepth, "Cyclic or too-deep Leader Pose chain."); }
+                if (leader) { scene.SetLeaderPose(ids.at(id), ids.at(leader)); }
+            }
+            for (const auto& object : objects) {
+                const auto name = String(object.at("attachmentSocket")); if (name.empty()) { continue; }
+                const auto id = ids.at(UInt(object.at("id"))); const auto& instance = scene.GetObject(id);
+                Require(instance.Parent != NoObject, "Socket attachment requires a parent.");
+                scene.AttachToSocket(id, instance.Parent, name, instance.LocalTransform);
+            }
         }
         ValidateScene(scene);
         return Result<SceneArchive>::Success(std::move(archive));

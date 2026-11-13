@@ -86,6 +86,7 @@ void Scene::SetParent(ObjectId id, ObjectId parent) {
         if (ancestor == id) { throw std::invalid_argument("Scene parenting cannot create a cycle."); }
     }
     objects_.at(id).Parent = parent;
+    objects_.at(id).AttachmentSocket.clear();
 }
 
 void Scene::SetTransform(ObjectId id, const Transform& transform) {
@@ -96,8 +97,13 @@ void Scene::SetTransform(ObjectId id, const Transform& transform) {
 
 void Scene::SetVisible(ObjectId id, bool visible) { (void)GetObject(id); objects_.at(id).Visible = visible; }
 void Scene::SetModel(ObjectId id, ModelHandle model) {
-    (void)GetObject(id); AnimationPlayer animation; animation.Bind(model);
+    ValidateSocketModel(id, model); AnimationPlayer animation; animation.Bind(model);
+    const auto& previous = GetObject(id);
+    if (!model && previous.SharedSkeleton) { throw std::invalid_argument("Clear Shared Skeleton before detaching its model."); }
+    auto binding = previous.SharedSkeleton ? BindSkeleton(*previous.SharedSkeleton, model->Skeleton) : SkeletonBinding{};
+    ValidateLeaderBinding(id, binding);
     objects_.at(id).Model = std::move(model); objects_.at(id).Animation = std::move(animation);objects_.at(id).MaterialOverrides.clear();
+    objects_.at(id).SkeletonMap = std::move(binding);
 }
 const MaterialAsset& Scene::GetMaterial(ObjectId id,std::size_t index) const {
     const auto& object=GetObject(id);if (!object.Model || index>=object.Model->Materials.size()) {throw std::invalid_argument("Material index does not belong to the model instance.");}
@@ -113,8 +119,8 @@ AnimationPlayer& Scene::GetAnimation(ObjectId id) {
 }
 void Scene::UpdateAnimations(double deltaSeconds) {
     if (!std::isfinite(deltaSeconds) || deltaSeconds < 0) { throw std::invalid_argument("Animation delta must be finite and nonnegative."); }
-    for (auto id:order_) {if (objects_.at(id).Model) {objects_.at(id).Animation.CollectUpdateEvents(deltaSeconds,nullptr);}}
-    for (auto id : order_) { if (objects_.at(id).Model) { objects_.at(id).Animation.Update(deltaSeconds); } }
+    for (auto id:order_) {if (objects_.at(id).Model && !objects_.at(id).LeaderPose) {objects_.at(id).Animation.CollectUpdateEvents(deltaSeconds,nullptr);}}
+    for (auto id : order_) { if (objects_.at(id).Model && !objects_.at(id).LeaderPose) { objects_.at(id).Animation.Update(deltaSeconds); } }
 }
 std::vector<SceneAnimationEvent> Scene::PollAnimationEvents() {
     std::vector<SceneAnimationEvent> result;for (auto id:order_) {const auto& player=objects_.at(id).Animation;for (const auto& event:player.PendingAnimationEvents()) {result.push_back({id,event});}}ClearAnimationEventQueues();return result;
@@ -129,10 +135,14 @@ std::size_t Scene::ReplaceModel(ModelHandle previous, ModelHandle replacement) {
     static_assert(std::is_nothrow_move_assignable_v<AnimationPlayer>);
     if (!previous || !replacement) {throw std::invalid_argument("ReplaceModel requires nonempty model handles.");}
     if (previous == replacement) {return 0;}
-    std::vector<std::pair<ObjectId,AnimationPlayer>> pending;
+    struct Replacement { ObjectId Id; AnimationPlayer Player; SkeletonBinding Binding; };
+    std::vector<Replacement> pending;
     for (auto id : order_) {
         const auto& object = objects_.at(id);
         if (object.Model != previous) {continue;}
+        ValidateSocketModel(id, replacement);
+        auto binding = object.SharedSkeleton ? BindSkeleton(*object.SharedSkeleton, replacement->Skeleton) : SkeletonBinding{};
+        ValidateLeaderBinding(id, binding);
         if (object.Animation.Model() != previous) {throw std::invalid_argument("Scene player was rebound outside its owning Scene.");}
         for (const auto& [index,material]:object.MaterialOverrides) {
             if (index>=replacement->Materials.size() || previous->Materials.at(index).Name != replacement->Materials[index].Name) {throw std::invalid_argument("Reimport changed an overridden material identity.");}
@@ -142,10 +152,10 @@ std::size_t Scene::ReplaceModel(ModelHandle previous, ModelHandle replacement) {
             ValidateMaterial(material,*replacement);
         }
         auto player = object.Animation; player.Rebind(replacement);
-        pending.emplace_back(id,std::move(player));
+        pending.push_back({id,std::move(player),std::move(binding)});
     }
-    for (auto& [id,player] : pending) {
-        auto& object = objects_.at(id); object.Model = replacement; object.Animation = std::move(player);
+    for (auto& entry : pending) {
+        auto& object = objects_.at(entry.Id); object.Model = replacement; object.Animation = std::move(entry.Player); object.SkeletonMap = std::move(entry.Binding);
     }
     return pending.size();
 }
@@ -153,13 +163,15 @@ std::size_t Scene::ReplaceModel(ModelHandle previous, ModelHandle replacement) {
 Mat4 Scene::GetWorldTransform(ObjectId id) const {
     auto result = Mat4::Identity();
     for (auto current = id; current; current = GetObject(current).Parent) {
-        result = GetObject(current).LocalTransform.Matrix() * result;
+        const auto& object = GetObject(current);
+        result = AttachmentTransform(object) * object.LocalTransform.Matrix() * result;
     }
     if (!id) { (void)GetObject(id); }
     return result;
 }
 
 std::vector<RenderItem> Scene::CollectRenderItems() const {
+    PoseCache poses;
     struct State { Mat4 World; bool Visible; };
     std::unordered_map<ObjectId, State> states;
     states.reserve(objects_.size());
@@ -177,13 +189,16 @@ std::vector<RenderItem> Scene::CollectRenderItems() const {
         if (current) { state = states.at(current); }
         for (auto it = pending.rbegin(); it != pending.rend(); ++it) {
             const auto& object = GetObject(*it);
-            state.World = state.World * object.LocalTransform.Matrix();
+            state.World = state.World * AttachmentTransform(object, &poses) * object.LocalTransform.Matrix();
             state.Visible = state.Visible && object.Visible;
             states.emplace(*it, state);
         }
         const auto& object = GetObject(id);
         if (object.Model && object.Animation.Model() != object.Model) { throw std::invalid_argument("Scene-owned player was rebound; use Scene::SetModel."); }
-        if (states.at(id).Visible && object.Model) { result.push_back({id, object.Model, states.at(id).World,&object.Animation,&object.MaterialOverrides}); }
+        if (states.at(id).Visible && object.Model) {
+            const auto pose = object.LeaderPose || object.Animation.NeedsEvaluation() ? ResolvePose(id, poses) : nullptr;
+            result.push_back({id, object.Model, states.at(id).World,&object.Animation,&object.MaterialOverrides,pose});
+        }
     }
     return result;
 }
@@ -205,6 +220,10 @@ void Scene::RemoveObject(ObjectId id) {
         if (inSubtree) { removed.insert(candidate); }
     }
     for (const auto removedId : removed) { objects_.erase(removedId); }
+    for (auto& [remainingId, object] : objects_) {
+        (void)remainingId;
+        if (removed.contains(object.LeaderPose)) { object.LeaderPose = NoObject; object.Animation.ClearAnimationEventQueue(); }
+    }
     std::erase_if(order_, [&removed](ObjectId candidate) { return removed.contains(candidate); });
 }
 

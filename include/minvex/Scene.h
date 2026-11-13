@@ -1,6 +1,7 @@
 #pragma once
 
 #include <minvex/Asset.h>
+#include <minvex/Skeleton.h>
 
 #include <unordered_map>
 
@@ -9,6 +10,7 @@ namespace lv {
 using ObjectId = std::uint64_t;
 inline constexpr ObjectId NoObject = 0;
 struct SceneAnimationEvent { ObjectId Object = NoObject; AnimationEventOccurrence Occurrence; };
+
 
 enum class CameraProjection { Perspective, Orthographic };
 struct Camera {
@@ -53,6 +55,11 @@ struct SceneObject {
     ModelHandle Model;
     AnimationPlayer Animation;
     std::unordered_map<std::size_t,MaterialAsset> MaterialOverrides;
+    std::vector<SkeletonSocket> Sockets;
+    std::string AttachmentSocket; // Empty: ordinary parenting. Otherwise uses Parent's socket.
+    SharedSkeletonHandle SharedSkeleton;
+    SkeletonBinding SkeletonMap;
+    ObjectId LeaderPose = NoObject; // Independent from transform parenting.
 };
 
 struct RenderItem {
@@ -61,6 +68,7 @@ struct RenderItem {
     Mat4 WorldTransform;
     const AnimationPlayer* Animation = nullptr; // Valid until the owning Scene object is removed.
     const std::unordered_map<std::size_t,MaterialAsset>* MaterialOverrides = nullptr;
+    std::shared_ptr<const EvaluatedPose> Pose; // Owned snapshot, model-node index order. Shared during collection.
 };
 
 class Scene {
@@ -79,10 +87,22 @@ public:
     std::size_t Size() const noexcept { return objects_.size(); }
     std::vector<ObjectId> ObjectIds() const { return order_; } // Creation order, including empty/hidden objects.
     void SetName(ObjectId id, std::string name);
-    void SetParent(ObjectId id, ObjectId parent); // Keeps local TRS; rejects cycles.
+    void SetParent(ObjectId id, ObjectId parent); // Keeps local TRS; clears socket attachment; rejects cycles.
     void SetTransform(ObjectId id, const Transform& transform);
+    void SetWorldTransform(ObjectId id, const Mat4& world); // Includes socket frame; rejects local shear.
     void SetVisible(ObjectId id, bool visible);
     void SetModel(ObjectId id, ModelHandle model); // Empty handle detaches the model.
+    void SetSocket(ObjectId id, const SkeletonSocket& socket); // Per-instance definition/override.
+    void RemoveSocket(ObjectId id, std::string_view name); // Removes instance override; requires fallback or no attachments.
+    const SkeletonSocket& GetSocket(ObjectId id, std::string_view name) const;
+    Mat4 GetSocketWorldTransform(ObjectId id, std::string_view name) const;
+    ObjectId CreateAttachmentNode(ObjectId parent, std::string socket, const Transform& relative = {}, std::string name = {});
+    void AttachToSocket(ObjectId id, ObjectId parent, std::string socket, const Transform& relative = {});
+    void DetachFromSocket(ObjectId id, bool keepWorld = true); // To scene root; shear cannot be kept as TRS.
+    EvaluatedPose EvaluatePose(ObjectId id) const; // Final scene-resolved model-space pose.
+    Bounds GetModelBounds(ObjectId id) const; // Final resolved pose plus instance morph weights.
+    void SetSharedSkeleton(ObjectId id, SharedSkeletonHandle skeleton);
+    void SetLeaderPose(ObjectId follower, ObjectId leader); // NoObject restores dormant independent player.
     const MaterialAsset& GetMaterial(ObjectId id, std::size_t index) const;
     void SetMaterial(ObjectId id, std::size_t index, const MaterialAsset& material); // Per-instance override.
     void ResetMaterial(ObjectId id, std::size_t index);
@@ -105,6 +125,11 @@ private:
     friend class EditorDocument; // Private CPU history snapshots preserve object identities.
     std::unordered_map<ObjectId, SceneObject> objects_;
     std::vector<ObjectId> order_;
+    using PoseCache = std::unordered_map<ObjectId, std::shared_ptr<const EvaluatedPose>>;
+    std::shared_ptr<const EvaluatedPose> ResolvePose(ObjectId id, PoseCache& cache) const;
+    Mat4 AttachmentTransform(const SceneObject& object, PoseCache* cache = nullptr) const;
+    void ValidateSocketModel(ObjectId id, const ModelHandle& model) const;
+    void ValidateLeaderBinding(ObjectId id, const SkeletonBinding& binding) const;
 };
 
 } // namespace lv

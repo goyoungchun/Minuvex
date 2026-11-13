@@ -31,6 +31,7 @@ target_compile_features(minvex_imgui PRIVATE cxx_std_20)
 
 add_library(minvex_editor_ui STATIC editor/EditorUI.cpp editor/AssetPanels.cpp editor/PerformancePanel.cpp editor/DebugPanels.cpp editor/SceneViewport.cpp editor/NativeFiles.cpp editor/EditorPreferences.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/AdditivePanel.cpp)
+target_sources(minvex_editor_ui PRIVATE editor/EquipmentPanel.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/EventPanel.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/AssetJobs.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/TransformTools.cpp)

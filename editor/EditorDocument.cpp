@@ -172,8 +172,15 @@ Result<void> EditorDocument::SetParent(ObjectId object, ObjectId parent) {
 Result<void> EditorDocument::SetTransform(ObjectId object, const Transform& transform) {
     return Change([&] { world_.SetTransform(object,transform); MarkChanged(); });
 }
+Result<void> EditorDocument::SetSharedSkeleton(ObjectId object, SharedSkeletonHandle skeleton) { return Change([&] { world_.SetSharedSkeleton(object, std::move(skeleton)); MarkChanged(); }); }
+Result<void> EditorDocument::SetLeaderPose(ObjectId follower, ObjectId leader) { return Change([&] { world_.SetLeaderPose(follower, leader); MarkChanged(); }); }
+Result<void> EditorDocument::SetSocket(ObjectId object, const SkeletonSocket& socket) { return Change([&] { world_.SetSocket(object, socket); MarkChanged(); }); }
+Result<void> EditorDocument::RemoveSocket(ObjectId object, std::string_view name) { return Change([&] { world_.RemoveSocket(object, name); MarkChanged(); }); }
+Result<ObjectId> EditorDocument::CreateAttachmentNode(ObjectId parent, std::string socket, const Transform& relative, std::string name) { return Change([&] { const auto id = world_.CreateAttachmentNode(parent, std::move(socket), relative, std::move(name)); selection_ = id; MarkChanged(); return id; }); }
+Result<void> EditorDocument::AttachToSocket(ObjectId object, ObjectId parent, std::string socket, const Transform& relative) { return Change([&] { world_.AttachToSocket(object, parent, std::move(socket), relative); MarkChanged(); }); }
+Result<void> EditorDocument::DetachFromSocket(ObjectId object, bool keepWorld) { return Change([&] { world_.DetachFromSocket(object, keepWorld); MarkChanged(); }); }
 Result<void> EditorDocument::SetWorldTransform(ObjectId object,const Mat4& world) {
-    return Change([&] {const auto parent=world_.GetObject(object).Parent;const auto local=DecomposeTRS(parent ? world_.GetWorldTransform(parent).InverseAffine()*world:world);world_.SetTransform(object,local);MarkChanged();});
+    return Change([&] {world_.SetWorldTransform(object,world);MarkChanged();});
 }
 Result<void> EditorDocument::SetVisible(ObjectId object, bool visible) {
     return Change([&] { world_.SetVisible(object,visible); MarkChanged(); });
@@ -222,7 +229,12 @@ Result<void> EditorDocument::SavePoseFile(ObjectId object, const std::filesystem
     auto captured = Edit([&] {
         const auto& instance = world_.GetObject(object);
         if (!instance.Model) { throw std::invalid_argument("Select a model instance to save a pose."); }
-        return overridesOnly ? instance.Animation.Overrides() : instance.Animation.CapturePose("Saved Pose");
+        if (overridesOnly) { return instance.Animation.Overrides(); }
+        if (!instance.LeaderPose) { return instance.Animation.CapturePose("Saved Pose"); }
+        auto result = ReferencePose(instance.Model->Skeleton); result.Name = "Saved Pose";
+        const auto pose = world_.EvaluatePose(object);
+        for (auto& joint : result.Joints) { joint.Local = DecomposeTRS(pose.Local.at(joint.Joint)); }
+        return result;
     });
     if (!captured) { return Result<void>::Failure(captured.Error()); }
     return lv::SavePose(captured.Value(),world_.GetObject(object).Model->Skeleton,path);

@@ -137,7 +137,7 @@ struct Application {
         bool wrong=false;std::thread other([&]{auto r=Renderer.Shutdown();wrong=!r && r.Error().Code == lv::ErrorCode::WrongThread;});other.join();Require(wrong,"Embedded owner thread was not enforced.");
         auto mismatch=original;++mismatch.Width;Require(!Renderer.Render(Scene,mismatch),"Mismatched Host target extent was accepted.");Targets bad;bad.Offscreen(Device.Get(),800,600,DXGI_FORMAT_R8G8B8A8_UNORM);Require(!Renderer.Render(Scene,bad.Target()),"Mismatched Host target format was accepted.");
         ComPtr<ID3D11Device> otherDevice;ComPtr<ID3D11DeviceContext> otherContext;Require(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&otherDevice,nullptr,&otherContext),"Cannot create second Host test device.");Targets foreign;foreign.Offscreen(otherDevice.Get(),800,600);Require(!Renderer.Render(Scene,foreign.Target()),"Foreign-device texture was accepted.");
-        const auto quality=Renderer.GetQuality().Value();auto invalid=quality.Requested;invalid.Overrides.Shadow=lv::ShadowMode::Pcss;
+        const auto quality=Renderer.GetQuality().Value();auto invalid=quality.Requested;invalid.Overrides.Shadow=static_cast<lv::ShadowMode>(99);
         Require(!Renderer.SetQuality(invalid,Scene) && Renderer.GetQuality().Value().Requested == quality.Requested,"Rejected quality changed the active Embedded profile.");
         auto paced=quality.Requested;paced.Overrides.TargetFps=1;Require(Renderer.SetQuality(paced,Scene));
         Require(Renderer.Render(Scene,original,draw).Value().SceneRendered && Renderer.Render(Scene,original,draw).Value().SceneRendered,"ForceRedraw did not bypass the FPS limiter.");

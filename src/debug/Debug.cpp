@@ -64,4 +64,14 @@ JointDebugInfo InspectJoint(const AnimationPlayer& player,JointId joint) {
     JointDebugInfo info{pose.Local.at(joint),pose.Global.at(joint),rest.Local.at(joint),rest.Global.at(joint),{}};
     for (const auto& skin:player.Model()->Skins) {for (std::size_t i=0;i<skin.Joints.size();++i) {if (skin.Joints[i] == joint) {const auto matrix=pose.Global.at(joint)*skin.InverseBindMatrices.at(i);for (float v:matrix.Elements) {if (!std::isfinite(v)) {throw std::invalid_argument("Nonfinite skinning matrix.");}}info.SkinningMatrices.push_back(matrix);}}}return info;
 }
+JointDebugInfo InspectJoint(const Scene& scene,ObjectId object,JointId joint) {
+    const auto& instance = scene.GetObject(object);
+    auto info = InspectJoint(instance.Animation, joint);
+    const auto pose = scene.EvaluatePose(object); info.Local = pose.Local.at(joint); info.Global = pose.Global.at(joint);
+    info.SkinningMatrices.clear();
+    for (const auto& skin : instance.Model->Skins) { for (std::size_t i = 0; i < skin.Joints.size(); ++i) {
+        if (skin.Joints[i] == joint) { const auto matrix = info.Global * skin.InverseBindMatrices.at(i); (void)matrix.NormalMatrix(); info.SkinningMatrices.push_back(matrix); }
+    } }
+    return info;
+}
 } // namespace lv

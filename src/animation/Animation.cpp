@@ -296,7 +296,12 @@ EvaluatedPose AnimationPlayer::Evaluate() const {
 Bounds AnimationPlayer::GetBounds() const {
     Require(bool(model_),"Bind a model before computing its bounds.");
     if (!NeedsEvaluation()) { return model_->ModelBounds; }
-    const auto pose = Evaluate(); Bounds bounds; bool first = true;
+    return GetBounds(Evaluate());
+}
+Bounds AnimationPlayer::GetBounds(const EvaluatedPose& pose) const {
+    Require(model_ && pose.Global.size() == model_->Skeleton.Joints.size(), "Bounds pose must match the bound model node count.");
+    for (const auto& matrix : pose.Global) { (void)matrix.NormalMatrix(); }
+    Bounds bounds; bool first = true;
     for (const auto& part : model_->Parts) {
         const auto matrix = part.Node == NoJoint ? part.Transform : pose.Global.at(part.Node);
         for (const auto& primitive : model_->Meshes.at(part.MeshIndex).Primitives) {

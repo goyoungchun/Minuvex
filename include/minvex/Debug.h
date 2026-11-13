@@ -66,4 +66,5 @@ BoneInfluenceStatistics InspectBoneInfluences(const ModelAsset& model);
 struct JointDebugInfo {Mat4 Local,Global,ReferenceLocal,ReferenceGlobal;std::vector<Mat4> SkinningMatrices;};
 // Palette matrices for each skin referencing this skeleton node, in model space.
 JointDebugInfo InspectJoint(const AnimationPlayer& player,JointId joint);
+JointDebugInfo InspectJoint(const Scene& scene,ObjectId object,JointId joint); // Includes Leader Pose.
 } // namespace lv

@@ -337,6 +337,7 @@ void EditorUI::Inspector() {
             bool changed = VecInput("Position",t.Position); changed = RotationInput(t.Rotation) || changed; changed = VecInput("Scale",t.Scale,0.01f) || changed;
             if (changed) { Report(Document.SetTransform(id,t)); }
             ImGui::TextWrapped("%s",object.Model ? Text(object.Model->SourcePath.filename()).c_str() : "Empty object");
+            EquipmentControls(id);
             if (ImGui::Button("Delete subtree...")) { deleteObject_=id; }
             if (object.Model && ImGui::CollapsingHeader("Materials")) {
                 ImGui::TextUnformatted("PBR uses Advanced lighting + PBR quality. Direct lights; no IBL.");
@@ -407,6 +408,7 @@ void EditorUI::BoneInspector() {
                 if (bone_ == NoJoint && !skeleton.Joints.empty()) { bone_ = 0; }
             }
             ImGui::Text("%zu skins | %zu transform nodes",instance.Model->Skins.size(),skeleton.Joints.size());
+            if (instance.LeaderPose) { ImGui::TextWrapped("Following Leader Pose. Bone edits affect the dormant independent player; edit the leader for the displayed pose."); }
             if (bone_ != NoJoint && ImGui::BeginCombo("Joint / Node",skeleton.Joints[bone_].Name.c_str())) {
                 for (std::size_t i=0;i<skeleton.Joints.size();++i) { ImGui::PushID(static_cast<int>(i));
                     const auto& joint = skeleton.Joints[i]; const auto label = (joint.IsJoint ? "[bone] " : "[node] ") + (joint.Name.empty() ? std::to_string(i) : joint.Name);

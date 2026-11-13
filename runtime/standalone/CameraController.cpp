@@ -67,7 +67,7 @@ Camera FitSceneCamera(const Scene& scene, float aspect,ObjectId focus) {
     for (const auto& item : items) {
         if (focus) {auto ancestor=item.Object;while (ancestor && ancestor != focus) {ancestor=scene.GetObject(ancestor).Parent;}if (!ancestor) {continue;}}
         (void)item.WorldTransform.NormalMatrix();
-        const auto bounds = item.Animation ? item.Animation->GetBounds() : item.Model->ModelBounds;
+        const auto bounds = scene.GetModelBounds(item.Object);
         for (unsigned mask = 0; mask < 8; ++mask) {
             const auto point = item.WorldTransform.TransformPoint({mask & 1 ? bounds.Max.X : bounds.Min.X,
                 mask & 2 ? bounds.Max.Y : bounds.Min.Y, mask & 4 ? bounds.Max.Z : bounds.Min.Z});
@@ -105,7 +105,7 @@ ObjectId PickSceneObject(const Scene& scene,float aspect,float x,float y) {
     const double cosine=Dot(ray,forward),origin[]{eye.X,eye.Y,eye.Z},direction[]{ray.X,ray.Y,ray.Z};
     double nearest=camera.FarPlane/cosine;ObjectId selected=NoObject;
     for (const auto& item:scene.CollectRenderItems()) {
-        const auto bounds=item.Animation ? item.Animation->GetBounds():item.Model->ModelBounds;double low[]{INFINITY,INFINITY,INFINITY},high[]{-INFINITY,-INFINITY,-INFINITY};
+        const auto bounds=scene.GetModelBounds(item.Object);double low[]{INFINITY,INFINITY,INFINITY},high[]{-INFINITY,-INFINITY,-INFINITY};
         for (unsigned mask=0;mask<8;++mask) {const auto point=item.WorldTransform.TransformPoint({mask&1 ? bounds.Max.X:bounds.Min.X,mask&2 ? bounds.Max.Y:bounds.Min.Y,mask&4 ? bounds.Max.Z:bounds.Min.Z});const double p[]{point.X,point.Y,point.Z};for (int i=0;i<3;++i) {if (!std::isfinite(p[i])) {throw std::invalid_argument("Pick bounds exceed numeric range.");}low[i]=std::min(low[i],p[i]);high[i]=std::max(high[i],p[i]);}}
         double near=camera.NearPlane/cosine,far=nearest;bool hit=true;
         for (int axis=0;axis<3;++axis) {if (std::abs(direction[axis]) < 1e-12) {if (origin[axis] < low[axis] || origin[axis] > high[axis]) {hit=false;break;}}else {double a=(low[axis]-origin[axis])/direction[axis],b=(high[axis]-origin[axis])/direction[axis];if (a>b) {std::swap(a,b);}near=std::max(near,a);far=std::min(far,b);if (near>far) {hit=false;break;}}}

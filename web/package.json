@@ -1,6 +1,6 @@
 {
   "name": "@minvex/web",
-  "version": "1.19.1",
+  "version": "1.20.0",
   "private": true,
   "type": "module",
   "scripts": {"test": "node tests/browser.mjs"},

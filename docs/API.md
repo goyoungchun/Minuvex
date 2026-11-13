@@ -176,6 +176,66 @@ track당 최대 1024개, overlay 최대 256 track, 기본 track별·인스턴스
 
 Editor는 Timeline marker, 추가·삭제·시간·이름·payload 편집, 수집 Seek 선택과 발생 로그를 제공함. marker 편집은 Undo/Redo 대상이며 큐 배출·로그는 문서를 dirty로 만들지 않음. Scene v11은 overlay와 Clip identity를 저장하고 reader는 v1~v11임. 발생 큐·callback·로그는 저장하지 않으며 Undo/Redo는 과거 큐를 재발송하지 않음. Reimport는 overlay Clip identity/duration을 검사함. SDK 1.19.1 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
 
+### Shared Skeleton / Leader Pose / Socket (SDK 1.20)
+
+공개 정의는 `minvex/Skeleton.h`·`minvex/Scene.h`이며 `minvex::animation`과 `minvex::scene`에 구현됨. 제품명은 Minvex, C++ namespace는 `lv`임.
+
+| API / 타입 | 동작 |
+|---|---|
+| `SkeletonSocket` | `Name`, 대상 노드 이름 `Joint`, 노드 기준 `LocalTransform` |
+| `SharedSkeletonHandle` / `SharedSkeletonAsset` | 불변 Skeleton·공유 소켓 snapshot의 강한 공유 소유권. `Skeleton()`·`Sockets()`로 조회 |
+| `CreateSharedSkeleton(skeleton, sockets={})` | 입력을 복사/이동하여 검증한 공유 정의 생성. 본이 하나 이상 필요함 |
+| `FindSkeletonJoint(skeleton, name)` | 유일한 노드 이름을 JointId로 해석. 누락·중복 이름 거부 |
+| `ValidateSkeletonSocket(skeleton, socket)` | 이름·노드 참조·유효한 offset TRS 검사 |
+| `BindSkeleton(shared, modelSkeleton)` | `SkeletonBinding::ModelToShared/SharedToModel` 매핑. 일반 노드/누락된 공유 본은 `NoJoint` |
+| `Scene::SetSharedSkeleton(id, handle)` | 모델 인스턴스에 공유 정의 연결/해제. 활성 Leader/Follower 관계가 있으면 변경을 거부함 |
+| `Scene::SetLeaderPose(follower, leader)` | 최종 본 행렬의 source 설정. `NoObject`는 독립 Player 복원 |
+| `Scene::EvaluatePose(id)` / `GetModelBounds(id)` | Leader까지 해석한 model-space Pose / Morph를 포함한 bounds 값 반환 |
+| `Scene::SetSocket(id, socket)` / `GetSocket(id, name)` | 인스턴스 소켓 정의/override 및 유효 정의 조회. 인스턴스 정의가 공유 정의보다 우선함 |
+| `Scene::RemoveSocket(id, name)` | 인스턴스 정의만 삭제함. 공유 정의가 있으면 복원하며, 대체 정의 없이 부착 중이면 거부함 |
+| `Scene::GetSocketWorldTransform(id, name)` | 최종 Pose·객체 계층·socket offset을 포함한 world 행렬 |
+| `Scene::CreateAttachmentNode(parent, socket, relative={}, name={})` | 모델 없는 부착 노드 생성. 아래에 모델·하위 노드 배치 가능 |
+| `Scene::AttachToSocket(id, parent, socket, relative={})` | 기존 객체를 지정 소켓에 부착. 기본 상대 TRS는 identity로 snap함 |
+| `Scene::DetachFromSocket(id, keepWorld=true)` | Scene root로 분리. false는 현재 상대 TRS 유지, true는 world TRS 보존 |
+| `Scene::SetWorldTransform(id, world)` | 일반 부모 또는 애니메이션 socket frame을 포함하여 local TRS 계산 |
+| `AnimationPlayer::GetBounds(pose)` | 지정한 model-node 순서 Global 행렬과 해당 Player의 Morph weight로 bounds 계산 |
+| `InspectJoint(scene, id, joint)` | Leader를 포함한 local/global·해당 메시의 skin palette 진단 (`minvex::debug`) |
+
+공유 매핑은 `IsJoint=true` 본의 유일한 이름, 가장 가까운 부모 본 이름과 model-space 기준 행렬을 검사함. 기준 행렬 오차는 요소별 `1e-5 × max(1, abs(a), abs(b))` 이내여야 함. 노드/팔레트 순서 차이와 조상 본을 유지한 부분 Skeleton은 허용함. Follower가 사용하는 모든 본은 Leader에도 있어야 하며 미등록 추가 본·다른 기준 자세·계층 변경은 거부함. 이 API는 리타기팅을 수행하지 않음. 메시 고유의 일반 노드는 Follower 기준 local 행렬을 유지하며, 매핑된 부모 본 아래에 있으면 함께 움직임.
+
+```cpp
+#include <minvex/Scene.h>
+
+// scene과 유효한 ModelHandle bodyModel/clothingModel/weaponModel을 준비한 뒤:
+auto shared = lv::CreateSharedSkeleton(bodyModel->Skeleton, {{"Weapon", "RightHand"}});
+auto body = scene.AddModel(bodyModel);
+auto clothes = scene.AddModel(clothingModel, {}, body);
+scene.SetSharedSkeleton(body, shared);
+scene.SetSharedSkeleton(clothes, shared);
+scene.SetLeaderPose(clothes, body);
+auto slot = scene.CreateAttachmentNode(clothes, "Weapon", {}, "Weapon slot");
+scene.AddModel(weaponModel, {}, slot);
+scene.GetAnimation(body).Play(0);
+scene.UpdateAnimations(.016); // Socket 갱신 호출은 필요 없음
+auto finalPose = scene.EvaluatePose(clothes);
+scene.DetachFromSocket(slot); // world TRS를 보존하여 root로 분리
+scene.AttachToSocket(slot, clothes, "Weapon"); // identity offset으로 다시 장착
+```
+
+Leader 관계와 Transform 부모 관계는 별개임. 의상이 Body world transform을 따르려면 부모도 Body로 설정함. Bone matrix는 각 객체의 model-space 기준이며 Body의 world transform을 중복 적용하지 않음. 부착 행렬은 `parentWorld × resolvedPose.Global[joint] × socket.LocalTransform × child.LocalTransform`이고 하위 자식에도 누적됨. 일반 `SetParent()`는 소켓 부착을 해제하고 현재 local TRS를 유지함. 부모의 Visible=false는 부착 subtree도 숨기지만 Transform 부모가 아닌 숨겨진 Leader는 보이는 Follower를 계속 구동함.
+
+Follower는 자체 애니메이션 Player의 TRS·Morph 재생과 이벤트 수집을 멈추고 Leader의 최종 Clip/Cross-fade/Blend Tree → Additive → 수동 override 결과를 사용함. Follower Player는 dormant 상태로 보존되며 직접 수정은 독립 상태에만 적용됨. Follower의 Morph weight 조회·수동 override, 재질, geometry, inverse bind는 자체 모델을 사용함. Leader 연결/해제는 Follower의 pending event queue를 비우며 과거 이벤트를 복제하지 않음. 해제 후 다음 Scene Update부터 보존된 독립 Player가 다시 진행함. Leader chain은 허용하고 self/순환/다른 Scene ID는 거부함.
+
+`CollectRenderItems()`는 한 번의 호출 안에서 Leader Pose를 한 번 평가하고 같은 모델의 Follower는 같은 `RenderItem::Pose` snapshot을 공유함. 다른 노드 순서의 Follower는 매핑된 snapshot을 생성함. snapshot은 `shared_ptr<const EvaluatedPose>`가 소유하므로 Scene 수정/삭제 후에도 유지할 수 있음. `RenderItem::Animation`·재질 포인터와 `GetSocket()` 참조는 Scene 편집/삭제 전까지 유효하며 장기 보관 시 복사함. Scene은 모델·공유 Skeleton handle을 강하게 보유하고 모델 원본·공유 Skeleton·Clip을 수정하지 않음. 같은 Scene/Player의 동시 수정·평가는 금지하며 불변 공유 정의는 다른 Scene에서 동시 조회/바인딩할 수 있음.
+
+소켓 이름·대상 노드 이름은 NUL 없는 1~256 bytes임. 인스턴스 정의와 공유 정의는 각각 최대 256개임. 공유 소켓은 본을 대상으로 하며 해당 정의에 바인딩된 각 모델에 존재해야 함. 공유 정의 자체는 불변이고 인스턴스 override로 조정함. 부착 subtree 삭제는 일반 Scene subtree 삭제와 같으며, 삭제된 Leader를 참조하는 다른 subtree의 살아 있는 Follower는 독립 Player로 복귀함. 모델 교체/재임포트는 소켓·Shared Skeleton·Leader 본 요구와 기존 Animation 상태를 먼저 검증한 뒤 적용하며 실패 시 모든 인스턴스를 유지함.
+
+잘못된 입력·누락된 소켓/본·호환성·순환·singular TRS는 `std::invalid_argument`임. world-preserving detach 또는 SetWorldTransform 결과에 shear가 있으면 TRS로 저장할 수 없어 변경 전에 거부함. `EditorDocument`는 공유 Skeleton·Leader·소켓·부착 API를 같은 인수로 제공하고 Result 오류 및 Undo/Redo를 적용함. 전체 Pose 저장은 Follower의 표시되는 최종 local TRS를 저장하며 local shear는 거부함. overrides-only 저장은 dormant 독립 Player의 override임. Viewer는 owner thread에서 `GetScene()`을 통해 사용함.
+
+Scene writer는 v12이며 reader는 v1~v12임. 최대 1024개의 공유 Skeleton 정의를 중복 없이 저장하고 본/기준 자세/공유 소켓, 인스턴스 소켓 override, Leader·Transform 부모·부착 소켓을 복원함. 파일의 ObjectId는 새 런타임 ID로 매핑하며 모순된 참조·순환·256단계 초과 chain은 거부함. v1~v11에서는 새 관계가 없는 일반 객체로 읽음. 기존 16 MiB JSON·65536 객체·4096 모델 제한을 유지함. 이전 SDK reader는 v12를 읽을 수 없음. Pose v1·ImportVersion 6은 유지하고 정적 SDK 소비자는 1.20.0 헤더/라이브러리로 함께 재빌드해야 함.
+
+예제는 `examples/Equipment/Main.cpp`, 설치 SDK 소비자는 `examples/SdkConsumer/Equipment.cpp`임. C++/Editor 기능을 제공하며 Python/JavaScript의 장착 제어 바인딩은 아직 제공하지 않음. Windows MSVC Release CTest 19/19, CPU-only Debug 12/12 통과(D3D11 장착 픽셀·예제·Editor/Embedded smoke 포함). 저장 chain 경계 검사 후 관련 Native 5개·CPU-only 12개를 재검증함. Native SDK 설치본만으로 공개 헤더 개별 컴파일·장착 상태 저장/복원 소비자·장착 그래픽 예제 실행을 검증함. macOS Metal·WebGL2의 새 기능 실행 결과는 미검증임.
+
 ### PBR Material
 
 `MaterialAsset::Shading`은 `ShadingModel::Basic/Unlit/Pbr` 중 선택함. 기존 `Unlit=true` 플래그가 우선함. `MetallicFactor/RoughnessFactor`는 [0,1]이며, BaseColor texture는 sRGB·MetallicRoughnessTexture의 G/B는 linear로 처리함. 계산 시 roughness는 최소 .045로 제한함.
