@@ -1,4 +1,4 @@
-// Headless public SDK example: import, playback/cross-fade, Pose IO and reset.
+// Headless public SDK example: independent pose evaluation/composition, playback, Pose IO and reset.
 #include <minuvex/Scene.h>
 #include <minuvex/PoseIO.h>
 #include <cstdio>
@@ -28,6 +28,14 @@ int main(int argc,char** argv) {
         for (std::size_t node=0;node<actual.Global.size();++node) {for (std::size_t element=0;element<16;++element) {
             if (std::abs(actual.Global[node].Elements[element]-expected.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("Pose roundtrip changed the evaluated transforms.");}
         }}
+        const auto sampled=lv::EvaluateAnimation(model->Skeleton,model->Animations[0],delta);
+        const auto incoming=lv::EvaluateAnimation(model->Skeleton,model->Animations[model->Animations.size()>1 ? 1:0],0);
+        const std::vector<lv::PoseChannels> mask(model->Skeleton.Joints.size(),lv::PoseChannels::All);
+        const auto mixed=lv::BlendPoses(model->Skeleton,sampled,incoming,.5f,mask);
+        const auto restored=lv::ComposePose(model->Skeleton,lv::ApplyPoseOverrides(model->Skeleton,mixed,loaded.Value()));
+        for (std::size_t node=0;node<restored.Global.size();++node) {for (std::size_t element=0;element<16;++element) {
+            if (std::abs(restored.Global[node].Elements[element]-expected.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("PoseBuffer composition/override changed the captured pose.");}
+        }}
         second.ResetPose();
         for (std::size_t i=0;i<model->Nodes.size();++i) {const auto& node=model->Nodes[i];if (!node.MeshIndex || model->Meshes[*node.MeshIndex].MorphWeights.empty()) {continue;}const auto joint=static_cast<lv::JointId>(i);auto weights=player.EvaluateMorphWeights(joint);weights[0]=.75f;player.SetMorphWeights(joint,weights);const auto geometry=lv::EvaluateMorph(model->Meshes[*node.MeshIndex].Primitives[0],weights);if (geometry.Vertices.empty() || player.MorphOverrides().empty()) {throw std::runtime_error("CPU Morph evaluation failed.");}player.ClearMorphWeights(joint);}
         if (second.Clip() || !second.Overrides().Joints.empty()) {throw std::runtime_error("ResetPose must restore reference playback state.");}
@@ -38,7 +46,7 @@ int main(int argc,char** argv) {
         if (std::abs(player.BlendWeight()-.5f)>1e-6f) {throw std::runtime_error("Pause must freeze the transition.");}
         player.Resume();scene.UpdateAnimations(.25);
         if (player.Blend()) {throw std::runtime_error("Cross-fade must finish at its duration.");}
-        std::printf("Animation/Pose: %zu nodes, %.3f seconds; independent instances, Pose IO and cross-fade passed.\n",model->Skeleton.Joints.size(),player.Time());
+        std::printf("Animation/Pose: %zu nodes, %.3f seconds; PoseBuffer, independent instances, Pose IO and cross-fade passed.\n",model->Skeleton.Joints.size(),player.Time());
         return 0;
     }catch (const std::exception& error) {std::fprintf(stderr,"%s\n",error.what());return 1;}
 }

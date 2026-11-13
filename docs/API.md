@@ -1,13 +1,13 @@
 # Minuvex API
 
-**C++20 Graphics SDK · Version 1.12.0 · Namespace `lv`**
+**C++20 Graphics SDK · Version 1.13.0 · Namespace `lv`**
 
 모듈별 주요 타입과 API를 정리한 사용 안내임. 전체 선언은 연결된 공개 헤더에서 확인할 수 있음.
 
 ## SDK 연결
 
 ```cmake
-find_package(Minuvex 1.12 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minuvex 1.13 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minuvex::viewer)
 ```
@@ -21,7 +21,7 @@ target_link_libraries(my_viewer PRIVATE minuvex::viewer)
 | **core** · [Math.h](../include/minuvex/Math.h), [Mesh.h](../include/minuvex/Mesh.h) | `Vec3`, `Quaternion`, `Mat4`, `Transform`, `Bounds`, `MeshData`, `MakeCube()`, `DecomposeTRS()`. 생성 헤더 `Version.h`의 `Version`, `BuildInfo`, `GetBuildInfo()` |
 | **assets** · [Asset.h](../include/minuvex/Asset.h), [AssetLoading.h](../include/minuvex/AssetLoading.h) | `ModelHandle`, `MorphTarget`, `MaterialAsset`, `ShadingModel`, `ImportSettings`, `ImporterRegistry`, `AssetRegistry::LoadModel/PrepareModel/ReimportModel`, `InspectModel()`, `ValidateModel()`, `CopyModelToProject()`, `AssetLoader`, `AssetHotReload` |
 | **scene** · [Scene.h](../include/minuvex/Scene.h) | `Scene`, `ObjectId`, `Camera`, `DirectionalLight`, `PointLight`, `SpotLight`. `AddModel()`, `CreateObject()`, `SetParent()`, `SetTransform()`, `SetModel()`, `GetMaterial/SetMaterial/ResetMaterial`, `GetAnimation()`, `UpdateAnimations()` |
-| **animation** · [Animation.h](../include/minuvex/Animation.h) | `SkeletonAsset`, `SkinAsset`, `PoseAsset`, `AnimationClip`, `AnimationBlendState`, `MorphTrack`, `MorphPose`, `AnimationPlayer`. `Bind()`, `Play()`, `CrossFade()`, `Pause()`, `Resume()`, `Stop()`, `Seek()`, `SetSpeed()`, `SetLoop()`, `Evaluate()`, `CapturePose()` |
+| **animation** · [Animation.h](../include/minuvex/Animation.h) | `SkeletonAsset`, `SkinAsset`, `PoseAsset`, `PoseBuffer`, `PoseChannels`, `AnimationClip`, `AnimationBlendState`, `MorphTrack`, `MorphPose`, `AnimationPlayer`. `EvaluateAnimation()`, `BlendPoses()`, `ComposePose()`, `Bind()`, `Play()`, `CrossFade()`, `Pause()`, `Resume()`, `Stop()`, `Seek()`, `SetSpeed()`, `SetLoop()`, `EvaluatePose/Evaluate()`, `CapturePose()` |
 | **scene_io** · [SceneIO.h](../include/minuvex/SceneIO.h), [PoseIO.h](../include/minuvex/PoseIO.h) | `SceneArchive`, `SaveScene(scene, path, library={})`, `LoadScene(path, registry)`, `SavePose(pose, skeleton, path)`, `LoadPose(path, skeleton)` |
 | **viewer** · [Viewer.h](../include/minuvex/Viewer.h) | `ViewerOptions`, `ModelOptions`, `ViewerRunOptions`, `Viewer`. `AddModel()`, `AddModelAsync()`, `GetAssetLoad()`, `CommitModelLoad()`, `SetHotReload()`, `SetCamera()`, `SetMaterial/ResetMaterial`, `SetQuality()`, `CrossFadeAnimation()`, `GetScene()`, `Run()` |
 | **embedded** · [EmbeddedRenderer.h](../include/minuvex/EmbeddedRenderer.h) | `HostGraphicsContext`, `HostRenderTarget`, `EmbeddedFrameOptions`, `EmbeddedRenderer`. `Initialize()`, `Update()`, `Render()`, `WaitIdle()`, `DetachTarget()`, `Shutdown()` |
@@ -78,6 +78,27 @@ if (model->Animations.size() >= 2) {
 `CrossFade(clip, seconds=.3)`는 0초이면 즉시 전환함. 재전환·Paused/Stopped 상태에서는 현재 base pose를 source로 고정함. Position/Scale은 선형 보간, Rotation은 Slerp, 수동 Pose override는 마지막에 적용함. Scale 부호가 호환되지 않는 조합은 거부함.
 
 Pause·속도 0은 전환도 멈추며 Seek·Play·Stop·ResetPose는 전환을 해제함. `Stop()`은 Clip과 override를 유지하고 time=0, `ResetPose()`는 Clip·override를 해제하여 Reference Pose로 돌아감. `ApplyPose()`·`SetJointOverride()`로 full/partial Pose를 적용하며 speed 기본값은 1, loop는 true임.
+
+### Pose Blending Core
+
+`PoseBuffer`는 SkeletonSignature·노드별 LocalTransforms·Channels를 소유하는 CPU 값 타입임. `PoseChannels`는 None/Translation/Rotation/Scale/All 비트이며 `|`·`&`로 조합함. `ReferencePoseBuffer()`의 채널은 None이고 `EvaluateAnimation()`은 Clip에 기록된 채널만 표시함. 없는 채널은 Reference Pose로 보완하며 읽기 전용 노드는 원본 행렬을 유지함.
+
+```cpp
+const auto& skeleton = model->Skeleton; // 유효한 ModelHandle
+auto a = lv::EvaluateAnimation(skeleton, model->Animations.at(0), .5);
+auto b = lv::EvaluateAnimation(skeleton, model->Animations.at(1), .25);
+auto mixed = lv::BlendPoses(skeleton, a, b, .5f);
+auto finalPose = lv::ApplyPoseOverrides(skeleton, mixed, player.Overrides());
+auto matrices = lv::ComposePose(skeleton, finalPose); // Local/Global 행렬
+```
+
+`EvaluateAnimation()`은 유한한 0 이상 시간을 받아 duration까지 clamp함. 재생 상태·loop·Morph weight는 별도임. `BlendPoses()`는 weight [0,1], Translation/Scale Lerp·Rotation shortest-arc Slerp를 사용함. 선택한 Scale의 부호는 양쪽이 같아야 하며 endpoint에도 같은 검사를 적용함. 채널 누락은 weight 재정규화 없이 Reference와 혼합함.
+
+`BlendPoses(..., weight, channelMask)`는 노드 수와 같은 `std::span<const PoseChannels>`를 선택적으로 받음. 빈 mask는 전체 채널 선택이며 미선택 채널은 from을 유지함. 결과 채널은 `from | (to & mask)`임. 수동 Pose는 `ApplyPoseOverrides()`로 마지막에 적용하며 해당 노드의 전체 TRS를 대체함. `AnimationPlayer::EvaluatePose()`도 같은 evaluator/composer 경로의 최종 local buffer를 반환함.
+
+`ValidatePoseBuffer()`는 실제 Skeleton 서명·정확한 배열 길이·채널 비트·활성 TRS·읽기 전용 노드를 검사함. 누락 채널의 저장 값은 무시함. 불일치·잘못된 시간/weight·비정상 Quaternion/Scale은 `std::invalid_argument`임. 함수는 입력을 수정하거나 보관하지 않으며, immutable 입력을 공유하는 별도 버퍼 평가는 병렬 사용 가능함. Player의 동시 수정/평가는 금지임.
+
+Scene v8·Pose v1·ImportVersion 6은 유지함. PoseBuffer와 채널 마스크는 평가 중간 결과이며 파일 저장 대상이 아님. 기존 Cross-fade의 live/frozen source·override 순서와 Morph 독립 채널을 유지함. 공개 타입/API가 추가된 SDK 1.13.0 소비자는 함께 재빌드해야 함.
 
 ### PBR Material
 
@@ -166,8 +187,8 @@ Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상�
 
 ## 검증 범위
 
-SDK 1.12.0의 Windows Release 핵심 5종(Animation·Asset·Document·Editor·픽셀 통합)에서 관련 동작을 확인함. sparse/flat-normal expansion·FBX progressive bake·독립 weight·cross-fade·Undo/Scene·Morph-before-Skinning·Normal/Tangent·bounds/culling·Shadow·자원 비용을 검증함. 실패했던 cache 검사를 Pause 상태로 수정한 뒤 Morph GPU 전용 10개 검사만 재실행해 모두 통과함.
+SDK 1.13.0의 Windows Release Animation 209개 검사와 GPU Animation/Cross-fade 전용 15개 검사를 통과함. 두 Pose 혼합·endpoint·누락 채널·mask·Quaternion·signature·읽기 전용 행렬·기존 재생/Morph·Undo/Scene 및 실제 Skinning 픽셀을 확인함.
 
-CPU-only Animation/Document 2종, 공개 헤더 18개·독립 Morph SDK 소비자·설치 경로 이동·ZIP/SHA-256 및 Morph 예제 3프레임 실행을 확인함. 기본 CTest 등록은 13종으로 유지함. HLSL5/Metal 셰이더 생성은 확인했으며 macOS 실기기·원격 CI·장기 성능 측정은 미검증임.
+CPU-only Debug 빌드와 공백 포함 설치 경로의 공개 헤더 18개·독립 Animation/PoseBuffer 소비자를 확인함. 기본 CTest 등록은 13종으로 유지하고 관련 묶음만 실행함. macOS 실기기·전체 회귀·장기 성능 측정은 이번 검증 범위에 포함하지 않았음.
 
 [기능·빌드 안내](../README.md) · [공식 SDK 예제](../examples/SdkConsumer) · [공개 헤더](../include/minuvex)

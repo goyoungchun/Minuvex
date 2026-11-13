@@ -64,6 +64,18 @@ struct AnimationClip {
     std::vector<AnimationTrack> Tracks;
     std::vector<MorphTrack> MorphTracks;
 };
+enum class PoseChannels : std::uint8_t { None = 0, Translation = 1, Rotation = 2, Scale = 4, All = 7 };
+constexpr PoseChannels operator|(PoseChannels a, PoseChannels b) noexcept {
+    return static_cast<PoseChannels>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
+}
+constexpr PoseChannels operator&(PoseChannels a, PoseChannels b) noexcept {
+    return static_cast<PoseChannels>(static_cast<unsigned>(a) & static_cast<unsigned>(b));
+}
+struct PoseBuffer {
+    std::uint64_t SkeletonSignature = 0;
+    std::vector<Transform> LocalTransforms;
+    std::vector<PoseChannels> Channels; // Per-node authored TRS bits; missing channels use reference values.
+};
 struct EvaluatedPose { std::vector<Mat4> Local, Global; };
 enum class PlaybackState { Stopped, Playing, Paused };
 struct AnimationBlendState {
@@ -81,6 +93,16 @@ void ValidatePose(const SkeletonAsset& skeleton, const PoseAsset& pose);
 void ValidateAnimation(const SkeletonAsset& skeleton, const AnimationClip& clip);
 PoseAsset ReferencePose(const SkeletonAsset& skeleton);
 Quaternion Slerp(Quaternion from, Quaternion to, float amount);
+void ValidatePoseBuffer(const SkeletonAsset& skeleton, const PoseBuffer& pose);
+PoseBuffer ReferencePoseBuffer(const SkeletonAsset& skeleton);
+// Stateless CPU sampling: finite nonnegative seconds, clamped to clip duration; no looping or manual overrides.
+PoseBuffer EvaluateAnimation(const SkeletonAsset& skeleton, const AnimationClip& clip, double seconds);
+// Empty mask selects all channels; otherwise one mask per node. Unselected channels retain 'from'.
+// Weight is [0,1]; selected scale channels must retain compatible signs, including at endpoints.
+PoseBuffer BlendPoses(const SkeletonAsset& skeleton, const PoseBuffer& from, const PoseBuffer& to,
+    float weight, std::span<const PoseChannels> channelMask = {});
+PoseBuffer ApplyPoseOverrides(const SkeletonAsset& skeleton, const PoseBuffer& base, const PoseAsset& overrides);
+EvaluatedPose ComposePose(const SkeletonAsset& skeleton, const PoseBuffer& pose);
 
 // CPU-only, copyable instance state, strong immutable ModelHandle ownership.
 // No shared mutable pose or playback state between Scene model instances.
@@ -114,6 +136,7 @@ public:
     void ClearOverrides() noexcept;
     void ResetPose() noexcept; // Reference pose: clears clip and overrides.
     PoseAsset CapturePose(std::string name = {}) const;
+    PoseBuffer EvaluatePose() const; // Current blended local TRS plus manual overrides; Morph stays separate.
     EvaluatedPose Evaluate() const;
     Bounds GetBounds() const; // Current deformed geometry bounds, for camera fitting.
     std::vector<float> EvaluateMorphWeights(JointId node) const;
@@ -132,10 +155,9 @@ private:
     std::vector<MorphPose> morphOverrides_;
     std::vector<float> EvaluateMorphClip(JointId node, std::optional<std::size_t> clip, double time) const;
     std::vector<float> EvaluateMorphBase(JointId node) const;
-    std::vector<Transform> EvaluateClip(std::optional<std::size_t> clip,double time) const;
-    std::vector<Transform> EvaluateBase() const;
+    PoseBuffer EvaluateClip(std::optional<std::size_t> clip,double time) const;
+    PoseBuffer EvaluateBase() const;
     void ValidateBlend(const AnimationBlendState& state) const;
-    std::vector<Transform> EvaluateLocal() const;
 };
 std::uint64_t MorphSignature(const ModelAsset& model);
 void ValidateMorphWeights(const ModelAsset& model, JointId node, std::span<const float> weights);

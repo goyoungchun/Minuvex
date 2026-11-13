@@ -1,4 +1,5 @@
 #include <minuvex/Asset.h>
+#include "AnimationEvaluation.h"
 
 #include <algorithm>
 #include <bit>
@@ -193,7 +194,7 @@ void AnimationPlayer::CrossFade(std::size_t clip,double duration) {
     Require(bool(model_),"Bind a model before blending clips.");
     AnimationBlendState state;state.Duration=duration;
     if (!blend_ && clip_ && state_ == PlaybackState::Playing) {state.SourceClip=clip_;state.SourceTime=time_;}
-    else {const auto base=EvaluateBase();state.SourcePose.Name="Blend source";state.SourcePose.SkeletonSignature=SkeletonSignature(model_->Skeleton);for (std::size_t i=0;i<base.size();++i) {if (model_->Skeleton.Joints[i].Editable) {state.SourcePose.Joints.push_back({static_cast<JointId>(i),base[i]});}}}
+    else {const auto base=EvaluateBase();state.SourcePose.Name="Blend source";state.SourcePose.SkeletonSignature=base.SkeletonSignature;for (std::size_t i=0;i<base.LocalTransforms.size();++i) {if (model_->Skeleton.Joints[i].Editable) {state.SourcePose.Joints.push_back({static_cast<JointId>(i),base.LocalTransforms[i]});}}}
     if (!state.SourceClip) {for (std::size_t i=0;i<model_->Nodes.size();++i) {const auto& node=model_->Nodes[i];if (node.MeshIndex && !model_->Meshes[*node.MeshIndex].MorphWeights.empty()) {state.SourceMorph.push_back({static_cast<JointId>(i),EvaluateMorphBase(static_cast<JointId>(i))});}}}
     auto next=*this;next.Play(clip);next.RestoreBlend(state);*this=std::move(next);
 }
@@ -211,11 +212,11 @@ void AnimationPlayer::ValidateBlend(const AnimationBlendState& state) const {
     if (state.SourceClip) {Require(state.SourceMorph.empty(),"Live source cannot contain a frozen morph pose.");}else {
         std::size_t expected=0;for (const auto& node:model_->Nodes) {expected+=node.MeshIndex && !model_->Meshes[*node.MeshIndex].MorphWeights.empty();}Require(state.SourceMorph.size()==expected,"Frozen blend requires every morph node.");std::unordered_set<JointId> nodes;for (const auto& pose:state.SourceMorph) {Require(nodes.insert(pose.Node).second,"Duplicate frozen morph node.");ValidateMorphWeights(*model_,pose.Node,pose.Weights);}
     }
-    auto source=EvaluateClip(state.SourceClip,state.SourceTime);if (!state.SourceClip) {for (const auto& joint:state.SourcePose.Joints) {source[joint.Joint]=joint.Local;}}
+    auto source=EvaluateClip(state.SourceClip,state.SourceTime);if (!state.SourceClip) {source=ApplyPoseOverrides(model_->Skeleton,source,state.SourcePose);}
     const auto target=EvaluateClip(clip_,time_);
+    (void)BlendPoses(model_->Skeleton,source,target,.5f);
     const auto signs=[](Vec3 a,Vec3 b) {return std::signbit(a.X) == std::signbit(b.X) && std::signbit(a.Y) == std::signbit(b.Y) && std::signbit(a.Z) == std::signbit(b.Z);};
-    for (std::size_t i=0;i<source.size();++i) {if (model_->Skeleton.Joints[i].Editable) {Require(signs(source[i].Scale,target[i].Scale),"Blend cannot cross a singular zero scale.");}}
-    const auto check=[&](std::size_t clip) {for (const auto& track:model_->Animations[clip].Tracks) {if (track.Path == AnimationPath::Scale) {for (const auto& value:track.Values) {Require(signs(source[track.Joint].Scale,{value[0],value[1],value[2]}),"Blend clips must retain compatible scale signs.");}}}};
+    const auto check=[&](std::size_t clip) {for (const auto& track:model_->Animations[clip].Tracks) {if (track.Path == AnimationPath::Scale) {for (const auto& value:track.Values) {Require(signs(source.LocalTransforms[track.Joint].Scale,{value[0],value[1],value[2]}),"Blend clips must retain compatible scale signs.");}}}};
     check(*clip_);if (state.SourceClip) {check(*state.SourceClip);}
 }
 void AnimationPlayer::RestoreBlend(const AnimationBlendState& state) {ValidateBlend(state);auto candidate=state;blend_=std::move(candidate);}
@@ -253,52 +254,25 @@ void AnimationPlayer::ClearJointOverride(JointId joint) {
 }
 void AnimationPlayer::ClearOverrides() noexcept { overrides_.Joints.clear(); }
 void AnimationPlayer::ResetPose() noexcept { clip_.reset(); time_ = 0; state_ = PlaybackState::Stopped;blend_.reset();ClearOverrides();ClearMorphOverrides(); }
-std::vector<Transform> AnimationPlayer::EvaluateClip(std::optional<std::size_t> clip,double time) const {
+PoseBuffer AnimationPlayer::EvaluateClip(std::optional<std::size_t> clip,double time) const {
     Require(bool(model_),"Bind a model before evaluating its pose.");
-    std::vector<Transform> local; local.reserve(model_->Skeleton.Joints.size());
-    for (const auto& joint : model_->Skeleton.Joints) { local.push_back(joint.ReferenceLocal); }
-    if (clip) {
-        for (const auto& track : model_->Animations[*clip].Tracks) {
-            const auto end = std::upper_bound(track.Times.begin(),track.Times.end(),time);
-            const auto left = end == track.Times.begin() ? 0 : static_cast<std::size_t>(end-track.Times.begin()-1);
-            const auto right = std::min(left+1,track.Times.size()-1);
-            const float factor = track.Interpolation == AnimationInterpolation::Step || right == left || time <= track.Times.front() ? 0 :
-                static_cast<float>(std::clamp((time-track.Times[left])/(double(track.Times[right])-track.Times[left]),0.0,1.0));
-            const auto& a = track.Values[left]; const auto& b = track.Values[right]; auto& t = local[track.Joint];
-            if (track.Path == AnimationPath::Rotation) { t.Rotation = Slerp({a[0],a[1],a[2],a[3]},{b[0],b[1],b[2],b[3]},factor); }
-            else {
-                Vec3 value{std::lerp(a[0],b[0],factor),std::lerp(a[1],b[1],factor),std::lerp(a[2],b[2],factor)};
-                if (track.Path == AnimationPath::Translation) { t.Position = value; } else { t.Scale = value; }
-            }
-        }
-    }
-    return local;
+    return detail::SampleAnimation(model_->Skeleton,clip ? &model_->Animations[*clip]:nullptr,time);
 }
-std::vector<Transform> AnimationPlayer::EvaluateBase() const {
+PoseBuffer AnimationPlayer::EvaluateBase() const {
     auto local=EvaluateClip(clip_,time_);if (!blend_) {return local;}
-    auto source=EvaluateClip(blend_->SourceClip,blend_->SourceTime);if (!blend_->SourceClip) {for (const auto& joint:blend_->SourcePose.Joints) {source[joint.Joint]=joint.Local;}}
-    const auto weight=BlendWeight();const auto lerp=[&](Vec3 a,Vec3 b) {return Vec3{std::lerp(a.X,b.X,weight),std::lerp(a.Y,b.Y,weight),std::lerp(a.Z,b.Z,weight)};};
-    for (std::size_t i=0;i<local.size();++i) {if (model_->Skeleton.Joints[i].Editable) {local[i]={lerp(source[i].Position,local[i].Position),Slerp(source[i].Rotation,local[i].Rotation,weight),lerp(source[i].Scale,local[i].Scale)};}}
-    return local;
+    auto source=EvaluateClip(blend_->SourceClip,blend_->SourceTime);if (!blend_->SourceClip) {source=ApplyPoseOverrides(model_->Skeleton,source,blend_->SourcePose);}
+    return BlendPoses(model_->Skeleton,source,local,BlendWeight());
 }
-std::vector<Transform> AnimationPlayer::EvaluateLocal() const {auto local=EvaluateBase();for (const auto& joint:overrides_.Joints) {local[joint.Joint]=joint.Local;}return local;}
+PoseBuffer AnimationPlayer::EvaluatePose() const {
+    const auto base=EvaluateBase();return overrides_.Joints.empty() ? base:ApplyPoseOverrides(model_->Skeleton,base,overrides_);
+}
 PoseAsset AnimationPlayer::CapturePose(std::string name) const {
-    const auto local = EvaluateLocal(); PoseAsset pose; pose.Name = std::move(name); pose.SkeletonSignature = SkeletonSignature(model_->Skeleton);
-    for (std::size_t i=0;i<local.size();++i) { if (model_->Skeleton.Joints[i].Editable) { pose.Joints.push_back({static_cast<JointId>(i),local[i]}); } }
+    const auto local = EvaluatePose(); PoseAsset pose; pose.Name = std::move(name); pose.SkeletonSignature = local.SkeletonSignature;
+    for (std::size_t i=0;i<local.LocalTransforms.size();++i) { if (model_->Skeleton.Joints[i].Editable) { pose.Joints.push_back({static_cast<JointId>(i),local.LocalTransforms[i]}); } }
     return pose;
 }
 EvaluatedPose AnimationPlayer::Evaluate() const {
-    const auto transforms = EvaluateLocal(); EvaluatedPose pose;
-    pose.Local.resize(transforms.size()); pose.Global.resize(transforms.size());
-    std::vector<bool> visited(transforms.size(),false);
-    for (std::size_t i=0;i<transforms.size();++i) { pose.Local[i] = model_->Skeleton.Joints[i].Editable ? transforms[i].Matrix() : model_->Skeleton.Joints[i].ReferenceMatrix; }
-    for (std::size_t i=0;i<transforms.size();++i) {
-        std::vector<JointId> chain; auto current = static_cast<JointId>(i);
-        while (current != NoJoint && !visited[current]) { chain.push_back(current); current = model_->Skeleton.Joints[current].Parent; }
-        auto parent = current == NoJoint ? Mat4::Identity() : pose.Global[current];
-        for (auto it=chain.rbegin();it!=chain.rend();++it) { parent = parent*pose.Local[*it]; (void)parent.NormalMatrix(); pose.Global[*it] = parent; visited[*it] = true; }
-    }
-    return pose;
+    const auto pose=EvaluatePose();return ComposePose(model_->Skeleton,pose);
 }
 Bounds AnimationPlayer::GetBounds() const {
     Require(bool(model_),"Bind a model before computing its bounds.");

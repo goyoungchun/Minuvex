@@ -205,7 +205,7 @@ void RunAnimation() {
     scene.GetAnimation(first).ResetPose();
     auto reset = target.Render(renderer,scene); Check(reset == reference,"reference reset restores exact original GPU pixels");
     scene.RemoveObject(second);
-    auto litModel = std::make_shared<lv::ModelAsset>(*ribbon); litModel->Materials[0].Unlit = false; litModel->Materials[0].BaseColor = {1,1,1,1};
+    auto litModel = std::make_shared<lv::ModelAsset>(*ribbon); litModel->Materials[0].Unlit = false; litModel->Materials[0].Shading = lv::ShadingModel::Basic; litModel->Materials[0].BaseColor = {1,1,1,1};
     scene.SetModel(first,litModel); scene.Sun.Direction = {0,0,-1}; scene.Sun.Intensity = 1; scene.Sun.Ambient = 0;
     auto bright = target.Render(renderer,scene);
     local = litModel->Skeleton.Joints[1].ReferenceLocal; local.Rotation = {0,.5f,0,.8660254f};
@@ -458,7 +458,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunPbr();RunMorph();} else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunPbr();RunMorph();} else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }

@@ -11,6 +11,63 @@ namespace {
 void MatrixNear(const lv::Mat4& a, const lv::Mat4& b, const char* label) {
     bool near = true; for (std::size_t i=0;i<16;++i) { near &= Near(a.Elements[i],b.Elements[i]); } Check(near,label);
 }
+void PoseBlendingCore() {
+    using C = lv::PoseChannels;
+    lv::SkeletonAsset skeleton; skeleton.Joints.resize(3);
+    skeleton.Joints[0].Name="Child";skeleton.Joints[0].Parent=2;skeleton.Joints[0].ReferenceLocal.Position.Y=2;
+    skeleton.Joints[1].Name="Shear";skeleton.Joints[1].Editable=false;skeleton.Joints[1].ReferenceMatrix.Elements[4]=.5f;
+    skeleton.Joints[2].Name="Root";skeleton.Joints[2].ReferenceLocal.Position.X=1;
+    lv::AnimationClip first;first.Duration=2;
+    first.Tracks={{2,lv::AnimationPath::Translation,lv::AnimationInterpolation::Linear,{0,2},{{1,0,0,0},{5,0,0,0}}},
+        {0,lv::AnimationPath::Rotation,lv::AnimationInterpolation::Linear,{0,2},{{0,0,0,1},{0,0,1,0}}}};
+    lv::AnimationClip second;second.Duration=2;
+    second.Tracks={{2,lv::AnimationPath::Translation,lv::AnimationInterpolation::Step,{0,1,2},{{9,0,0,0},{11,0,0,0},{13,0,0,0}}},
+        {0,lv::AnimationPath::Scale,lv::AnimationInterpolation::Linear,{0,2},{{1,1,1,0},{3,3,3,0}}}};
+    const auto a=lv::EvaluateAnimation(skeleton,first,1),b=lv::EvaluateAnimation(skeleton,second,.5);
+    Check(a.Channels==std::vector<C>{C::Rotation,C::None,C::Translation} && b.Channels[0]==C::Scale,"stateless evaluation reports authored channels including sparse joints");
+    Check(Near(a.LocalTransforms[2].Position.X,3) && Near(a.LocalTransforms[0].Rotation.Z,std::sqrt(.5f)) && Near(b.LocalTransforms[2].Position.X,9),"sampler handles independent clip times, linear TRS and STEP keys");
+    const auto mixed=lv::BlendPoses(skeleton,a,b,.5f);const auto& child=mixed.LocalTransforms[0];
+    Check(Near(mixed.LocalTransforms[2].Position.X,6) && Near(child.Scale.X,1.25f) && Near(child.Rotation.Z,std::sin(std::numbers::pi_v<float>/8)),"two-pose blend uses reference values for absent channels and shortest-arc rotation");
+    Check(mixed.Channels[0]==(C::Rotation|C::Scale) && mixed.Channels[1]==C::None,"blended channel provenance is the union of selected authored channels");
+    const auto zero=lv::ComposePose(skeleton,lv::BlendPoses(skeleton,a,b,0)),one=lv::ComposePose(skeleton,lv::BlendPoses(skeleton,a,b,1));
+    const auto ca=lv::ComposePose(skeleton,a),cb=lv::ComposePose(skeleton,b);
+    for (std::size_t i=0;i<3;++i) {MatrixNear(zero.Global[i],ca.Global[i],"weight zero matches source pose");MatrixNear(one.Global[i],cb.Global[i],"weight one matches target pose");}
+    MatrixNear(ca.Global[0],ca.Local[2]*ca.Local[0],"composer supports parents after children in storage order");
+    MatrixNear(lv::ComposePose(skeleton,mixed).Local[1],skeleton.Joints[1].ReferenceMatrix,"read-only shear matrix survives sampling and blending");
+    const std::array<C,3> mask{C::Rotation,C::None,C::None};const auto masked=lv::BlendPoses(skeleton,a,b,.5f,mask);
+    Check(Near(masked.LocalTransforms[2].Position.X,3) && Near(masked.LocalTransforms[0].Scale.X,1) && masked.Channels[0]==C::Rotation,"per-node channel mask retains unselected source values and provenance");
+    auto absent=lv::ReferencePoseBuffer(skeleton);absent.LocalTransforms[0].Position.X=std::numeric_limits<float>::quiet_NaN();
+    Check(Near(lv::ComposePose(skeleton,absent).Local[0].Elements[12],0),"inactive channel storage is ignored and resolved from the reference pose");
+    auto local=skeleton.Joints[0].ReferenceLocal;local.Position.X=7;
+    const lv::PoseAsset overridePose{"Override",lv::SkeletonSignature(skeleton),{{0,local}}};
+    const auto overridden=lv::ApplyPoseOverrides(skeleton,mixed,overridePose);
+    Check(overridden.Channels[0]==C::All && Near(overridden.LocalTransforms[0].Position.X,7) && Near(overridden.LocalTransforms[0].Scale.X,1) && Near(mixed.LocalTransforms[0].Scale.X,1.25f),"manual full-TRS overrides apply last without changing input buffers");
+    auto antipodal=a;auto& rotation=antipodal.LocalTransforms[0].Rotation;rotation={-rotation.X,-rotation.Y,-rotation.Z,-rotation.W};
+    MatrixNear(lv::ComposePose(skeleton,lv::BlendPoses(skeleton,a,antipodal,.5f)).Local[0],ca.Local[0],"antipodal quaternion blending preserves orientation");
+    Check(Near(lv::EvaluateAnimation(skeleton,first,100).LocalTransforms[2].Position.X,5),"standalone sampling clamps beyond the endpoint without looping");
+    auto invalid=b;invalid.SkeletonSignature^=1;Rejects([&]{lv::BlendPoses(skeleton,a,invalid,.5f);},"foreign pose signature rejected");
+    auto changed=skeleton;changed.Joints[2].Name="Other";changed.Signature=a.SkeletonSignature;Rejects([&]{lv::ComposePose(changed,a);},"compatibility checks actual skeleton values rather than a stale cached signature");
+    invalid=b;invalid.Channels.pop_back();Rejects([&]{lv::ComposePose(skeleton,invalid);},"incomplete dense channel layout rejected");
+    invalid=b;invalid.LocalTransforms.pop_back();Rejects([&]{lv::BlendPoses(skeleton,a,invalid,.5f);},"incomplete transform layout rejected");
+    invalid=b;invalid.Channels[0]=static_cast<C>(8);Rejects([&]{lv::ValidatePoseBuffer(skeleton,invalid);},"unknown channel bits rejected");
+    invalid=b;invalid.Channels[1]=C::Translation;Rejects([&]{lv::ComposePose(skeleton,invalid);},"matrix-authored read-only node cannot be overridden");
+    invalid=b;invalid.Channels[0]=C::Rotation;invalid.LocalTransforms[0].Rotation={0,0,0,0};Rejects([&]{lv::ComposePose(skeleton,invalid);},"active zero quaternion rejected");
+    invalid=b;invalid.LocalTransforms[0].Scale.X=0;Rejects([&]{lv::BlendPoses(skeleton,a,invalid,.5f);},"singular active scale rejected");
+    invalid=b;invalid.LocalTransforms[0].Scale.X=-1;Rejects([&]{lv::BlendPoses(skeleton,a,invalid,.5f);},"opposite scale signs cannot blend through zero");
+    Check(Near(lv::BlendPoses(skeleton,a,invalid,.5f,mask).LocalTransforms[0].Scale.X,1),"unselected scale channel does not impose a blend sign constraint");
+    Rejects([&]{lv::BlendPoses(skeleton,a,b,std::numeric_limits<float>::quiet_NaN());},"nonfinite blend weight rejected");
+    Rejects([&]{lv::BlendPoses(skeleton,a,b,1.1f);},"out-of-range blend weight rejected");
+    Rejects([&]{lv::BlendPoses(skeleton,a,b,.5f,std::span(mask).first(2));},"incorrect blend mask size rejected");
+    auto badMask=mask;badMask[1]=static_cast<C>(8);Rejects([&]{lv::BlendPoses(skeleton,a,b,.5f,badMask);},"unknown mask bits rejected even on read-only nodes");
+    Rejects([&]{lv::EvaluateAnimation(skeleton,first,-1);},"negative stateless sample time rejected");
+    Rejects([&]{lv::EvaluateAnimation(skeleton,first,std::numeric_limits<double>::infinity());},"nonfinite stateless sample time rejected");
+    changed=skeleton;changed.Joints[2].Parent=0;Rejects([&]{lv::ComposePose(changed,a);},"composer rejects cyclic skeletons before hierarchy traversal");
+    Check(lv::ComposePose({},lv::ReferencePoseBuffer({})).Global.empty(),"empty reference skeleton composes safely");
+    lv::AssetRegistry assets;const auto model=assets.LoadModel(Fixture("AnimatedRibbon.gltf"));lv::AnimationPlayer player;player.Bind(model);player.Play(0);player.Seek(.5);player.CrossFade(1,1);player.Update(.25);
+    const auto direct=lv::ComposePose(model->Skeleton,lv::BlendPoses(model->Skeleton,lv::EvaluateAnimation(model->Skeleton,model->Animations[0],.75),lv::EvaluateAnimation(model->Skeleton,model->Animations[1],.25),.25f));
+    MatrixNear(player.Evaluate().Global[2],direct.Global[2],"AnimationPlayer cross-fade uses the independent evaluator and composer");
+    Check(player.EvaluatePose().SkeletonSignature==lv::SkeletonSignature(model->Skeleton),"Player exposes its current local pose buffer without changing playback");
+}
 void DataAndPlayer() {
     lv::AssetRegistry registry; auto model = registry.LoadModel(Fixture("AnimatedRibbon.gltf"));
     Check(model->ImportVersion == 6 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
@@ -250,7 +307,7 @@ void MorphPlayback() {
     Check(fbx->Meshes[0].MorphWeights.size() == 2 && Near(fbxPlayer.EvaluateMorphWeights(node)[0],.5f),"FBX progressive shapes become independent targets with normalized default weights");fbxPlayer.Play(0);fbxPlayer.Seek(.75);const auto weights=fbxPlayer.EvaluateMorphWeights(node);Check(Near(weights[0],.5f) && Near(weights[1],.5f),"FBX progressive animation bake interpolates between shape thresholds");
 }
 int main() {
-    try { DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport();MorphPlayback(); }
+    try { PoseBlendingCore();DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport();MorphPlayback(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }
