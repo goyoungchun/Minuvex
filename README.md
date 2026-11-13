@@ -22,6 +22,8 @@ cmake --preset windows-release
 cmake --build --preset windows-release --parallel 4
 ./out/build/windows-release/bin/minuvex_standalone.exe "path/to/model.glb"
 ./out/build/windows-release/bin/minuvex_editor.exe
+# 금속/비금속·거칠기 비교 예제
+./out/build/windows-release/bin/minuvex_rendering_enhancement.exe --pbr
 ```
 
 ### macOS
@@ -41,7 +43,7 @@ cmake --install out/build/windows-release --config Release --prefix out/sdk-nati
 ```
 
 ```cmake
-find_package(Minuvex 1.10 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minuvex 1.11 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minuvex::viewer)
 ```
@@ -58,7 +60,7 @@ cmake --build build
 | **Asset** | glTF/GLB, OBJ/MTL, FBX(Static·Skin·Animation Bake), 검사·재임포트·Hot Reload·비동기 로딩 |
 | **Scene** | 객체 계층·Transform, 모델 인스턴스 공유, Scene 저장·불러오기 |
 | **Mesh** | Static/Skeletal Mesh, GPU Skinning(정점당 최대 4개 영향) |
-| **Material·Lighting** | Base Color·Texture·Normal Map, Directional/Point/Spot Light, Basic/PCF Shadow, HDR·FXAA |
+| **Material·Lighting** | Base Color·Texture·Normal Map, PBR Metallic/Roughness, Directional/Point/Spot Light, Basic/PCF Shadow, HDR·FXAA |
 | **Camera** | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking |
 | **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기 |
 | **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Clip Cross-fade, Timeline Scrubbing |
@@ -71,7 +73,13 @@ cmake --build build
 | **SDK** | C++20, CMake 설치·연결, Facade API, Result/Error, 공식 예제, CPU-only 구성 |
 | **Platform** | Windows D3D11, macOS Metal |
 
-**미지원·후속 개발:** PBR Metallic/Roughness, Morph Target, Blend Tree·Additive·Animation Event, PCSS, Python·WebAssembly 바인딩.
+**PBR 범위:** 직접광 기반임. Low/Medium 기본 OFF, High ON이며 Custom에서 설정 가능함. IBL·Emissive/Occlusion·Alpha BLEND는 미지원임.
+
+**미지원·후속 개발:** Morph Target, Blend Tree·Additive·Animation Event, PCSS, Python·WebAssembly 바인딩.
+
+**확장 진행:** Phase 1(PBR) 구현·Windows 검증 완료임. Phase 2(Morph) 이후는 후속 개발임.
+
+**검증:** Windows Release 핵심 6종·CPU-only Scene/재질 1종, PBR GPU 단독 15개 검사, SDK ZIP·독립 소비자·공개 헤더 18개 통과함. macOS 실기기는 미검증임.
 
 ## 최소 사양
 

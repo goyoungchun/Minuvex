@@ -338,6 +338,22 @@ void EditorUI::Inspector() {
             if (changed) { Report(Document.SetTransform(id,t)); }
             ImGui::TextWrapped("%s",object.Model ? Text(object.Model->SourcePath.filename()).c_str() : "Empty object");
             if (ImGui::Button("Delete subtree...")) { deleteObject_=id; }
+            if (object.Model && ImGui::CollapsingHeader("Materials")) {
+                ImGui::TextUnformatted("PBR uses Advanced lighting + PBR quality. Direct lights; no IBL.");
+                for (std::size_t index=0;index<object.Model->Materials.size();++index) {ImGui::PushID(static_cast<int>(index));auto material=Document.GetScene().GetMaterial(id,index);
+                    const auto label=material.Name.empty() ? "Material "+std::to_string(index):material.Name;
+                    if (ImGui::TreeNode("Material","%zu: %s",index,label.c_str())) {
+                        bool materialChanged=false;int shading=material.Unlit ? 1:static_cast<int>(material.Shading);
+                        if (ImGui::Combo("Shading",&shading,"Basic\0Unlit\0PBR\0")) {material.Shading=static_cast<ShadingModel>(shading);material.Unlit=shading == 1;materialChanged=true;}
+                        materialChanged=ImGui::ColorEdit4("Base color",material.BaseColor.data()) || materialChanged;
+                        materialChanged=ImGui::SliderFloat("Metallic",&material.MetallicFactor,0,1) || materialChanged;materialChanged=ImGui::SliderFloat("Roughness",&material.RoughnessFactor,0,1) || materialChanged;
+                        materialChanged=ImGui::SliderFloat("Normal scale",&material.NormalScale,-16,16) || materialChanged;materialChanged=ImGui::Checkbox("Double sided",&material.DoubleSided) || materialChanged;
+                        const auto texture=[&](const char* name,std::optional<std::size_t>& slot) {const auto preview=slot ? std::to_string(*slot):"<none>";bool edit=false;if (ImGui::BeginCombo(name,preview.c_str())) {if (ImGui::Selectable("<none>",!slot)) {slot.reset();edit=true;}for (std::size_t i=0;i<object.Model->Textures.size();++i) {const auto image=object.Model->Textures[i].ImageIndex;if (image>=object.Model->Images.size() || object.Model->Images[image].Rgba.empty()) {continue;}const auto text=std::to_string(i);if (ImGui::Selectable(text.c_str(),slot == i)) {slot=i;edit=true;}}ImGui::EndCombo();}return edit;};
+                        materialChanged=texture("Base texture",material.BaseColorTexture) || materialChanged;materialChanged=texture("Metallic/Roughness texture",material.MetallicRoughnessTexture) || materialChanged;materialChanged=texture("Normal texture",material.NormalTexture) || materialChanged;
+                        if (materialChanged) {Report(Document.SetMaterial(id,index,material));}if (ImGui::Button("Reset material")) {Report(Document.ResetMaterial(id,index));}ImGui::TreePop();
+                    }ImGui::PopID();
+                }
+            }
             ImGui::Separator();
         } else { ImGui::TextUnformatted("Select an object in Hierarchy."); }
         if (ImGui::CollapsingHeader("Camera")) {
@@ -489,6 +505,7 @@ void EditorUI::QualitySettings() {
             if (ImGui::Checkbox("Automatic rigid LOD",&s.Lod)) {o.Lod=s.Lod;}
             if (ImGui::SliderFloat("LOD bias",&s.LodBias,-4,4,"%.2f")) {o.LodBias=s.LodBias;}
             if (ImGui::Checkbox("Static GPU instancing",&s.Instancing)) {o.Instancing=s.Instancing;}
+            if (ImGui::Checkbox("PBR materials (Advanced)",&s.Pbr)) {o.Pbr=s.Pbr;}
             int compression=static_cast<int>(s.Compression);if (ImGui::Combo("Texture compression",&compression,"None\0Auto\0BC3\0")) {o.Compression=static_cast<TextureCompression>(compression);}
             ImGui::TextWrapped("LOD and instancing retain animated/skinned draw paths. PCSS remains unavailable.");
         } else {ImGui::TextWrapped("%s",expanded.Error().Message.c_str());}

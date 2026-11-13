@@ -7,7 +7,7 @@
 using namespace test;
 using Json=nlohmann::json;
 namespace {
-lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4)|(1u<<8);return c;}
+lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.PbrLighting=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4)|(1u<<8);return c;}
 void Policy() {
     lv::RenderSettings invalidShadow;invalidShadow.Shadow=lv::ShadowMode::Pcf;invalidShadow.ShadowResolution=513;Rejects([&]{(void)lv::RenderTargetBytes(invalidShadow,16,16);},"public target byte helper rejects unsupported shadow resolutions");
     auto low=lv::MakeQualityProfile(lv::QualityPreset::Low),medium=lv::MakeQualityProfile(lv::QualityPreset::Medium),high=lv::MakeQualityProfile(lv::QualityPreset::High);
@@ -94,4 +94,10 @@ void CullingAndPacing() {
     Rejects([&]{(void)scheduler.Due(-1,30);},"invalid pacing clock rejected");
 }
 }
-int main() {try {Policy();Persistence();CullingAndPacing();}catch (const std::exception& e) {Check(false,e.what());}return Finish();}
+void PbrPolicy() {
+    Check(!lv::QualityPresetSettings(lv::QualityPreset::Low).Pbr && !lv::QualityPresetSettings(lv::QualityPreset::Medium).Pbr && lv::QualityPresetSettings(lv::QualityPreset::High).Pbr,"PBR opt-in defaults preserve Low/Medium and enable High");
+    auto p=lv::MakeQualityProfile(lv::QualityPreset::Medium);p.Overrides.Pbr=true;auto caps=Caps();caps.PbrLighting=false;Check(!lv::ResolveQuality(p,caps,128,128),"strict PBR capability rejection");p.AllowFallback=true;auto result=lv::ResolveQuality(p,caps,128,128);Check(result && !result.Value().Effective->Pbr && result.Value().Adjustments.size() == 1,"explicit PBR fallback is reported");
+    p.AllowFallback=false;caps.PbrLighting=true;p.Overrides.Lighting=lv::LightingMode::Basic;Check(!lv::ResolveQuality(p,caps,128,128),"PBR requires Advanced lighting");
+    p.Overrides.Lighting=lv::LightingMode::Advanced;TemporaryDirectory temp;const auto path=temp.File("Pbr.mvxquality.json");Check(bool(lv::SaveQuality(p,path)) && lv::LoadQuality(path).Value().Overrides.Pbr == true,"PBR override persists in Quality JSON");
+}
+int main() {try {Policy();Persistence();CullingAndPacing();PbrPolicy();}catch (const std::exception& e) {Check(false,e.what());}return Finish();}

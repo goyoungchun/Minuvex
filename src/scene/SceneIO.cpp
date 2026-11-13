@@ -69,6 +69,22 @@ PoseAsset Pose(const Json& json, const SkeletonAsset& skeleton) {
     for (const auto& joint : joints) { pose.Joints.push_back({static_cast<JointId>(UInt(joint.at("joint"),UINT32_MAX)),Local(joint)}); }
     ValidatePose(skeleton,pose); return pose;
 }
+Json Materials(const SceneObject& object) {
+    Json result=Json::array();if (!object.Model) {Require(object.MaterialOverrides.empty(),"Empty object cannot have material overrides.");return result;}
+    for (std::size_t index=0;index<object.Model->Materials.size();++index) {const auto found=object.MaterialOverrides.find(index);if (found == object.MaterialOverrides.end()) {continue;}const auto& m=found->second;ValidateMaterial(m,*object.Model);
+        Json entry{{"index",index},{"sourceName",String(object.Model->Materials[index].Name)},{"name",String(m.Name)},{"baseColor",m.BaseColor},{"doubleSided",m.DoubleSided},{"unlit",m.Unlit},{"alphaCutoff",m.AlphaCutoff},{"normalScale",m.NormalScale},{"shading",static_cast<unsigned>(m.Shading)},{"metallic",m.MetallicFactor},{"roughness",m.RoughnessFactor},{"baseTexture",nullptr},{"normalTexture",nullptr},{"metallicRoughnessTexture",nullptr}};
+        if (m.BaseColorTexture) {entry["baseTexture"]=*m.BaseColorTexture;}if (m.NormalTexture) {entry["normalTexture"]=*m.NormalTexture;}if (m.MetallicRoughnessTexture) {entry["metallicRoughnessTexture"]=*m.MetallicRoughnessTexture;}result.push_back(std::move(entry));
+    }Require(result.size() == object.MaterialOverrides.size(),"Invalid overridden material index.");return result;
+}
+void Materials(const Json& entries,Scene& scene,ObjectId id) {
+    const auto& object=scene.GetObject(id);Require(entries.is_array() && entries.size()<=(object.Model ? object.Model->Materials.size():0),"Invalid material override list.");std::unordered_set<std::size_t> seen;
+    for (const auto& entry:entries) {const auto index=static_cast<std::size_t>(UInt(entry.at("index")));Require(seen.insert(index).second,"Duplicate material override index.");
+        const auto& source=scene.GetMaterial(id,index);Require(String(entry.at("sourceName")) == source.Name,"Saved material identity changed.");auto m=source;m.Name=String(entry.at("name"));
+        const auto& color=entry.at("baseColor");Require(color.is_array() && color.size() == 4,"Expected four material color components.");for (int i=0;i<4;++i) {m.BaseColor[i]=Float(color[i]);}
+        m.DoubleSided=entry.at("doubleSided").get<bool>();m.Unlit=entry.at("unlit").get<bool>();m.AlphaCutoff=Float(entry.at("alphaCutoff"));m.NormalScale=Float(entry.at("normalScale"));m.Shading=static_cast<ShadingModel>(UInt(entry.at("shading"),2));m.MetallicFactor=Float(entry.at("metallic"));m.RoughnessFactor=Float(entry.at("roughness"));
+        const auto texture=[&](const char* key)->std::optional<std::size_t> {const auto& value=entry.at(key);return value.is_null() ? std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(UInt(value)));};m.BaseColorTexture=texture("baseTexture");m.NormalTexture=texture("normalTexture");m.MetallicRoughnessTexture=texture("metallicRoughnessTexture");scene.SetMaterial(id,index,m);
+    }
+}
 Json Animation(const SceneObject& object) {
     if (!object.Model) { return nullptr; }
     const auto& player = object.Animation;
@@ -153,6 +169,7 @@ void ValidateScene(const Scene& scene) {
             Require(++depth <= MaxDepth,"Scene hierarchy exceeds 256 levels.");
         }
         (void)scene.GetWorldTransform(id).NormalMatrix();
+        (void)Materials(scene.GetObject(id));
     }
 }
 Error Failure(const std::filesystem::path& path) {
@@ -174,7 +191,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",6},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",7},{"assets",Json::array()},{"objects",Json::array()}};
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -199,7 +216,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
             const Json rotation = Json::array({t.Rotation.X,t.Rotation.Y,t.Rotation.Z,t.Rotation.W});
             root["objects"].push_back({{"id",ids.at(id)},{"parent",object.Parent ? ids.at(object.Parent) : 0},
                 {"name",String(object.Name)},{"visible",object.Visible},{"asset",object.Model ? assetIds.at(object.Model.get()) : 0},
-                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object)}});
+                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object)},{"materials",Materials(object)}});
         }
         const auto& c = scene.MainCamera; const auto& l = scene.Sun;
         root["camera"] = {{"position",Vector(c.Position)},{"target",Vector(c.Target)},{"up",Vector(c.Up)},
@@ -217,7 +234,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 6),"Unsupported scene format/version.");
+        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 7),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -278,6 +295,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
             if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6); }
+            if (version>=7) {Materials(object.at("materials"),scene,ids.at(UInt(object.at("id"))));}
         }
         ValidateScene(scene);
         return Result<SceneArchive>::Success(std::move(archive));

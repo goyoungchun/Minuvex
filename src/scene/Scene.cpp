@@ -97,8 +97,16 @@ void Scene::SetTransform(ObjectId id, const Transform& transform) {
 void Scene::SetVisible(ObjectId id, bool visible) { (void)GetObject(id); objects_.at(id).Visible = visible; }
 void Scene::SetModel(ObjectId id, ModelHandle model) {
     (void)GetObject(id); AnimationPlayer animation; animation.Bind(model);
-    objects_.at(id).Model = std::move(model); objects_.at(id).Animation = std::move(animation);
+    objects_.at(id).Model = std::move(model); objects_.at(id).Animation = std::move(animation);objects_.at(id).MaterialOverrides.clear();
 }
+const MaterialAsset& Scene::GetMaterial(ObjectId id,std::size_t index) const {
+    const auto& object=GetObject(id);if (!object.Model || index>=object.Model->Materials.size()) {throw std::invalid_argument("Material index does not belong to the model instance.");}
+    const auto found=object.MaterialOverrides.find(index);return found == object.MaterialOverrides.end() ? object.Model->Materials[index]:found->second;
+}
+void Scene::SetMaterial(ObjectId id,std::size_t index,const MaterialAsset& material) {
+    (void)GetMaterial(id,index);ValidateMaterial(material,*GetObject(id).Model);objects_.at(id).MaterialOverrides.insert_or_assign(index,material);
+}
+void Scene::ResetMaterial(ObjectId id,std::size_t index) {(void)GetMaterial(id,index);objects_.at(id).MaterialOverrides.erase(index);}
 AnimationPlayer& Scene::GetAnimation(ObjectId id) {
     if (!GetObject(id).Model) { throw std::invalid_argument("Object has no model animation state."); }
     return objects_.at(id).Animation;
@@ -117,6 +125,13 @@ std::size_t Scene::ReplaceModel(ModelHandle previous, ModelHandle replacement) {
         const auto& object = objects_.at(id);
         if (object.Model != previous) {continue;}
         if (object.Animation.Model() != previous) {throw std::invalid_argument("Scene player was rebound outside its owning Scene.");}
+        for (const auto& [index,material]:object.MaterialOverrides) {
+            if (index>=replacement->Materials.size() || previous->Materials.at(index).Name != replacement->Materials[index].Name) {throw std::invalid_argument("Reimport changed an overridden material identity.");}
+            for (auto texture:{material.BaseColorTexture,material.NormalTexture,material.MetallicRoughnessTexture}) {
+                if (texture && (*texture>=replacement->Textures.size() || previous->Textures.at(*texture).ImageIndex != replacement->Textures[*texture].ImageIndex)) {throw std::invalid_argument("Reimport changed an overridden texture identity.");}
+            }
+            ValidateMaterial(material,*replacement);
+        }
         auto player = object.Animation; player.Rebind(replacement);
         pending.emplace_back(id,std::move(player));
     }
@@ -159,7 +174,7 @@ std::vector<RenderItem> Scene::CollectRenderItems() const {
         }
         const auto& object = GetObject(id);
         if (object.Model && object.Animation.Model() != object.Model) { throw std::invalid_argument("Scene-owned player was rebound; use Scene::SetModel."); }
-        if (states.at(id).Visible && object.Model) { result.push_back({id, object.Model, states.at(id).World,&object.Animation}); }
+        if (states.at(id).Visible && object.Model) { result.push_back({id, object.Model, states.at(id).World,&object.Animation,&object.MaterialOverrides}); }
     }
     return result;
 }

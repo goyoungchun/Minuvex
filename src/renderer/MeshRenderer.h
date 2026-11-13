@@ -28,6 +28,9 @@ struct MeshLighting {
     DebugOptions Debug;
     float NearPlane=.1f,FarPlane=1000;
     bool Orthographic=false;
+    bool Pbr=false;
+    Vec3 Eye{},ViewDirection{0,0,1};
+    sg_view MetallicRoughnessTexture{};sg_sampler MetallicRoughnessSampler{};
     sg_buffer Instances{};int InstanceCount=0;unsigned Lod=0;bool Mirrored=false;
 };
 
@@ -48,6 +51,7 @@ public:
     void PrepareWireframe(const MeshData& mesh);
     void Inspect(std::vector<DebugResource>& resources) const;
     void PrepareInstances();
+    void PrepareDoubleSided();
     std::size_t TriangleCount(unsigned lod=0) const noexcept {return (lod && lod<=lodCounts_.size() ? lodCounts_[lod-1]:indexCount_)/3;}
 
 private:
@@ -55,6 +59,8 @@ private:
     sg_buffer indices_{};
     sg_shader shader_{};
     sg_pipeline pipelines_[2]{};
+    sg_pipeline doubleSidedPipelines_[2]{},doubleSidedShadowPipelines_[2]{};
+    bool doubleSided_=false;
     sg_shader shadowShader_{};sg_pipeline shadowPipelines_[2]{};
     sg_sampler nearestSampler_{};
     sg_image whiteImage_{};

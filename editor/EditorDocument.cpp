@@ -185,6 +185,8 @@ Result<void> EditorDocument::SetLocalLights(std::vector<PointLight> points,std::
 }
 Result<void> EditorDocument::PlayAnimation(ObjectId object, std::size_t clip) { return ChangeAnimation(object,[&](auto& p) { p.Play(clip); }); }
 Result<void> EditorDocument::CrossFadeAnimation(ObjectId object,std::size_t clip,double duration) {return ChangeAnimation(object,[&](auto& p) {p.CrossFade(clip,duration);});}
+Result<void> EditorDocument::SetMaterial(ObjectId object,std::size_t index,const MaterialAsset& material) {return Change([&] {world_.SetMaterial(object,index,material);MarkChanged();});}
+Result<void> EditorDocument::ResetMaterial(ObjectId object,std::size_t index) {return Change([&] {world_.ResetMaterial(object,index);MarkChanged();});}
 Result<void> EditorDocument::PauseAnimation(ObjectId object) { return ChangeAnimation(object,[](auto& p) { p.Pause(); }); }
 Result<void> EditorDocument::ResumeAnimation(ObjectId object) { return ChangeAnimation(object,[](auto& p) { p.Resume(); }); }
 Result<void> EditorDocument::StopAnimation(ObjectId object) { return ChangeAnimation(object,[](auto& p) { p.Stop(); }); }

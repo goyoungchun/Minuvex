@@ -35,6 +35,7 @@ struct RenderSettings {
     bool PostProcessing = false;
     bool Instancing=true;
     TextureCompression Compression=TextureCompression::Auto;
+    bool Pbr = false;
     bool operator==(const RenderSettings&) const = default;
 };
 
@@ -55,6 +56,7 @@ struct QualityOverrides {
     std::optional<bool> PostProcessing;
     std::optional<bool> Instancing;
     std::optional<TextureCompression> Compression;
+    std::optional<bool> Pbr;
     bool Empty() const noexcept;
     bool operator==(const QualityOverrides&) const = default;
 };
@@ -76,6 +78,7 @@ struct QualityCapabilities {
     // Host-configured attachment budget, not measured free VRAM (Phase 7).
     std::uint64_t RenderTargetBudgetBytes = 256ull * 1024 * 1024;
     bool Bc3Textures=false;
+    bool PbrLighting=false;
 };
 struct QualityAdjustment { std::string Field, Reason; };
 struct QualityState {

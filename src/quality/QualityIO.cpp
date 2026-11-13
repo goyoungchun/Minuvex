@@ -35,7 +35,7 @@ Result<void> SaveQuality(const QualityProfile& p,const std::filesystem::path& pa
         LV_SAVE(ResolutionScale,"resolutionScale") LV_SAVE(FixedWidth,"fixedWidth") LV_SAVE(FixedHeight,"fixedHeight") LV_SAVE(MaxRenderHeight,"maxRenderHeight")
         LV_SAVE(TargetFps,"targetFps") LV_SAVE(MsaaSamples,"msaaSamples") LV_SAVE(Anisotropy,"anisotropy") LV_SAVE(FrustumCulling,"frustumCulling")
         LV_SAVE(ShadowResolution,"shadowResolution") LV_SAVE(Lod,"lod") LV_SAVE(LodBias,"lodBias") LV_SAVE(PostProcessing,"postProcessing")
-        LV_SAVE(Instancing,"instancing")
+        LV_SAVE(Instancing,"instancing") LV_SAVE(Pbr,"pbr")
         if (a.Compression) {o["textureCompression"]=*a.Compression == TextureCompression::None ? "none":*a.Compression == TextureCompression::Auto ? "auto":"bc3";}
 #undef LV_SAVE
         if (a.Resolution) {o["resolution"]=Choice(*a.Resolution,{"relative","fixed"});}
@@ -61,7 +61,7 @@ Result<QualityProfile> LoadQuality(const std::filesystem::path& path) {
 #define LV_BOOL(field,name) if (key == name) {a.field=value.get<bool>();continue;}
             LV_INT(FixedWidth,"fixedWidth") LV_INT(FixedHeight,"fixedHeight") LV_INT(MaxRenderHeight,"maxRenderHeight") LV_INT(TargetFps,"targetFps") LV_INT(MsaaSamples,"msaaSamples") LV_INT(Anisotropy,"anisotropy") LV_INT(ShadowResolution,"shadowResolution")
             LV_FLOAT(ResolutionScale,"resolutionScale") LV_FLOAT(LodBias,"lodBias") LV_BOOL(FrustumCulling,"frustumCulling") LV_BOOL(Lod,"lod") LV_BOOL(PostProcessing,"postProcessing")
-            LV_BOOL(Instancing,"instancing")
+            LV_BOOL(Instancing,"instancing") LV_BOOL(Pbr,"pbr")
 #undef LV_INT
 #undef LV_FLOAT
 #undef LV_BOOL

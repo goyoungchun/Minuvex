@@ -7,7 +7,7 @@
 
 using namespace test;
 namespace {
-lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4);return c;}
+lv::QualityCapabilities Caps() {lv::QualityCapabilities c;c.GraphicsAvailable=true;c.PbrLighting=true;c.ShadowMapping=c.HdrPostProcessing=true;c.SampleCounts=c.HdrSampleCounts=(1u<<1)|(1u<<2)|(1u<<4);return c;}
 void Frames() {
     lv::FrameMonitor m;Check(!m.Snapshot(0).Fps.Value && m.Snapshot(0).SampleCount == 0,"no fabricated FPS before a frame");
     m.Record(1,2,5,12);Check(!m.Snapshot(1).Fps.Value && *m.Snapshot(1).CpuFrameMs.Value == 2,"first frame exposes CPU work without invented cadence");

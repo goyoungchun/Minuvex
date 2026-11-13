@@ -43,6 +43,8 @@ public:
     Result<void> SetTransform(ObjectId object, const Transform& transform);
     Result<void> SetWorldTransform(ObjectId object, const Mat4& world); // Reject local shear.
     Result<void> SetVisible(ObjectId object, bool visible);
+    Result<void> SetMaterial(ObjectId object, std::size_t index, const MaterialAsset& material);
+    Result<void> ResetMaterial(ObjectId object, std::size_t index);
     Result<void> SetCamera(const Camera& camera);
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> SetLocalLights(std::vector<PointLight> points,std::vector<SpotLight> spots);

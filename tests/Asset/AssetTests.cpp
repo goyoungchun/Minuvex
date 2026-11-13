@@ -1,6 +1,8 @@
 #include "TestHarness.h"
 
 #include <cstring>
+#include <limits>
+#include <json.hpp>
 
 using namespace test;
 namespace {
@@ -14,7 +16,7 @@ void TestImports() {
     Check(gltf->Id != 0 && gltf->Id != glb->Id, "assets have unique nonzero IDs");
     Check(registry.Find(gltf->Id) == gltf && !registry.Find(0), "registry lookup and invalid asset ID");
     Check(registry.LoadModel(Fixture("../Fixtures/SharedBox.gltf")) == gltf, "canonical path load reuses the same CPU asset");
-    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 4, "registry retains import metadata");
+    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 5, "registry retains import metadata");
     Check(gltf->ContentHash && gltf->SourcePath.is_absolute(), "asset has a content hash and canonical source");
     Check(gltf->Dependencies.size() == 1 && external->Dependencies.size() == 3, "embedded and external dependency lists");
     for (const auto& model : {gltf, glb, external}) {
@@ -198,10 +200,20 @@ void TestCompatibility() {
 }
 } // namespace
 
+void TestPbr() {
+    TemporaryDirectory temp;auto json=nlohmann::json::parse(Read(Fixture("SharedBox.gltf")));auto& material=json["materials"][0];
+    material["pbrMetallicRoughness"]["metallicFactor"]=.75;material["pbrMetallicRoughness"]["roughnessFactor"]=.25;material["pbrMetallicRoughness"]["metallicRoughnessTexture"]={{"index",0}};
+    const auto path=temp.File("Pbr.gltf");Write(path,json.dump());lv::AssetRegistry assets;const auto model=assets.LoadModel(path);const auto& m=model->Materials[0];
+    Check(m.Shading == lv::ShadingModel::Pbr && Near(m.MetallicFactor,.75f) && Near(m.RoughnessFactor,.25f) && m.MetallicRoughnessTexture == 0,"glTF PBR factors and MR texture reference imported");
+    Check(model->Images.size() == 1 && !model->Images[0].Rgba.empty(),"base/MR texture share one decoded source image");
+    auto invalid=m;invalid.RoughnessFactor=-.1f;Rejects([&]{lv::ValidateMaterial(invalid,*model);},"negative roughness rejected");invalid=m;invalid.MetallicFactor=std::numeric_limits<float>::quiet_NaN();Rejects([&]{lv::ValidateMaterial(invalid,*model);},"nonfinite metallic rejected");invalid=m;invalid.MetallicRoughnessTexture=999;Rejects([&]{lv::ValidateMaterial(invalid,*model);},"foreign MR texture rejected");
+    json["materials"][0]["pbrMetallicRoughness"]["roughnessFactor"]=1.2;Write(temp.File("InvalidPbr.gltf"),json.dump());ImportRejects([&]{assets.LoadModel(temp.File("InvalidPbr.gltf"));},lv::ImportErrorCode::InvalidData,"out-of-range imported roughness rejected");
+    json["materials"][0]["pbrMetallicRoughness"]["roughnessFactor"]=.25;json["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"]["texCoord"]=1;Write(temp.File("InvalidUv.gltf"),json.dump());ImportRejects([&]{assets.LoadModel(temp.File("InvalidUv.gltf"));},lv::ImportErrorCode::UnsupportedFeature,"unsupported MR UV set rejected");
+}
 int main(int argc,char** argv) {
     try {
         if (argc>1 && std::string_view(argv[1]) == "--compatibility") {TestCompatibility();return Finish();}
-        TestImports();TestFailuresAndLimits();TestLargeIndices();TestCompatibility();
+        TestImports();TestFailuresAndLimits();TestLargeIndices();TestCompatibility();TestPbr();
         {
             TemporaryDirectory temp;const auto file=temp.File("reimport.gltf");const auto source=Read(Fixture("SharedBox.gltf"));Write(file,source);
             lv::AssetRegistry registry;const auto old=registry.LoadModel(file);Write(file,source+"\n");const auto fresh=registry.ReimportModel(old->Id);

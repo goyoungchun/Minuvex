@@ -140,7 +140,7 @@ std::shared_ptr<ModelAsset> ImportFbx(const std::filesystem::path& path,const Im
         if (!clip.Tracks.empty()) {model->Animations.push_back(std::move(clip));}
     }}
     if (!model->Animations.empty()) {model->Warnings.push_back("FBX animation stacks/layers are sampled to local TRS at "+std::to_string(settings.AnimationBakeRate)+" Hz; interpolation between samples is approximate.");}
-    model->Warnings.push_back("FBX converted to right-handed Y-up meters; base color/normal textures supported, advanced PBR is not evaluated.");
+    model->Warnings.push_back("FBX converted to right-handed Y-up meters; Basic base-color/normal materials retained. FBX PBR factors are not mapped; use an explicit instance PBR override.");
     FinishImportedModel(*model);return model;
 }
 } // namespace lv::detail

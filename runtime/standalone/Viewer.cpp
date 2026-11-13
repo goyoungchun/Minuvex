@@ -163,6 +163,14 @@ Result<void> Viewer::CrossFadeAnimation(ObjectId id,std::size_t clip,double dura
     try {state_->World.GetAnimation(id).CrossFade(clip,duration);return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid animation clip, nonnegative duration and compatible scale signs."));}
 }
+Result<void> Viewer::SetMaterial(ObjectId id,std::size_t index,const MaterialAsset& material) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.SetMaterial(id,index,material);return Result<void>::Success();}
+    catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid instance material and model-local textures."));}
+}
+Result<void> Viewer::ResetMaterial(ObjectId id,std::size_t index) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.ResetMaterial(id,index);return Result<void>::Success();}
+    catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid instance material index."));}
+}
 Result<void> Viewer::PauseAnimation(ObjectId id) {
     auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
     try { state_->World.GetAnimation(id).Pause(); return Result<void>::Success(); }

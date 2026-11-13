@@ -27,6 +27,7 @@ bool ran = false;
 bool animationTests = false;
 bool qualityTests = false;
 bool compatibilityTests = false;
+bool pbrTests = false;
 
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message,
          std::uint32_t line, const char* file, void* user) {
@@ -390,6 +391,29 @@ void RunBlend() {
     Check(changed<10,"GPU blend midpoint matches independently authored half-translation and half-rotation pose");
     player.Resume();scene.UpdateAnimations(.5);const auto finished=render();Check(!player.Blend() && finished != blended,"completed fade releases source and produces final GPU pose");
 }
+void RunPbr() {
+    auto model=std::make_shared<lv::ModelAsset>();lv::MeshPrimitive primitive;primitive.Geometry.Vertices={{{-2,-2,0},{0,0,1},{1,1,1,1},{0,0}},{{2,-2,0},{0,0,1},{1,1,1,1},{1,0}},{{0,2,0},{0,0,1},{1,1,1,1},{.5f,1}}};primitive.Geometry.Indices={0,1,2};model->Meshes.push_back({"PBR triangle",{primitive}});model->Parts.push_back({0});model->ModelBounds={{-2,-2,0},{2,2,0}};model->Materials.push_back({});auto& material=model->Materials[0];material.Shading=lv::ShadingModel::Pbr;material.BaseColor={.8f,.4f,.2f,1};material.MetallicFactor=0;material.RoughnessFactor=.6f;
+    lv::Scene scene;const auto id=scene.AddModel(model);scene.MainCamera.Position={0,0,4};scene.MainCamera.Target={};scene.MainCamera.Projection=lv::CameraProjection::Orthographic;scene.MainCamera.OrthographicHeight=4;scene.Sun.Direction={-.6f,0,-.8f};scene.Sun.Intensity=2;scene.Sun.Ambient=0;
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Medium);profile.Overrides.Pbr=true;profile.Overrides.Shadow=lv::ShadowMode::Off;profile.Overrides.Lod=false;profile.Overrides.Compression=lv::TextureCompression::None;profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;
+    lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare PBR surface.");double clock=1;
+    const auto render=[&] {Require(surface.Render(scene,clock++,false,{0,0,0,1}),"PBR change did not wake On-Demand.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    // Independent fixed-angle CPU GGX/Smith/Schlick reference, NdotL=.8, NdotV=1.
+    const auto expected=[](double base,double metallic,double roughness) {const double nl=.8,nh=std::sqrt(.9),alpha2=std::pow(std::max(.045,roughness),4);const double f0=.04*(1-metallic)+base*metallic,f=f0+(1-f0)*std::pow(1-nh,5);const double d=alpha2/(std::numbers::pi*std::pow(.9*(alpha2-1)+1,2));const double g=2*nl/(nl+std::sqrt(alpha2+(1-alpha2)*nl*nl));return static_cast<int>(std::lround(std::clamp(((1-f)*(1-metallic)*base/std::numbers::pi+f*d*g/(4*nl))*nl*2,0.0,1.0)*255));};
+    auto dielectric=render();const auto center=64*Size+64;Check(std::abs(int(dielectric[center][0])-expected(.8,0,.6))<=3,"PBR dielectric direct light matches independent CPU BRDF");
+    scene.Sun.Intensity=0;scene.PointLights={{{0,0,2},{1,1,1},10,8}};const auto point=render();Check(point[center][0]>10,"PBR Point Light contributes actual local specular/diffuse pixels");scene.PointLights.clear();scene.SpotLights={{{0,0,2},{0,0,-1},{1,1,1},10,8,.2f,.5f}};const auto spot=render();scene.SpotLights[0].Direction={0,0,1};const auto outside=render();Check(spot[center][0]>10 && outside[center][0] == 0,"PBR Spot Light respects cone direction");scene.SpotLights.clear();scene.Sun.Intensity=2;
+    auto override=material;override.MetallicFactor=1;override.RoughnessFactor=.2f;scene.SetMaterial(id,0,override);auto metal=render();Check(std::abs(int(metal[center][0])-expected(.8,1,.2))<=3 && metal!=dielectric,"metallic/roughness overrides change actual GGX pixels");
+    Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"unchanged PBR Scene reuses cached pixels");
+    auto textured=std::make_shared<lv::ModelAsset>(*model);textured->Images={{1,1,{128,128,128,255}},{1,1,{32,128,64,255}},{1,1,{128,255,128,255}}};textured->Textures.resize(3);for (std::size_t i=0;i<3;++i) {textured->Textures[i].ImageIndex=i;}auto& m=textured->Materials[0];m.BaseColor={1,1,1,1};m.BaseColorTexture=0;m.MetallicRoughnessTexture=1;m.MetallicFactor=.8f;m.RoughnessFactor=.7f;scene.SetModel(id,textured);const auto mapped=render();const double linear=std::pow((128.0/255+.055)/1.055,2.4);
+    Check(std::abs(int(mapped[center][0])-expected(linear,.8*64/255,.7*128/255))<=3,"base texture is sRGB while MR G/B channels remain linear");
+    auto changed=std::make_shared<lv::ModelAsset>(*textured);changed->Images[1].Rgba[0]=255;scene.SetModel(id,changed);Check(render() == mapped,"MR red channel does not affect shading");
+    auto shared=changed->Materials[0];shared.NormalTexture=1;scene.SetMaterial(id,0,shared);(void)render();const auto estimate=lv::EstimateQualityResources(profile,surface.Quality().Capabilities,scene,Size,Size);
+    Check(estimate && surface.Stats().ResidentImages == 2 && estimate.Value().Cost.TextureBytes == surface.Stats().LogicalTextureBytes,"MR and Normal reuse one linear allocation and match resource costs");
+    shared.NormalTexture=2;scene.SetMaterial(id,0,shared);const auto normal=render();Check(normal[center][0]<mapped[center][0]/2,"normal map modifies PBR direct lighting");
+    scene.ResetMaterial(id,0);Check(render() == mapped && surface.Stats().ResidentImages == 2,"ResetMaterial restores pixels and releases unused override texture");
+    scene.MainCamera.Position.Z=-4;scene.Sun.Direction={-.6f,0,.8f};const auto back=render();shared=changed->Materials[0];shared.DoubleSided=true;scene.SetMaterial(id,0,shared);const auto twoSided=render();Check(back[center][0] == 0 && twoSided[center][0]>5,"DoubleSided override changes actual backface rasterization");
+    scene.MainCamera.Position.Z=4;scene.Sun.Direction={-.6f,0,-.8f};scene.ResetMaterial(id,0);lv::Transform offset;offset.Position.X=.2f;const auto other=scene.AddModel(changed,offset);(void)render();Check(surface.Stats().LastDrawCalls == 1 && surface.Stats().Optimization.InstancedObjects == 2,"PBR materials support static GPU instancing");shared=changed->Materials[0];shared.MetallicFactor=1;scene.SetMaterial(other,0,shared);(void)render();Check(surface.Stats().LastDrawCalls == 2,"different instance materials cannot merge into one GPU batch");scene.RemoveObject(other);
+    lv::AssetRegistry assets;scene.SetModel(id,assets.LoadModel(Fixture("AnimatedRibbon.gltf")));scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};scene.MainCamera.Projection=lv::CameraProjection::Perspective;const auto skin=render();scene.GetAnimation(id).Play(0);scene.GetAnimation(id).Seek(1);Check(render()!=skin && surface.Stats().LastDrawCalls == 1,"PBR and GPU skinning produce animated pixels");
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -413,7 +437,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();} else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunPbr();} else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -424,6 +448,7 @@ int main(int argc, char** argv) {
     animationTests = argc > 1 && std::strcmp(argv[1],"--animation") == 0;
     qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
     compatibilityTests=argc > 1 && std::strcmp(argv[1],"--compatibility") == 0;
+    pbrTests=argc > 1 && std::strcmp(argv[1],"--pbr") == 0;
     sapp_desc app{};
     app.width = app.height = 64; app.window_title = "Minuvex D3D11 pixel tests";
     app.init_cb = Initialize; app.frame_cb = Frame; app.cleanup_cb = Cleanup; app.logger.func = Log;

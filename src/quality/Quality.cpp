@@ -23,14 +23,14 @@ int TextureLimit(TextureQuality q) {
 }
 }
 bool QualityOverrides::Empty() const noexcept {
-    return !Resolution && !ResolutionScale && !FixedWidth && !FixedHeight && !MaxRenderHeight && !TargetFps && !MsaaSamples && !Textures && !Anisotropy && !Lighting && !FrustumCulling && !OnDemand && !Shadow && !ShadowResolution && !Lod && !LodBias && !PostProcessing && !Instancing && !Compression;
+    return !Resolution && !ResolutionScale && !FixedWidth && !FixedHeight && !MaxRenderHeight && !TargetFps && !MsaaSamples && !Textures && !Anisotropy && !Lighting && !FrustumCulling && !OnDemand && !Shadow && !ShadowResolution && !Lod && !LodBias && !PostProcessing && !Instancing && !Compression && !Pbr;
 }
 RenderSettings QualityPresetSettings(QualityPreset preset) {
     RenderSettings s;
     switch (preset) {
     case QualityPreset::Low: s.MaxRenderHeight=720; s.TargetFps=30; s.Textures=TextureQuality::Low; s.OnDemand=OnDemandMode::Auto;s.Lod=true;break;
     case QualityPreset::Medium: s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Basic;s.Lod=true;break;
-    case QualityPreset::High: s.MaxRenderHeight=2160; s.MsaaSamples=4; s.Textures=TextureQuality::High; s.Anisotropy=8;s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Pcf;s.ShadowResolution=2048;s.PostProcessing=true;break;
+    case QualityPreset::High: s.MaxRenderHeight=2160; s.MsaaSamples=4; s.Textures=TextureQuality::High; s.Anisotropy=8;s.Lighting=LightingMode::Advanced;s.Shadow=ShadowMode::Pcf;s.ShadowResolution=2048;s.PostProcessing=true;s.Pbr=true;break;
     default: throw std::invalid_argument("Invalid base quality preset.");
     }
     s.MaxTextureSize=TextureLimit(s.Textures); return s;
@@ -47,7 +47,7 @@ Result<RenderSettings> ExpandQuality(const QualityProfile& p) {
         LV_OVERRIDE(Resolution) LV_OVERRIDE(ResolutionScale) LV_OVERRIDE(FixedWidth) LV_OVERRIDE(FixedHeight) LV_OVERRIDE(MaxRenderHeight)
         LV_OVERRIDE(TargetFps) LV_OVERRIDE(MsaaSamples) LV_OVERRIDE(Textures) LV_OVERRIDE(Anisotropy) LV_OVERRIDE(Lighting) LV_OVERRIDE(FrustumCulling)
         LV_OVERRIDE(OnDemand) LV_OVERRIDE(Shadow) LV_OVERRIDE(ShadowResolution) LV_OVERRIDE(Lod) LV_OVERRIDE(LodBias) LV_OVERRIDE(PostProcessing)
-        LV_OVERRIDE(Instancing) LV_OVERRIDE(Compression)
+        LV_OVERRIDE(Instancing) LV_OVERRIDE(Compression) LV_OVERRIDE(Pbr)
 #undef LV_OVERRIDE
         Require(s.Resolution == ResolutionMode::Relative || s.Resolution == ResolutionMode::Fixed,"Invalid resolution mode.");
         Require(std::isfinite(s.ResolutionScale) && s.ResolutionScale >= .5f && s.ResolutionScale <= 1,"Resolution scale must be in [0.5,1].");
@@ -77,6 +77,7 @@ Result<QualityState> ResolveQuality(const QualityProfile& p,const QualityCapabil
             change(); state.Adjustments.push_back({field,reason}); return true;
         };
         const auto unsupported=[&](const char* message) { return Result<QualityState>::Failure({ErrorCode::UnsupportedFeature,message,"Choose supported settings or explicitly allow fallback.",{}}); };
+        if (!adjust(s.Pbr && (!caps.PbrLighting || s.Lighting!=LightingMode::Advanced),"pbr","PBR requires supported Advanced lighting; using Basic material shading.",[&]{s.Pbr=false;})) {return unsupported("PBR requires supported Advanced lighting.");}
         if (!adjust(s.Shadow == ShadowMode::Pcss,"shadow","PCSS is not implemented; using PCF.",[&]{s.Shadow=ShadowMode::Pcf;})) {return unsupported("PCSS is not implemented.");}
         if (!adjust(s.Shadow != ShadowMode::Off && !caps.ShadowMapping,"shadow","Shadow format support is unavailable; disabled.",[&]{s.Shadow=ShadowMode::Off;})) {return unsupported("Shadow render/sample formats are unavailable.");}
         if (!adjust(s.Shadow != ShadowMode::Off && s.ShadowResolution > caps.MaxRenderSize,"shadowResolution","Shadow size clamped to supported power of two.",[&]{while (s.ShadowResolution > 512 && s.ShadowResolution > caps.MaxRenderSize) {s.ShadowResolution/=2;}if (s.ShadowResolution > caps.MaxRenderSize) {s.Shadow=ShadowMode::Off;}})) {return unsupported("Shadow map exceeds the device extent limit.");}

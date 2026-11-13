@@ -19,6 +19,14 @@ AssetInspection InspectModel(const ModelAsset& model) {
     for (const auto& mesh:model.Meshes) {for (const auto& p:mesh.Primitives) {for (const auto& lod:p.Lods) {info.LodIndices+=lod.Indices.size();}}}
     info.GeometryBytes=info.Vertices*sizeof(Vertex)+(info.Indices+info.LodIndices)*sizeof(std::uint32_t);return info;
 }
+void ValidateMaterial(const MaterialAsset& m,const ModelAsset& model) {
+    const auto require=[](bool ok,const char* message) {if (!ok) {throw std::invalid_argument(message);}};
+    require(m.Shading == ShadingModel::Basic || m.Shading == ShadingModel::Unlit || m.Shading == ShadingModel::Pbr,"Invalid material shading model.");
+    for (auto value:m.BaseColor) {require(std::isfinite(value) && value>=0 && (m.Shading!=ShadingModel::Pbr || value<=1),"PBR base color must be in [0,1]; Basic colors must be finite and nonnegative.");}
+    require(std::isfinite(m.MetallicFactor) && m.MetallicFactor>=0 && m.MetallicFactor<=1 && std::isfinite(m.RoughnessFactor) && m.RoughnessFactor>=0 && m.RoughnessFactor<=1,"Metallic/roughness factors must be in [0,1].");
+    require(std::isfinite(m.AlphaCutoff) && m.AlphaCutoff<=1 && std::isfinite(m.NormalScale) && std::abs(m.NormalScale)<=16,"Invalid material cutoff/normal scale.");
+    for (auto texture:{m.BaseColorTexture,m.NormalTexture,m.MetallicRoughnessTexture}) {if (texture) {require(*texture<model.Textures.size(),"Invalid material texture index.");const auto image=model.Textures[*texture].ImageIndex;require(image<model.Images.size() && !model.Images[image].Rgba.empty(),"Material references an undecoded image.");}}
+}
 void ValidateModel(const ModelAsset& model) {
     detail::ValidateImportSettings(model.Settings);
     const auto require=[](bool valid,const char* message) {if (!valid) {throw std::invalid_argument(message);}};
@@ -40,6 +48,7 @@ void ValidateModel(const ModelAsset& model) {
     for (const auto& image:model.Images) {if (image.Width == 0 && image.Height == 0 && image.Rgba.empty()) {continue;}require(image.Width>0 && image.Height>0,"Image dimensions must be positive.");if (image.Width>settings.MaxImageDimension || image.Height>settings.MaxImageDimension) {detail::ImportLimit("Image exceeds MaxImageDimension.");}require(std::uint64_t(image.Width)*image.Height*4 == image.Rgba.size(),"Image pixels do not match dimensions.");}
     for (const auto& texture:model.Textures) {require(texture.ImageIndex<model.Images.size(),"Invalid texture image reference.");}
     for (const auto& material:model.Materials) {
+        ValidateMaterial(material,model);
         for (auto color:material.BaseColor) {require(std::isfinite(color) && color>=0,"Invalid material color.");}
         require(std::isfinite(material.AlphaCutoff) && std::isfinite(material.NormalScale),"Nonfinite material data.");
         require(!material.BaseColorTexture || *material.BaseColorTexture<model.Textures.size(),"Invalid base-color texture.");

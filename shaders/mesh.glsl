@@ -82,6 +82,9 @@ layout(binding=1) uniform material_params {
     vec4 normal_options;
     vec4 shadow_options;
     vec4 debug_options;
+    vec4 pbr_options;
+    vec4 eye_position;
+    vec4 view_direction;
     vec4 local_positions[8];
     vec4 local_colors[8];
     vec4 local_directions[8];
@@ -93,6 +96,8 @@ layout(binding=1) uniform texture2D normal_texture;
 layout(binding=1) uniform sampler normal_sampler;
 layout(binding=2) uniform texture2D shadow_texture;
 layout(binding=2) uniform sampler shadow_sampler;
+layout(binding=3) uniform texture2D metallic_roughness_texture;
+layout(binding=3) uniform sampler metallic_roughness_sampler;
 in vec3 world_normal;
 in vec3 world_position;
 in vec4 world_tangent;
@@ -101,6 +106,17 @@ in vec4 color;
 in vec2 uv;
 in float bone_weight;
 out vec4 frag_color;
+vec3 direct_brdf(vec3 base,float metallic,float roughness,vec3 n,vec3 v,vec3 l) {
+    float nv=max(dot(n,v),0.00001),nl=max(dot(n,l),0.0);vec3 hv=v+l;
+    if (nl<=0.0 || dot(hv,hv)<0.0000001) {return vec3(0);}
+    vec3 h=normalize(hv);float nh=max(dot(n,h),0.0),vh=max(dot(v,h),0.0);
+    float a=roughness*roughness,a2=a*a,d=nh*nh*(a2-1.0)+1.0;
+    float distribution=a2/(3.14159265*d*d);
+    float gv=2.0*nv/(nv+sqrt(a2+(1.0-a2)*nv*nv));
+    float gl=2.0*nl/(nl+sqrt(a2+(1.0-a2)*nl*nl));
+    vec3 f0=mix(vec3(.04),base,metallic);vec3 f=f0+(vec3(1)-f0)*pow(1.0-vh,5.0);
+    return ((vec3(1)-f)*(1.0-metallic)*base/3.14159265+f*(distribution*gv*gl/max(4.0*nv*nl,0.00001)))*nl;
+}
 float visibility(vec3 n) {
     if (shadow_options.x < 0.5) {return 1.0;}
     vec3 p=shadow_position.xyz/shadow_position.w;vec2 coord=vec2(p.x*.5+.5,.5-p.y*.5);
@@ -137,6 +153,21 @@ void main() {
         if (dot(transformed,transformed) > 0.00000001) {n=normalize(transformed);}
     }
     n*=gl_FrontFacing ? 1.0:-1.0;
+    if (pbr_options.z>.5 && options.y<.5) {
+        vec2 mr=texture(sampler2D(metallic_roughness_texture,metallic_roughness_sampler),uv).gb;
+        float metallic=clamp(pbr_options.x*mr.y,0.0,1.0),roughness=clamp(pbr_options.y*mr.x,.045,1.0);
+        vec3 eye=debug_options.w>.5 ? view_direction.xyz:eye_position.xyz-world_position;
+        vec3 v=dot(eye,eye)>0.0000001 ? normalize(eye):n;
+        vec3 result=albedo.rgb*light_color.w*(1.0-metallic);
+        result+=direct_brdf(albedo.rgb,metallic,roughness,n,v,light_direction.xyz)*light_color.rgb*light_direction.w*visibility(n);
+        for (int i=0;i<8;++i) {if (float(i)<options.z) {
+            vec3 delta=local_positions[i].xyz-world_position;float distance=length(delta);vec3 direction=delta/max(distance,.00001);
+            float attenuation=pow(max(1.0-distance/max(local_positions[i].w,.00001),0.0),2.0)/(1.0+distance*distance);
+            if (local_cones[i].y>.5) {float cone=dot(-direction,local_directions[i].xyz);attenuation*=clamp((cone-local_directions[i].w)/max(local_cones[i].x-local_directions[i].w,.00001),0.0,1.0);}
+            result+=direct_brdf(albedo.rgb,metallic,roughness,n,v,direction)*local_colors[i].rgb*local_colors[i].w*attenuation;
+        }}
+        frag_color=vec4(clamp(result,vec3(0),vec3(65000)),1);return;
+    }
     float diffuse=max(dot(n,light_direction.xyz),0.0);
     vec3 illumination=vec3(light_color.w)+light_color.rgb*diffuse*light_direction.w*visibility(geometric);
     if (options.w > .5 && options.z > .5) {for (int i=0;i<8;++i) {

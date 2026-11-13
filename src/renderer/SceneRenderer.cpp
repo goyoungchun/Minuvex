@@ -25,11 +25,12 @@ sg_wrap Wrap(TextureWrap mode) {
 struct SceneRenderer::GpuModel {
     ModelHandle Asset;
     std::vector<std::vector<std::unique_ptr<MeshRenderer>>> Meshes;
-    struct GpuImage { sg_image Image{}; sg_view View{}; int Size=0; };
+    struct GpuImage { sg_image Image{}; sg_view View{}; int Size=0;std::uint64_t Bytes=0; };
     std::vector<GpuImage> Images;
     std::vector<sg_sampler> Samplers;
     std::vector<Bounds> MeshBounds;
     std::uint64_t TextureBytes=0,BufferBytes=0;
+    std::vector<bool> NeededImages,NeededSamplers;
 
     ~GpuModel() {
         Meshes.clear();
@@ -43,65 +44,49 @@ struct SceneRenderer::GpuModel {
     }
 
     void Upload(ModelHandle asset,const RenderSettings& settings) {
-        Asset = std::move(asset);
-        Meshes.resize(Asset->Meshes.size());
-        MeshBounds.resize(Asset->Meshes.size());
-        Images.resize(Asset->Images.size()*2);
-        Samplers.resize(Asset->Textures.size());
-        for (const auto& part : Asset->Parts) {
-            auto& primitives = Meshes.at(part.MeshIndex);
-            if (!primitives.empty()) { continue; }
-            bool first=true;
-            for (const auto& primitive:Asset->Meshes.at(part.MeshIndex).Primitives) {for (const auto& v:primitive.Geometry.Vertices) {
-                const Vec3 p{v.Position[0],v.Position[1],v.Position[2]};auto& b=MeshBounds[part.MeshIndex];
-                if (first) {b={p,p};first=false;}b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};
-            }}
-            for (const auto& primitive : Asset->Meshes.at(part.MeshIndex).Primitives) {
-                const auto& material = Asset->Materials.at(primitive.MaterialIndex);
-                auto renderer = std::make_unique<MeshRenderer>();
-                renderer->Initialize(primitive.Geometry, material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow != ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{});
+        Asset=std::move(asset);Meshes.resize(Asset->Meshes.size());MeshBounds.resize(Asset->Meshes.size());
+        Images.resize(Asset->Images.size()*2);Samplers.resize(Asset->Textures.size());
+        for (const auto& part:Asset->Parts) {
+            auto& primitives=Meshes.at(part.MeshIndex);if (!primitives.empty()) {continue;}bool first=true;
+            for (const auto& primitive:Asset->Meshes.at(part.MeshIndex).Primitives) {
+                for (const auto& v:primitive.Geometry.Vertices) {const Vec3 p{v.Position[0],v.Position[1],v.Position[2]};auto& b=MeshBounds[part.MeshIndex];if (first) {b={p,p};first=false;}b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};}
+                const auto& material=Asset->Materials.at(primitive.MaterialIndex);auto renderer=std::make_unique<MeshRenderer>();
+                renderer->Initialize(primitive.Geometry,material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow!=ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{});
                 BufferBytes+=primitive.Geometry.Vertices.size()*sizeof(Vertex)+primitive.Geometry.Indices.size()*sizeof(std::uint32_t);
                 if (settings.Lod) {for (const auto& level:primitive.Lods) {BufferBytes+=level.Indices.size()*sizeof(std::uint32_t);}}
-                TextureBytes+=4;
                 primitives.push_back(std::move(renderer));
-                for (int role=0;role<2;++role) {
-                const auto index=role == 0 ? material.BaseColorTexture:material.NormalTexture;
-                if (!index || (role == 1 && settings.Lighting != LightingMode::Advanced)) {continue;}
-                const auto textureIndex=*index;
-                const auto& texture = Asset->Textures.at(textureIndex);
-                auto& gpuImage = Images.at(texture.ImageIndex+role*Asset->Images.size());
-                if (!gpuImage.Image.id) {
-                    const auto& image = Asset->Images.at(texture.ImageIndex);
-                    const auto packed=PackTexture(image,std::min(settings.MaxTextureSize,sg_query_limits().max_image_size_2d),role == 0,settings.Compression == TextureCompression::Bc3);
-                    TextureBytes+=packed.Pixels.size();
-                    sg_image_desc desc{};
-                    desc.width = packed.Width; desc.height = packed.Height;
-                    desc.num_mipmaps = packed.Levels;
-                    desc.pixel_format = packed.Compressed ? (role == 0 ? SG_PIXELFORMAT_BC3_SRGBA:SG_PIXELFORMAT_BC3_RGBA):(role == 0 ? SG_PIXELFORMAT_SRGB8A8:SG_PIXELFORMAT_RGBA8);
-                    desc.data = {packed.Pixels.data(), packed.Pixels.size()};
-                    gpuImage.Size=std::max(packed.Width,packed.Height);
-                    desc.label = "minuvex-base-color";
-                    gpuImage.Image = sg_make_image(desc);
-                    if (sg_query_image_state(gpuImage.Image) != SG_RESOURCESTATE_VALID) { throw std::runtime_error("Failed to upload the base-color image."); }
-                    sg_view_desc view{};
-                    view.texture.image = gpuImage.Image;
-                    gpuImage.View = sg_make_view(view);
-                    if (sg_query_view_state(gpuImage.View) != SG_RESOURCESTATE_VALID) { throw std::runtime_error("Failed to create the base-color image view."); }
-                }
-                if (Samplers.at(textureIndex).id) {continue;}
-                sg_sampler_desc sampler{};
-                sampler.wrap_u = Wrap(texture.WrapU); sampler.wrap_v = Wrap(texture.WrapV);
-                sampler.min_filter = texture.MinFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
-                sampler.mag_filter = texture.MagFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
-                sampler.mipmap_filter = texture.UseMipmaps && texture.MipFilter == TextureFilter::Linear ? SG_FILTER_LINEAR : SG_FILTER_NEAREST;
-                sampler.max_anisotropy=static_cast<std::uint32_t>(settings.Anisotropy);
-                if (settings.Anisotropy > 1) {sampler.min_filter=sampler.mag_filter=sampler.mipmap_filter=SG_FILTER_LINEAR;}
-                if (!texture.UseMipmaps) { sampler.max_lod = 0.00001f; }
-                Samplers[textureIndex] = sg_make_sampler(sampler);
-                if (sg_query_sampler_state(Samplers[textureIndex]) != SG_RESOURCESTATE_VALID) { throw std::runtime_error("Failed to create the texture sampler."); }
-                }
             }
         }
+    }
+    void BeginMaterials() {NeededImages.assign(Images.size(),false);NeededSamplers.assign(Samplers.size(),false);}
+    void UseTexture(std::optional<std::size_t> index,bool linear,const RenderSettings& settings) {
+        if (!index) {return;}const auto& texture=Asset->Textures.at(*index);const auto imageIndex=texture.ImageIndex+(linear ? Asset->Images.size():0);
+        NeededImages.at(imageIndex)=true;NeededSamplers.at(*index)=true;auto& gpu=Images.at(imageIndex);
+        if (!gpu.Image.id) {
+            const auto packed=PackTexture(Asset->Images.at(texture.ImageIndex),std::min(settings.MaxTextureSize,sg_query_limits().max_image_size_2d),!linear,settings.Compression==TextureCompression::Bc3);
+            sg_image_desc d{};d.width=packed.Width;d.height=packed.Height;d.num_mipmaps=packed.Levels;
+            d.pixel_format=packed.Compressed ? (linear ? SG_PIXELFORMAT_BC3_RGBA:SG_PIXELFORMAT_BC3_SRGBA):(linear ? SG_PIXELFORMAT_RGBA8:SG_PIXELFORMAT_SRGB8A8);
+            d.data={packed.Pixels.data(),packed.Pixels.size()};d.label=linear ? "material-linear-data":"material-srgb-color";
+            GpuImage candidate;
+            try {candidate.Image=sg_make_image(d);if (sg_query_image_state(candidate.Image)!=SG_RESOURCESTATE_VALID) {throw std::runtime_error("Cannot upload material image.");}
+                sg_view_desc view{};view.texture.image=candidate.Image;candidate.View=sg_make_view(view);if (sg_query_view_state(candidate.View)!=SG_RESOURCESTATE_VALID) {throw std::runtime_error("Cannot create material image view.");}
+            }catch (...) {if (candidate.View.id) {sg_destroy_view(candidate.View);}if (candidate.Image.id) {sg_destroy_image(candidate.Image);}throw;}
+            gpu=candidate;
+            gpu.Size=std::max(packed.Width,packed.Height);gpu.Bytes=packed.Pixels.size();
+        }
+        if (Samplers.at(*index).id) {return;}sg_sampler_desc sampler{};sampler.wrap_u=Wrap(texture.WrapU);sampler.wrap_v=Wrap(texture.WrapV);
+        sampler.min_filter=texture.MinFilter==TextureFilter::Nearest ? SG_FILTER_NEAREST:SG_FILTER_LINEAR;sampler.mag_filter=texture.MagFilter==TextureFilter::Nearest ? SG_FILTER_NEAREST:SG_FILTER_LINEAR;
+        sampler.mipmap_filter=texture.UseMipmaps && texture.MipFilter==TextureFilter::Linear ? SG_FILTER_LINEAR:SG_FILTER_NEAREST;
+        sampler.max_anisotropy=static_cast<std::uint32_t>(settings.Anisotropy);if (settings.Anisotropy>1) {sampler.min_filter=sampler.mag_filter=sampler.mipmap_filter=SG_FILTER_LINEAR;}if (!texture.UseMipmaps) {sampler.max_lod=.00001f;}
+        const auto candidate=sg_make_sampler(sampler);if (sg_query_sampler_state(candidate)!=SG_RESOURCESTATE_VALID) {if (candidate.id) {sg_destroy_sampler(candidate);}throw std::runtime_error("Cannot create material sampler.");}Samplers[*index]=candidate;
+    }
+    void UseMaterial(const MaterialAsset& material,const RenderSettings& settings) {
+        UseTexture(material.BaseColorTexture,false,settings);if (settings.Lighting==LightingMode::Advanced) {UseTexture(material.NormalTexture,true,settings);if (settings.Pbr && material.Shading==ShadingModel::Pbr && !material.Unlit) {UseTexture(material.MetallicRoughnessTexture,true,settings);}}
+    }
+    void EndMaterials() {
+        TextureBytes=0;for (const auto& mesh:Meshes) {TextureBytes+=mesh.size()*4;}
+        for (std::size_t i=0;i<Images.size();++i) {auto& image=Images[i];if (!NeededImages[i]) {if (image.View.id) {sg_destroy_view(image.View);}if (image.Image.id) {sg_destroy_image(image.Image);}image={};}TextureBytes+=image.Bytes;}
+        for (std::size_t i=0;i<Samplers.size();++i) {if (!NeededSamplers[i] && Samplers[i].id) {sg_destroy_sampler(Samplers[i]);Samplers[i]={};}}
     }
 };
 
@@ -122,7 +107,7 @@ unsigned SceneRenderer::Lod(const Scene& scene,const Bounds& b,const Mat4& world
 void SceneRenderer::PrepareBatches(const Scene& scene) {
     batches_.clear();stats_.Optimization={};if (!settings_.Instancing || debug_.View == DebugView::Wireframe || (!viewportKnown_ && settings_.FrustumCulling)) {return;}
     const auto vp=scene.MainCamera.ViewProjection(aspect_);
-    for (const auto& item:scene.CollectRenderItems()) {if (item.Animation && item.Animation->NeedsEvaluation()) {continue;}auto& model=*models_.at(item.Model.get());
+    for (const auto& item:scene.CollectRenderItems()) {if ((item.MaterialOverrides && !item.MaterialOverrides->empty()) || (item.Animation && item.Animation->NeedsEvaluation())) {continue;}auto& model=*models_.at(item.Model.get());
         for (const auto& part:item.Model->Parts) {if (part.SkinIndex) {continue;}const auto transform=item.WorldTransform*part.Transform;(void)transform.NormalMatrix();const bool visible=!settings_.FrustumCulling || IntersectsFrustum(model.MeshBounds[part.MeshIndex],transform,vp);
             for (std::size_t i=0;i<item.Model->Meshes[part.MeshIndex].Primitives.size();++i) {const auto& primitive=item.Model->Meshes[part.MeshIndex].Primitives[i];if (primitive.HasSkinning) {continue;}auto* mesh=model.Meshes[part.MeshIndex][i].get();
                 const auto append=[&](bool shadow,unsigned lod) {BatchKey key{mesh,lod,transform.LinearDeterminant()<0,shadow};auto& group=batches_[key];if (!group) {group=std::make_unique<Batch>();}group->Transforms.push_back(transform);};
@@ -148,9 +133,12 @@ void SceneRenderer::Prepare(const Scene& scene) {
         }
     }
     std::erase_if(models_, [&needed](const auto& entry) { return !needed.contains(entry.first); });
+    for (auto& [key,model]:models_) {(void)key;model->BeginMaterials();}
+    for (const auto& item:scene.CollectRenderItems()) {auto& gpu=*models_.at(item.Model.get());for (const auto& part:item.Model->Parts) {for (std::size_t i=0;i<item.Model->Meshes[part.MeshIndex].Primitives.size();++i) {const auto& primitive=item.Model->Meshes[part.MeshIndex].Primitives[i];const auto& material=scene.GetMaterial(item.Object,primitive.MaterialIndex);gpu.UseMaterial(material,settings_);if (material.DoubleSided) {gpu.Meshes[part.MeshIndex][i]->PrepareDoubleSided();}}}}
+    for (auto& [key,model]:models_) {(void)key;model->EndMaterials();}
     if (debug_.View == DebugView::Wireframe) {for (auto& [key,model]:models_) {(void)key;for (std::size_t i=0;i<model->Meshes.size();++i) {for (std::size_t p=0;p<model->Meshes[i].size();++p) {model->Meshes[i][p]->PrepareWireframe(model->Asset->Meshes[i].Primitives[p].Geometry);}}}}
     stats_.ResidentModels = models_.size();
-    stats_.ResidentAssetSignature=signature;
+    HashMaterialResources(signature,scene);stats_.ResidentAssetSignature=signature;
     stats_.ResidentPrimitives = stats_.ResidentImages = 0;
     stats_.MaxResidentTextureSize=0;
     stats_.LogicalTextureBytes=stats_.LogicalBufferBytes=0;
@@ -204,7 +192,7 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
             }
             const auto& mesh = item.Model->Meshes.at(part.MeshIndex);
             for (std::size_t i = 0; i < mesh.Primitives.size(); ++i) {
-                const auto& material = item.Model->Materials.at(mesh.Primitives[i].MaterialIndex);
+                const auto& material = scene.GetMaterial(item.Object,mesh.Primitives[i].MaterialIndex);
                 sg_view texture{};
                 sg_sampler sampler{};
                 if (material.BaseColorTexture) {
@@ -212,14 +200,16 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                     texture = model.Images.at(item.Model->Textures.at(index).ImageIndex).View;
                     sampler = model.Samplers.at(index);
                 }
-                if (shadowPass) {auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();MeshLighting instances;auto drawTransform=transform;std::size_t count=1;const auto group=batches_.find({renderer,0,transform.LinearDeterminant()<0,true});const bool eligible=!mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();instances.Instances=batch.Buffer;instances.InstanceCount=static_cast<int>(count);instances.Mirrored=transform.LinearDeterminant()<0;drawTransform=Mat4::Identity();++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}renderer->DrawShadow(drawTransform,viewProjection,material,texture,sampler,palette,instances);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;}
+                if (shadowPass) {auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();MeshLighting instances;auto drawTransform=transform;std::size_t count=1;const auto group=batches_.find({renderer,0,transform.LinearDeterminant()<0,true});const bool eligible=(!item.MaterialOverrides || item.MaterialOverrides->empty()) && !mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();instances.Instances=batch.Buffer;instances.InstanceCount=static_cast<int>(count);instances.Mirrored=transform.LinearDeterminant()<0;drawTransform=Mat4::Identity();++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}renderer->DrawShadow(drawTransform,viewProjection,material,texture,sampler,palette,instances);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;}
                 else {
                     MeshLighting lighting;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
                     lighting.Debug=debug_;lighting.NearPlane=scene.MainCamera.NearPlane;lighting.FarPlane=scene.MainCamera.FarPlane;
-                    lighting.Orthographic=scene.MainCamera.Projection == CameraProjection::Orthographic;
+                    lighting.Orthographic=scene.MainCamera.Projection == CameraProjection::Orthographic;lighting.Pbr=settings_.Pbr && lighting.Advanced;lighting.Eye=scene.MainCamera.Position;
+                    lighting.ViewDirection={scene.MainCamera.Position.X-scene.MainCamera.Target.X,scene.MainCamera.Position.Y-scene.MainCamera.Target.Y,scene.MainCamera.Position.Z-scene.MainCamera.Target.Z};
+                    if (lighting.Pbr && material.Shading==ShadingModel::Pbr && !material.Unlit && material.MetallicRoughnessTexture) {const auto index=*material.MetallicRoughnessTexture;lighting.MetallicRoughnessTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.MetallicRoughnessSampler=model.Samplers.at(index);}
                     if (lighting.Advanced && material.NormalTexture) {const auto index=*material.NormalTexture;lighting.NormalTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.NormalSampler=model.Samplers.at(index);}
                     auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();const auto level=part.SkinIndex ? 0:Lod(scene,model.MeshBounds[part.MeshIndex],transform,mesh.Primitives[i].Lods.size());lighting.Lod=level;
-                    const BatchKey key{renderer,level,transform.LinearDeterminant()<0,false};const auto group=batches_.find(key);const bool eligible=!mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());std::size_t count=1;Mat4 drawTransform=transform;
+                    const BatchKey key{renderer,level,transform.LinearDeterminant()<0,false};const auto group=batches_.find(key);const bool eligible=(!item.MaterialOverrides || item.MaterialOverrides->empty()) && !mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());std::size_t count=1;Mat4 drawTransform=transform;
                     if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();lighting.Instances=batch.Buffer;lighting.InstanceCount=static_cast<int>(count);lighting.Mirrored=key.Mirrored;drawTransform=Mat4::Identity();stats_.Optimization.InstancedObjects+=count;++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}
                     renderer->Draw(drawTransform,viewProjection,scene.Sun,material,texture,sampler,palette,settings_.Lighting == LightingMode::Unlit,lighting);
                     ++stats_.LastDrawCalls;stats_.Optimization.LodDraws[level]+=count;stats_.Optimization.SourceTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;

@@ -259,7 +259,7 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
             mesh.Indices[i] = static_cast<std::uint32_t>(index);
         }
     } else { std::iota(mesh.Indices.begin(), mesh.Indices.end(), 0u); }
-    if (primitive.material && (primitive.material->pbr_metallic_roughness.base_color_texture.texture || primitive.material->normal_texture.texture) && !uv) {
+    if (primitive.material && (primitive.material->pbr_metallic_roughness.base_color_texture.texture || primitive.material->normal_texture.texture || primitive.material->pbr_metallic_roughness.metallic_roughness_texture.texture) && !uv) {
         Invalid("Textured primitive requires TEXCOORD_0.");
     }
     if (!normal) {
@@ -312,18 +312,21 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
         if (source.name) { material.Name = source.name; }
         material.DoubleSided = source.double_sided != 0;
         material.Unlit = source.unlit != 0;
+        material.Shading=material.Unlit ? ShadingModel::Unlit:ShadingModel::Pbr;
         if (source.alpha_mode == cgltf_alpha_mode_blend) { Unsupported("Alpha BLEND materials require a later transparency pass."); }
         material.AlphaCutoff = source.alpha_mode == cgltf_alpha_mode_mask ? source.alpha_cutoff : -1.0f;
         if (!std::isfinite(material.AlphaCutoff) || material.AlphaCutoff > 1 ||
             (source.alpha_mode == cgltf_alpha_mode_mask && material.AlphaCutoff < 0)) { Invalid("Invalid alpha cutoff."); }
         if (source.has_pbr_metallic_roughness) {
             std::copy_n(source.pbr_metallic_roughness.base_color_factor, 4, material.BaseColor.begin());
+            material.MetallicFactor=source.pbr_metallic_roughness.metallic_factor;material.RoughnessFactor=source.pbr_metallic_roughness.roughness_factor;
         }
+        if (!std::isfinite(material.MetallicFactor) || material.MetallicFactor<0 || material.MetallicFactor>1 || !std::isfinite(material.RoughnessFactor) || material.RoughnessFactor<0 || material.RoughnessFactor>1) {Invalid("Metallic/roughness factors must be in [0,1].");}
         for (float value : material.BaseColor) { if (!std::isfinite(value) || value < 0 || value > 1) { Invalid("Invalid base color factor."); } }
         material.NormalScale=source.normal_texture.texture ? source.normal_texture.scale:1.0f;
         if (!std::isfinite(material.NormalScale) || std::abs(material.NormalScale) > 16) {Invalid("Normal texture scale must be finite and in [-16,16].");}
-        for (int role=0;role<2;++role) {
-        const auto& view = role == 0 ? source.pbr_metallic_roughness.base_color_texture:source.normal_texture;
+        for (int role=0;role<3;++role) {
+        const auto& view = role == 0 ? source.pbr_metallic_roughness.base_color_texture:role == 1 ? source.normal_texture:source.pbr_metallic_roughness.metallic_roughness_texture;
         if (view.texture) {
             if (view.texcoord != 0 || view.has_transform) { Unsupported("Material textures require TEXCOORD_0 without KHR_texture_transform."); }
             const auto& sourceTexture = *view.texture;
@@ -348,7 +351,7 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
                 if (sampler->mag_filter == cgltf_filter_type_nearest) { texture.MagFilter = TextureFilter::Nearest; }
                 else if (sampler->mag_filter != cgltf_filter_type_undefined && sampler->mag_filter != cgltf_filter_type_linear) { Invalid("Invalid texture magnification filter."); }
             }
-            if (!role) {material.BaseColorTexture=textureIndex;}else {material.NormalTexture=textureIndex;}
+            if (!role) {material.BaseColorTexture=textureIndex;}else if (role == 1) {material.NormalTexture=textureIndex;}else {material.MetallicRoughnessTexture=textureIndex;}
             if (!decoded[imageIndex]) {
                 const auto& image = *sourceTexture.image;
                 std::vector<std::uint8_t> encoded;
@@ -384,12 +387,13 @@ void ImportMaterials(Context& context, const cgltf_data& data) {
                 decoded[imageIndex] = true;
                 }
             }
-            if (missing[imageIndex]) {if (!role) {material.BaseColorTexture.reset();}else {material.NormalTexture.reset();}}
+            if (missing[imageIndex]) {if (!role) {material.BaseColorTexture.reset();}else if (role == 1) {material.NormalTexture.reset();}else {material.MetallicRoughnessTexture.reset();}}
         }
         }
         model.Materials.push_back(std::move(material));
     }
     model.Materials.push_back({}); // Default material, used when a primitive omits it.
+    model.Materials.back().Shading=ShadingModel::Pbr;
 }
 
 void ImportNodes(Context& context, const cgltf_data& data) {
@@ -594,7 +598,7 @@ std::shared_ptr<ModelAsset> ImportGltf(const std::filesystem::path& path, const 
         try { AnimationPlayer reference; reference.Bind(model); model->ModelBounds = reference.GetBounds(); }
         catch (const std::invalid_argument& e) { Invalid(e.what()); }
     }
-    model->Warnings.push_back("Base-color diffuse/unlit shading with tangent-space normal maps; metallic/roughness PBR and emissive maps are not evaluated.");
+    if (data->materials_count && std::any_of(data->materials,data->materials+data->materials_count,[](const auto& m) {return m.emissive_texture.texture || m.emissive_factor[0]!=0 || m.emissive_factor[1]!=0 || m.emissive_factor[2]!=0 || m.occlusion_texture.texture;})) {model->Warnings.push_back("Emissive/occlusion maps are not evaluated; PBR uses direct lighting without IBL.");}
     return model;
 }
 

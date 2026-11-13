@@ -98,6 +98,8 @@ public:
     Result<std::optional<Error>> GetAssetLoadError() const;
     Result<void> SetTransform(ObjectId id, const Transform& transform);
     Result<void> SetVisible(ObjectId id, bool visible);
+    Result<void> SetMaterial(ObjectId id, std::size_t index, const MaterialAsset& material);
+    Result<void> ResetMaterial(ObjectId id, std::size_t index);
     Result<void> SetCamera(const Camera& camera); // Disables automatic framing.
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> FrameScene();

@@ -59,6 +59,7 @@ struct TextureAsset {
     bool UseMipmaps = true;
 };
 
+enum class ShadingModel { Basic, Unlit, Pbr };
 struct MaterialAsset {
     std::string Name;
     std::array<float, 4> BaseColor{1, 1, 1, 1};
@@ -69,6 +70,9 @@ struct MaterialAsset {
     float AlphaCutoff = -1.0f;
     std::optional<std::size_t> NormalTexture; // Linear tangent-space data, TEXCOORD_0.
     float NormalScale = 1.0f;
+    ShadingModel Shading = ShadingModel::Basic;
+    float MetallicFactor = 1.0f, RoughnessFactor = 1.0f;
+    std::optional<std::size_t> MetallicRoughnessTexture; // Linear data: G roughness, B metallic.
 };
 
 struct MeshPrimitive {
@@ -108,7 +112,7 @@ struct ModelAsset {
     std::vector<std::filesystem::path> Dependencies;
     // FNV-1a of source and loaded resource bytes, for change tracking, not security.
     std::uint64_t ContentHash = 0;
-    std::uint32_t ImportVersion = 4;
+    std::uint32_t ImportVersion = 5;
     std::vector<MeshAsset> Meshes;
     std::vector<MaterialAsset> Materials;
     std::vector<ImageAsset> Images;
@@ -133,6 +137,7 @@ struct AssetInspection {
 };
 // CPU-only validation. Throws invalid_argument for malformed data, ImportError for budgets.
 void ValidateModel(const ModelAsset& model);
+void ValidateMaterial(const MaterialAsset& material, const ModelAsset& model);
 AssetInspection InspectModel(const ModelAsset& model);
 const char* AssetFormatName(AssetFormat format) noexcept;
 

@@ -26,6 +26,10 @@ int main(int argc, char** argv) {
         const auto estimate=lv::EstimateQualityResources(low,caps,reopened.GetScene(),1280,720);
         if (!estimate || !estimate.Value().Cost.BufferBytes) {return 1;}
         lv::Viewer viewer;if (!viewer.AddModel(argv[1]) || !viewer.SetQuality(low)) {return 1;}
+        const auto object=viewer.GetScene().ObjectIds().front();auto material=viewer.GetScene().GetMaterial(object,0);material.Shading=lv::ShadingModel::Pbr;material.MetallicFactor=.7f;material.RoughnessFactor=.3f;
+        if (!viewer.SetMaterial(object,0,material) || viewer.GetScene().GetMaterial(object,0).RoughnessFactor!=.3f || !viewer.ResetMaterial(object,0)) {return 1;}
+        if (!doc.SetMaterial(opened.Value(),0,material) || !doc.Save(file)) {return 1;}
+        lv::EditorDocument pbr;if (!pbr.Open(file) || pbr.GetScene().GetMaterial(pbr.GetScene().ObjectIds().front(),0).MetallicFactor!=.7f) {return 1;}
         if (!viewer.ReimportModel(viewer.GetScene().ObjectIds().front())) {return 1;}
         lv::DebugDraw debug;debug.DrawAxis(lv::Mat4::Identity());debug.DrawBoundingBox(preview.Value()->ModelBounds);
         if (!viewer.SetDebugDraw(debug) || !viewer.SetDebugView(lv::DebugView::Wireframe) || !viewer.SetShowSkeleton(true)) {return 1;}

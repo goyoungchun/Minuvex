@@ -13,7 +13,7 @@ void MatrixNear(const lv::Mat4& a, const lv::Mat4& b, const char* label) {
 }
 void DataAndPlayer() {
     lv::AssetRegistry registry; auto model = registry.LoadModel(Fixture("AnimatedRibbon.gltf"));
-    Check(model->ImportVersion == 4 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
+    Check(model->ImportVersion == 5 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
     Check(model->Skeleton.Joints.size() == 4 && model->Skeleton.Joints[1].IsJoint && model->Skeleton.Joints[2].Parent == 1,"joint mapping includes non-joint ancestors");
     Check(model->Skins[0].Joints == std::vector<lv::JointId>({1,2}) && Near(model->Skins[0].InverseBindMatrices[1].Elements[13],-1),"inverse binds and joint mapping retained");
     Check(model->Parts.size() == 1 && model->Parts[0].SkinIndex == 0 && model->Parts[0].Node == 3,"part keeps skin and node identity");
@@ -125,7 +125,7 @@ void BlendPersistence() {
     Check(bool(doc.PlayAnimation(id,0)) && bool(doc.SeekAnimation(id,.5)),"prepare blend source");Check(bool(doc.CrossFadeAnimation(id,1,1)) && doc.IsDirty(),"Editor cross-fade records an undoable edit");
     Check(bool(doc.Undo()) && !doc.GetScene().GetObject(id).Animation.Blend() && bool(doc.Redo()) && doc.GetScene().GetObject(id).Animation.Blend(),"Undo/Redo restores transition state");
     Check(bool(doc.UpdateAnimations(.25)) && bool(doc.PauseAnimation(id)),"pause blend preview");const auto file=temp.File("Blend.mvxscene.json");Check(bool(doc.Save(file)),"active transition saves");
-    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 6 && bool(loaded.Open(file)),"Scene v6 restores active live-source blend");
+    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 7 && bool(loaded.Open(file)),"Scene v7 restores active live-source blend");
     const auto other=loaded.GetScene().ObjectIds()[0];const auto& restored=loaded.GetScene().GetObject(other).Animation;
     Check(restored.State() == lv::PlaybackState::Paused && restored.Blend()->SourceClip == 0 && restored.Blend()->SourceTime == .75 && restored.Time() == .25 && restored.Blend()->Elapsed == .25,"paused transition clocks and clip identities survive serialization");
     MatrixNear(restored.Evaluate().Global[2],doc.GetScene().GetObject(id).Animation.Evaluate().Global[2],"live blend roundtrip preserves evaluated pose");

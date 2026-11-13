@@ -15,6 +15,7 @@ QualityCapabilities QueryQualityCapabilities() {
     const auto defaults=sg_query_desc().environment.defaults;
     const auto color=sg_query_pixelformat(defaults.color_format),depth=sg_query_pixelformat(defaults.depth_format);
     caps.GraphicsAvailable=color.render && color.sample && color.filter && depth.render;
+    caps.PbrLighting=caps.GraphicsAvailable;
     caps.MaxRenderSize=std::min(8192,sg_query_limits().max_image_size_2d);caps.MaxTextureSize=sg_query_limits().max_image_size_2d;
     const auto shadow=sg_query_pixelformat(SG_PIXELFORMAT_R32F),shadowDepth=sg_query_pixelformat(SG_PIXELFORMAT_DEPTH),hdr=sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
     caps.ShadowMapping=shadow.render && shadow.sample && shadowDepth.render;
@@ -56,6 +57,7 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
     integer(scene.SpotLights.size());for (const auto& light:scene.SpotLights) {vector(light.Position);vector(light.Direction);vector(light.Color);scalar(light.Intensity);scalar(light.Range);scalar(light.InnerConeRadians);scalar(light.OuterConeRadians);}
     for (const auto& item:scene.CollectRenderItems()) {
         integer(item.Object);integer(reinterpret_cast<std::uintptr_t>(item.Model.get()));
+        if (item.MaterialOverrides) {integer(item.MaterialOverrides->size());for (std::size_t index=0;index<item.Model->Materials.size();++index) {const auto found=item.MaterialOverrides->find(index);if (found == item.MaterialOverrides->end()) {continue;}integer(index);const auto& m=found->second;for (auto value:m.BaseColor) {scalar(value);}scalar(m.AlphaCutoff);scalar(m.NormalScale);scalar(m.MetallicFactor);scalar(m.RoughnessFactor);integer(static_cast<unsigned>(m.Shading));integer(m.Unlit);integer(m.DoubleSided);for (auto texture:{m.BaseColorTexture,m.NormalTexture,m.MetallicRoughnessTexture}) {integer(texture.has_value());integer(texture.value_or(0));}}}
         for (auto value:item.WorldTransform.Elements) {scalar(value);}
         if (item.Animation) {
             integer(item.Animation->Clip().has_value());integer(item.Animation->Clip().value_or(0));integer(std::bit_cast<std::uint64_t>(item.Animation->Time()));
