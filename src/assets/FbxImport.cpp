@@ -141,15 +141,23 @@ primitive.HasSkinning=skinIndex.has_value();primitive.MaterialIndex=fallback;
     if (settings.ImportAnimations) {for (const auto* stack:scene->anim_stacks) {
         ufbx_bake_opts bake{};bake.resample_rate=settings.AnimationBakeRate;bake.temp_allocator.memory_limit=settings.MaxResourceBytes;bake.result_allocator.memory_limit=settings.MaxResourceBytes;
         std::unique_ptr<ufbx_baked_anim,decltype(&ufbx_free_baked_anim)> baked(ufbx_bake_anim(scene.get(),stack->anim,&bake,&error),ufbx_free_baked_anim);if (!baked) {Failure(error);}
-        AnimationClip clip;clip.Name=Text(stack->name);clip.Duration=stack->time_end-stack->time_begin;
-        if (!std::isfinite(clip.Duration) || clip.Duration<0 || clip.Duration*settings.AnimationBakeRate>settings.MaxAnimationSamples) {ImportLimit("FBX animation duration exceeds bake budget.");}
-        const auto count=static_cast<std::size_t>(std::ceil(clip.Duration*settings.AnimationBakeRate))+1;
+        AnimationClip clip;clip.Name=Text(stack->name);const auto duration=stack->time_end-stack->time_begin;
+        if (!std::isfinite(duration) || duration<0 || duration*settings.AnimationBakeRate>settings.MaxAnimationSamples) {ImportLimit("FBX animation duration exceeds bake budget.");}
+        // Keep the authored double duration for saved playhead compatibility.
+        // Float keys must not round beyond it; merge duplicates and keep the
+        // exact endpoint's value even when it shares the preceding float key.
+        clip.Duration=duration;std::vector<std::pair<float,double>> samples;
+        const auto intervals=std::ceil(duration*settings.AnimationBakeRate);
+        if (intervals>=static_cast<double>(settings.MaxResourceBytes/sizeof(samples[0]))) {ImportLimit("FBX bake timeline exceeds MaxResourceBytes.");}
+        const auto requested=static_cast<std::size_t>(intervals)+1;samples.reserve(requested);
+        for (std::size_t i=0;i<requested;++i) {const auto seconds=std::min(static_cast<double>(i)/settings.AnimationBakeRate,duration);auto time=Float(seconds);if (time>duration) {time=std::nextafter(time,0.0f);}
+            if (!samples.empty() && time==samples.back().first) {samples.back().second=seconds;}else {samples.emplace_back(time,seconds);}}
+        const auto count=samples.size();
         if (baked->nodes.count && count>(settings.MaxAnimationSamples-totalSamples)/(baked->nodes.count*3)) {ImportLimit("FBX TRS bake exceeds MaxAnimationSamples; lower AnimationBakeRate or disable ImportAnimations.");}
         for (const auto& animated:baked->nodes) {
             AnimationTrack translation,rotation,scale;translation.Joint=rotation.Joint=scale.Joint=animated.typed_id;translation.Path=AnimationPath::Translation;rotation.Path=AnimationPath::Rotation;scale.Path=AnimationPath::Scale;
             context.Reserve(count*3*(sizeof(float)+sizeof(std::array<float,4>)));totalSamples+=count*3;
-            for (std::size_t sample=0;sample<count;++sample) {
-                const auto seconds=std::min(static_cast<double>(sample)/settings.AnimationBakeRate,clip.Duration);const auto time=Float(seconds);
+            for (const auto& [time,seconds]:samples) {
                 const auto t=TransformOf(ufbx_evaluate_transform(stack->anim,scene->nodes[animated.typed_id],stack->time_begin+seconds));
                 translation.Times.push_back(time);rotation.Times.push_back(time);scale.Times.push_back(time);
                 translation.Values.push_back({t.Position.X,t.Position.Y,t.Position.Z,0});rotation.Values.push_back({t.Rotation.X,t.Rotation.Y,t.Rotation.Z,t.Rotation.W});scale.Values.push_back({t.Scale.X,t.Scale.Y,t.Scale.Z,0});
@@ -158,7 +166,7 @@ primitive.HasSkinning=skinIndex.has_value();primitive.MaterialIndex=fallback;
         }
         for (std::size_t nodeIndex=0;nodeIndex<model->Nodes.size();++nodeIndex) {const auto& node=model->Nodes[nodeIndex];if (!node.MeshIndex || morphChannels.at(*node.MeshIndex).empty()) {continue;}MorphTrack track;track.Node=static_cast<JointId>(nodeIndex);track.TargetCount=model->Meshes[*node.MeshIndex].MorphWeights.size();
             if (count>(settings.MaxAnimationSamples-totalSamples)/track.TargetCount) {ImportLimit("FBX morph bake exceeds MaxAnimationSamples.");}totalSamples+=count*track.TargetCount;context.Reserve(count*(track.TargetCount+1)*sizeof(float));
-            for (std::size_t sample=0;sample<count;++sample) {const auto seconds=std::min(static_cast<double>(sample)/settings.AnimationBakeRate,clip.Duration);track.Times.push_back(Float(seconds));for (const auto* channel:morphChannels[*node.MeshIndex]) {const auto weights=BlendWeights(*channel,ufbx_evaluate_blend_weight(stack->anim,channel,stack->time_begin+seconds));track.Values.insert(track.Values.end(),weights.begin(),weights.end());}}
+            for (const auto& [time,seconds]:samples) {track.Times.push_back(time);for (const auto* channel:morphChannels[*node.MeshIndex]) {const auto weights=BlendWeights(*channel,ufbx_evaluate_blend_weight(stack->anim,channel,stack->time_begin+seconds));track.Values.insert(track.Values.end(),weights.begin(),weights.end());}}
             clip.MorphTracks.push_back(std::move(track));
         }
         if (!clip.Tracks.empty() || !clip.MorphTracks.empty()) {model->Animations.push_back(std::move(clip));}

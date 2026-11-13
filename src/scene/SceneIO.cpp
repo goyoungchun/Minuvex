@@ -231,7 +231,9 @@ Error Failure(const std::filesystem::path& path) {
 Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, std::span<const ModelHandle> library) {
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
-        const auto destination = std::filesystem::absolute(path).lexically_normal();
+        // Model sources are canonical. Resolve directory aliases (e.g. macOS
+        // /var -> /private/var) before computing portable relative references.
+        const auto base = std::filesystem::weakly_canonical(std::filesystem::absolute(path).parent_path());
         Json root{{"format","MinvexScene"},{"version",11},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
         TreeIds trees;
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
@@ -240,9 +242,9 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
             if (assetIds.contains(model.get())) { return; }
             Require(assetIds.size() < MaxAssets,"Scene asset limit exceeded.");
             auto sourceSettings=model->Settings;
-            if (!sourceSettings.TextureDirectory.empty()) {auto relative=sourceSettings.TextureDirectory.lexically_relative(destination.parent_path());if (!relative.empty()) {sourceSettings.TextureDirectory=std::move(relative);}}
+            if (!sourceSettings.TextureDirectory.empty()) {auto relative=std::filesystem::relative(sourceSettings.TextureDirectory,base);if (!relative.empty()) {sourceSettings.TextureDirectory=std::move(relative);}}
             const auto settings = Settings(sourceSettings); (void)Settings(settings);
-            auto relative = model->SourcePath.lexically_relative(destination.parent_path());
+            auto relative = std::filesystem::relative(model->SourcePath,base);
             if (relative.empty()) { relative = model->SourcePath; }
             const auto id = assetIds.size()+1;
             root["assets"].push_back({{"id",id},{"path",String(Utf8(relative))},{"import",settings}});
@@ -326,7 +328,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
             for (const auto& p:spots) {scene.SpotLights.push_back({Vector(p.at("position")),Vector(p.at("direction")),Vector(p.at("color")),Float(p.at("intensity")),Float(p.at("range")),Float(p.at("inner")),Float(p.at("outer"))});}
         }
         ValidateScene(scene);
-        const auto base = std::filesystem::absolute(path).parent_path();
+        const auto base = std::filesystem::weakly_canonical(std::filesystem::absolute(path).parent_path());
         for (const auto& asset : assets) {
             const auto reference = detail::PathFromUtf8(String(asset.at("path")));
             Require(!reference.empty(),"Empty asset path.");

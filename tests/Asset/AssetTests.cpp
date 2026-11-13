@@ -1,6 +1,7 @@
 #include "TestHarness.h"
 
 #include <cstring>
+#include <algorithm>
 #include <limits>
 #include <json.hpp>
 
@@ -177,6 +178,12 @@ void TestCompatibility() {
     settings={};settings.GenerateMissingNormals=false;
     ImportRejects([&] {registry.LoadModel(Fixture("CompatibilityBinary.fbx"),settings);},lv::ImportErrorCode::InvalidData,"strict FBX normals option is enforced");
     TemporaryDirectory temp;
+    for (const auto& [ticks,keys]:{std::pair{"1539538600",2u},std::pair{"1539538601",2u},std::pair{"32330310600",22u}}) {
+        auto source=Read(Fixture("MorphProgressive.fbx"));while (source.find("46186158000")!=std::string::npos) {source=Replace(source,"46186158000",ticks);}source=Replace(source,"23093079000","769769300");
+        const auto path=temp.File(ticks);Write(path.string()+".fbx",source);const auto fractional=registry.LoadModel(path.string()+".fbx");const auto& clip=fractional->Animations.at(0);
+        Check(std::abs(clip.Duration-std::stod(ticks)/46186158000.0)<1e-12 && clip.Tracks[0].Times.back()<=clip.Duration && clip.Duration-clip.Tracks[0].Times.back()<1e-7 && clip.Tracks[0].Times.size()==keys && clip.MorphTracks.at(0).Times==clip.Tracks[0].Times,"fractional FBX duration is preserved with strictly increasing representable TRS/Morph keys");
+        Check(Near(clip.MorphTracks[0].Values.back(),1) && std::any_of(clip.Tracks.begin(),clip.Tracks.end(),[](const auto& track){return track.Path==lv::AnimationPath::Translation && Near(track.Values.back()[1],2);}),"rounded FBX endpoint retains the authored TRS and progressive Morph values");
+    }
     Write(temp.File("centimeters.fbx"),Replace(Read(Fixture("Compatibility.fbx")),"\"UnitScaleFactor\", \"double\", \"Number\", \"\",100","\"UnitScaleFactor\", \"double\", \"Number\", \"\",1"));
     const auto centimeters=registry.LoadModel(temp.File("centimeters.fbx"));
     Check(Near(centimeters->ModelBounds.Max.X,.025f) && Near(centimeters->ModelBounds.Max.Y,.005f),"FBX source units are converted to meters");

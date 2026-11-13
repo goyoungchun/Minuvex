@@ -2,6 +2,7 @@
 import argparse
 import gc
 import importlib
+import json
 import math
 from pathlib import Path
 import shutil
@@ -63,6 +64,41 @@ class BindingTests(unittest.TestCase):
             self.error(mvx.ErrorCode.InvalidState, lambda: viewer.scene)
             viewer.close()  # Idempotent, owner thread only.
 
+    def test_scene_with_directory_symlink(self):
+        with tempfile.TemporaryDirectory(prefix="minvex links ") as folder:
+            root = Path(folder).resolve()
+            project = root / "physical" / "nested" / "project"
+            (project / "assets").mkdir(parents=True)
+            (project / "textures").mkdir()
+            shutil.copyfile(args.fixtures / "SharedBox.glb", project / "assets" / "model.glb")
+            alias = root / "alias"
+            if sys.platform == "win32":
+                # A junction exercises directory aliases without symlink privilege.
+                import _winapi
+                _winapi.CreateJunction(str(project), str(alias))
+            else:
+                alias.symlink_to(project, target_is_directory=True)
+            file = alias / "Scene.mvxscene.json"
+            settings = mvx.ImportSettings()
+            settings.texture_directory = alias / "textures"
+            with mvx.Viewer() as viewer:
+                viewer.add_model(alias / "assets" / "model.glb", import_settings=settings)
+                viewer.scene.save(file)
+            saved = json.loads(file.read_text(encoding="utf-8"))["assets"][0]
+            self.assertEqual(saved["path"], "assets/model.glb")
+            self.assertEqual(saved["import"]["textureDirectory"], "textures")
+            # Use fresh registries, so a cached import cannot hide a broken path.
+            for scene in (file, project / file.name):
+                with self.subTest(scene=scene), mvx.Viewer() as viewer:
+                    viewer.scene.load(scene)
+                    self.assertEqual(viewer.scene.size, 1)
+            # Relative references must also survive moving the physical project.
+            moved = root / "moved"
+            project.rename(moved)
+            with mvx.Viewer() as viewer:
+                viewer.scene.load(moved / file.name)
+                self.assertEqual(viewer.scene.size, 1)
+
     def test_animation_morph_and_tree(self):
         with mvx.Viewer() as viewer:
             model = viewer.add_model(args.fixtures / "MorphRibbon.gltf")
@@ -93,6 +129,48 @@ class BindingTests(unittest.TestCase):
             model.seek_blend_tree(.5)
             self.assertEqual(model.blend_weights, [.75, .25])
             self.error(mvx.ErrorCode.InvalidArgument, lambda: model.set_blend_parameter("Missing", 1))
+            rig = viewer.add_model(args.fixtures / "AnimatedRibbon.gltf")
+            rig.play_animation(0)
+            reference = rig.reference_pose
+            skeleton = rig.skeleton_nodes
+            self.assertEqual([n["node"] for n in skeleton], list(range(len(skeleton))))
+            self.assertIsNone(skeleton[0]["parent"])
+            self.assertIn("name", skeleton[2])
+            joints = reference.joints
+            joints[2].local.scale.x = 1.25
+            reference.joints = joints
+            rig.set_additive_animation(2, .5, reference=reference)
+            rig.seek_additive(1)
+            rig.pause_animation()
+            self.assertAlmostEqual(rig.capture_pose().joints[2].local.scale.x, 1.1, places=5)
+            snapshot = rig.additive
+            snapshot.weight = .1
+            self.assertEqual(rig.additive.weight, .5)  # Value snapshots never mutate native state.
+            self.assertAlmostEqual(rig.additive.reference.joints[2].local.scale.x, 1.25)
+            self.error(mvx.ErrorCode.InvalidArgument, lambda: rig.set_additive_mask([1]))
+            self.error(mvx.ErrorCode.InvalidArgument, lambda: rig.set_additive_weight(2))
+            self.assertEqual(rig.additive.weight, .5)
+            rig.set_additive_mask([0] * len(skeleton))
+            self.assertAlmostEqual(rig.capture_pose().joints[2].local.scale.x, 1)
+            rig.set_additive_mask([])
+            state = rig.additive
+            state.time, state.speed, state.loop, state.state = 1.9, 2, False, mvx.PlaybackState.Playing
+            rig.restore_additive_animation(state)
+            viewer.scene.update_animations(.2)
+            self.assertEqual(rig.additive.time, 2)
+            self.assertEqual(rig.additive.state, mvx.PlaybackState.Stopped)
+            invalid = rig.additive
+            invalid.time = 99
+            self.error(mvx.ErrorCode.InvalidArgument, lambda: rig.restore_additive_animation(invalid))
+            self.assertEqual(rig.additive.time, 2)
+            rig.apply_pose(reference)
+            self.assertAlmostEqual(rig.capture_pose().joints[2].local.scale.x, 1.25)
+            rig.reset_pose()
+            self.assertIsNone(rig.additive)
+            rig.set_additive_animation(2)
+            rig.set_additive_weight(.4)
+            rig.clear_additive_animation()
+            self.assertIsNone(rig.additive)
 
     def test_events_and_python_exception(self):
         with mvx.Viewer() as viewer:
@@ -195,6 +273,9 @@ def native_case(mode):
                 model.set_material(0, material)
                 model.seek_animation(.4, collect_events=True)
                 model.set_morph_weights(3, [.8, .2])
+                model.set_additive_animation(1, .5)
+                model.seek_additive(.5)
+                assert model.additive.weight == .5
                 first_frame.set()
         def on_event(event):
             if mode == "event_callback":

@@ -18,6 +18,15 @@ void BindValues(py::module_& m) {
     py::class_<lv::Vec3>(m,"Vec3").def(py::init<float,float,float>(),py::arg("x")=0,py::arg("y")=0,py::arg("z")=0).def_readwrite("x",&lv::Vec3::X).def_readwrite("y",&lv::Vec3::Y).def_readwrite("z",&lv::Vec3::Z);
     py::class_<lv::Quaternion>(m,"Quaternion").def(py::init<float,float,float,float>(),py::arg("x")=0,py::arg("y")=0,py::arg("z")=0,py::arg("w")=1).def_readwrite("x",&lv::Quaternion::X).def_readwrite("y",&lv::Quaternion::Y).def_readwrite("z",&lv::Quaternion::Z).def_readwrite("w",&lv::Quaternion::W);
     py::class_<lv::Transform>(m,"Transform").def(py::init<lv::Vec3,lv::Quaternion,lv::Vec3>(),py::arg("position")=lv::Vec3{},py::arg("rotation")=lv::Quaternion{},py::arg("scale")=lv::Vec3{1,1,1}).def_readwrite("position",&lv::Transform::Position).def_readwrite("rotation",&lv::Transform::Rotation).def_readwrite("scale",&lv::Transform::Scale);
+    py::class_<lv::PoseJoint>(m,"PoseJoint").def(py::init<lv::JointId,lv::Transform>(),py::arg("joint"),py::arg("local")=lv::Transform{})
+        .def_readwrite("joint",&lv::PoseJoint::Joint).def_readwrite("local",&lv::PoseJoint::Local);
+    py::class_<lv::PoseAsset>(m,"Pose").def(py::init<>())
+        .def_readwrite("name",&lv::PoseAsset::Name).def_readwrite("skeleton_signature",&lv::PoseAsset::SkeletonSignature).def_readwrite("joints",&lv::PoseAsset::Joints);
+    py::class_<lv::AdditiveAnimationState>(m,"AdditiveAnimationState").def(py::init<>())
+        .def_readwrite("clip",&lv::AdditiveAnimationState::Clip).def_readwrite("time",&lv::AdditiveAnimationState::Time)
+        .def_readwrite("speed",&lv::AdditiveAnimationState::Speed).def_readwrite("loop",&lv::AdditiveAnimationState::Loop)
+        .def_readwrite("weight",&lv::AdditiveAnimationState::Weight).def_readwrite("state",&lv::AdditiveAnimationState::State)
+        .def_readwrite("reference",&lv::AdditiveAnimationState::Reference).def_readwrite("joint_mask",&lv::AdditiveAnimationState::JointMask);
     py::class_<lv::ImportSettings>(m,"ImportSettings").def(py::init<>())
         .def_readwrite("generate_missing_normals",&lv::ImportSettings::GenerateMissingNormals)
         .def_readwrite("max_file_bytes",&lv::ImportSettings::MaxFileBytes)

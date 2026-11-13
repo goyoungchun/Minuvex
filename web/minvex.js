@@ -13,9 +13,10 @@ let canvasSequence = 0;
 const activeCanvases = new WeakSet();
 const maximumFileBytes = 64 * 1024 * 1024, maximumImportBytes = 128 * 1024 * 1024;
 function bytesOf(value) {
-  if (value instanceof ArrayBuffer) return new Uint8Array(value).slice();
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
-  throw failure('InvalidArgument', 'Asset data requires an ArrayBuffer or typed array.');
+  if (!(value instanceof ArrayBuffer) && !ArrayBuffer.isView(value))
+    throw failure('InvalidArgument', 'Asset data requires an ArrayBuffer or typed array.');
+  if (value.byteLength > maximumFileBytes) throw failure('InsufficientResource', 'Asset file exceeds the size limit.');
+  return value instanceof ArrayBuffer ? new Uint8Array(value).slice() : new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
 }
 function resourceUri(uri) {
   let decoded;
@@ -192,37 +193,42 @@ class Viewer {
     });
   }
   async loadBuffer(data, options = {}) {
-    return this.#loading(async signal => {
-      const bytes = bytesOf(data), files = options.files ?? {};
-      return this.#import(bytes, options.name ?? 'model.glb', async uri => {
-        const decoded = resourceUri(uri);
-        const item = files instanceof Map ? (files.get(uri) ?? files.get(decoded)) : (Object.hasOwn(files, uri) ? files[uri] : Object.hasOwn(files, decoded) ? files[decoded] : undefined);
-        if (item !== undefined) return bytesOf(item);
-        if (options.resolve) return options.resolve(uri, undefined, signal);
-        throw failure('AssetLoad', `Missing dependency: ${uri}`, {sourcePath: uri});
-      }, signal);
-    });
+    return this.#loading(signal => this.#buffer(data, options, signal));
+  }
+  #buffer(data, options, signal) {
+    if (this.disposed || signal.aborted) throw failure('InvalidState', 'Viewer is disposed.');
+    const bytes = bytesOf(data), files = options.files ?? {};
+    return this.#import(bytes, options.name ?? 'model.glb', async uri => {
+      const decoded = resourceUri(uri);
+      const item = files instanceof Map ? (files.get(uri) ?? files.get(decoded)) : (Object.hasOwn(files, uri) ? files[uri] : Object.hasOwn(files, decoded) ? files[decoded] : undefined);
+      if (item !== undefined) return item;
+      if (options.resolve) return options.resolve(uri, undefined, signal);
+      throw failure('AssetLoad', `Missing dependency: ${uri}`, {sourcePath: uri});
+    }, signal);
   }
   async loadFiles(fileList, options = {}) {
-    const files = [...fileList], candidates = files.filter(file => /\.(glb|gltf)$/i.test(file.name));
-    const entry = options.entry ? files.find(file => (file.webkitRelativePath || file.name) === options.entry || file.name === options.entry) : candidates.length === 1 ? candidates[0] : null;
-    if (!entry) throw failure('InvalidArgument', 'Select one GLB/glTF entry or specify entry.');
-    if (entry.size > maximumFileBytes) throw failure('InsufficientResource', 'Browser file exceeds the size limit.');
-    const entryPath = entry.webkitRelativePath || entry.name;
-    const data = await entry.arrayBuffer(), resources = new Map();
-    const base = entryPath.split('/').slice(0, -1);
-    for (const file of files) {
-      if (file.size > maximumFileBytes) throw failure('InsufficientResource', 'Browser file exceeds the size limit.');
-      resources.set(file.webkitRelativePath || file.name, file);
-    }
-    return this.loadBuffer(data, {...options, name: entry.name, resolve: async uri => {
-      const decoded = resourceUri(uri);let key;
-      try { key = joinPath(base, decoded); } catch (error) {if (error.code !== 'InvalidData') throw error;}
-      let file = resources.get(key);
-      if (!file) { const matches = files.filter(candidate => candidate.name === decoded.split('/').pop()); if (matches.length === 1) file = matches[0]; }
-      if (!file) throw failure('AssetLoad', `Missing browser file: ${uri}`);
-      return new Uint8Array(await file.arrayBuffer());
-    }});
+    return this.#loading(async signal => {
+      const files = [...fileList], candidates = files.filter(file => /\.(glb|gltf)$/i.test(file.name));
+      const entry = options.entry ? files.find(file => (file.webkitRelativePath || file.name) === options.entry || file.name === options.entry) : candidates.length === 1 ? candidates[0] : null;
+      if (!entry) throw failure('InvalidArgument', 'Select one GLB/glTF entry or specify entry.');
+      if (entry.size > maximumFileBytes) throw failure('InsufficientResource', 'Browser file exceeds the size limit.');
+      const entryPath = entry.webkitRelativePath || entry.name;
+      const data = await entry.arrayBuffer(), resources = new Map();
+      if (this.disposed || signal.aborted) throw failure('InvalidState', 'Viewer is disposed.');
+      const base = entryPath.split('/').slice(0, -1);
+      for (const file of files) {
+        if (file.size > maximumFileBytes) throw failure('InsufficientResource', 'Browser file exceeds the size limit.');
+        resources.set(file.webkitRelativePath || file.name, file);
+      }
+      return this.#buffer(data, {...options, name: entry.name, resolve: async uri => {
+        const decoded = resourceUri(uri);let key;
+        try { key = joinPath(base, decoded); } catch (error) {if (error.code !== 'InvalidData') throw error;}
+        let file = resources.get(key);
+        if (!file) { const matches = files.filter(candidate => candidate.name === decoded.split('/').pop()); if (matches.length === 1) file = matches[0]; }
+        if (!file) throw failure('AssetLoad', `Missing browser file: ${uri}`);
+        return file.arrayBuffer();
+      }}, signal);
+    });
   }
   async #loading(work) {
     if (this.disposed) throw failure('InvalidState', 'Viewer is disposed.');
@@ -235,6 +241,8 @@ class Viewer {
     } finally { this.#loads.delete(controller); }
   }
   async #import(bytes, name, resolve, signal) {
+    const live = () => {if (this.disposed || signal.aborted) throw failure('InvalidState', 'Viewer is disposed.');};
+    live();
     if (bytes.length > maximumFileBytes) throw failure('InsufficientResource', 'Asset file exceeds the size limit.');
     if (!/\.(glb|gltf)$/i.test(name) || /[\\/\0]/u.test(name)) throw failure('InvalidArgument', 'Use a GLB/glTF file name without path separators.');
     const json = modelJson(bytes, name);
@@ -243,12 +251,17 @@ class Viewer {
     // A bounded private directory allows parent-relative glTF paths without escaping the sandbox.
     const base = Array(16).fill('r'), files = [[joinPath(base, name), bytes]];
     for (const uri of uris) {
-      const decoded = resourceUri(uri), path = joinPath(base, decoded), data = bytesOf(await resolve(uri));
+      live();
+      const decoded = resourceUri(uri), path = joinPath(base, decoded), resource = await resolve(uri);
+      live();
+      // Check the cumulative budget before allocating another owned copy.
+      if (resource?.byteLength > maximumImportBytes - total) throw failure('InsufficientResource', 'Asset dependency budget exceeded.');
+      const data = bytesOf(resource);
       total += data.length;
       if (data.length > maximumFileBytes || total > maximumImportBytes) throw failure('InsufficientResource', 'Asset dependency budget exceeded.');
       files.push([path, data]);
     }
-    if (this.disposed || signal.aborted) throw failure('InvalidState', 'Viewer is disposed.');
+    live();
     const root = `/minvex/load${++this.#loadSequence}`;
     const fs = this.#module.FS;
     const remove = path => { for (const child of fs.readdir(path).filter(n => n !== '.' && n !== '..')) { const p = `${path}/${child}`; if (fs.isDir(fs.stat(p).mode)) remove(p); else fs.unlink(p); } fs.rmdir(path); };

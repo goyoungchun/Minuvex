@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <sstream>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 using Json=nlohmann::json;
@@ -29,8 +30,18 @@ const char* Code(lv::ErrorCode code) {
 }
 lv::Vec3 Vector(const Json& j) {if (!j.is_array() || j.size()!=3) {throw std::invalid_argument("Expected three vector components.");}return {j[0].get<float>(),j[1].get<float>(),j[2].get<float>()};}
 Json Vector(lv::Vec3 v) {return {v.X,v.Y,v.Z};}
+template<class T> T Integer(const Json& value) {
+    if (!value.is_number()) {throw std::invalid_argument("Expected an integer number.");}
+    const auto n=value.get<double>();
+    if (!std::isfinite(n) || std::floor(n)!=n || n<static_cast<double>(std::numeric_limits<T>::lowest()) ||
+        n>std::min(9007199254740991.0,static_cast<double>(std::numeric_limits<T>::max()))) {
+        throw std::invalid_argument("Integer is outside the supported range.");
+    }
+    return static_cast<T>(n);
+}
 lv::ObjectId Id(const Json& request) {
-    const auto n=request.at("id").get<double>();if (!std::isfinite(n) || n<1 || n>9007199254740991.0 || std::floor(n)!=n) {Fail(lv::ErrorCode::InvalidHandle,"Invalid object ID.");}return static_cast<lv::ObjectId>(n);
+    const auto& value=request.at("id");if (!value.is_number()) {Fail(lv::ErrorCode::InvalidHandle,"Invalid object ID.");}
+    const auto n=value.get<double>();if (!std::isfinite(n) || n<1 || n>9007199254740991.0 || std::floor(n)!=n) {Fail(lv::ErrorCode::InvalidHandle,"Invalid object ID.");}return static_cast<lv::ObjectId>(n);
 }
 lv::QualityProfile Profile(const Json& value) {
     const auto p=value.is_string() ? value.get<std::string>():value.value("preset",std::string("low"));
@@ -41,11 +52,11 @@ lv::QualityProfile Profile(const Json& value) {
         for (const auto& [key,item]:value.items()) {(void)item;if (key!="preset" && key!="allowFallback" && key!="pbr" && key!="targetFps" && key!="resolutionScale" && key!="shadow" && key!="postProcessing" && key!="msaaSamples" && key!="onDemand") {throw std::invalid_argument("Unknown Web quality option: "+key);}}
         auto& o=q.Overrides;
         if (value.contains("pbr")) {o.Pbr=value.at("pbr").get<bool>();}
-        if (value.contains("targetFps")) {o.TargetFps=value.at("targetFps").get<int>();}
+        if (value.contains("targetFps")) {o.TargetFps=Integer<int>(value.at("targetFps"));}
         if (value.contains("resolutionScale")) {o.ResolutionScale=value.at("resolutionScale").get<float>();}
         if (value.contains("shadow")) {const auto mode=value.at("shadow").get<std::string>();if (mode!="off" && mode!="basic" && mode!="pcf" && mode!="pcss") {throw std::invalid_argument("Unknown shadow mode.");}o.Shadow=mode=="off" ? lv::ShadowMode::Off:mode=="basic" ? lv::ShadowMode::Basic:mode=="pcf" ? lv::ShadowMode::Pcf:lv::ShadowMode::Pcss;}
         if (value.contains("postProcessing")) {o.PostProcessing=value.at("postProcessing").get<bool>();}
-        if (value.contains("msaaSamples")) {o.MsaaSamples=value.at("msaaSamples").get<int>();}
+        if (value.contains("msaaSamples")) {o.MsaaSamples=Integer<int>(value.at("msaaSamples"));}
         if (value.contains("onDemand")) {o.OnDemand=value.at("onDemand").get<bool>() ? lv::OnDemandMode::On:lv::OnDemandMode::Off;}
     }
     (void)Check(lv::ExpandQuality(q));return q;
@@ -80,7 +91,7 @@ class WebHost {
     const lv::SceneObject& Object(const Json& r) {const auto id=Id(r);if (!world_.Contains(id)) {Fail(lv::ErrorCode::InvalidHandle,"The object has been removed.");}return world_.GetObject(id);}
     std::size_t Clip(const lv::SceneObject& o,const Json& clip) {
         if (!o.Model) {throw std::invalid_argument("Object has no model.");}
-        if (clip.is_number_unsigned() || clip.is_number_integer()) {const auto n=clip.get<std::int64_t>();if (n<0 || static_cast<std::size_t>(n)>=o.Model->Animations.size()) {throw std::invalid_argument("Animation index is out of range.");}return static_cast<std::size_t>(n);}
+        if (clip.is_number()) {const auto n=Integer<std::size_t>(clip);if (n>=o.Model->Animations.size()) {throw std::invalid_argument("Animation index is out of range.");}return n;}
         const auto name=clip.get<std::string>();std::optional<std::size_t> found;
         for (std::size_t i=0;i<o.Model->Animations.size();++i) {if (o.Model->Animations[i].Name==name) {if (found) {throw std::invalid_argument("Ambiguous animation name; use an index.");}found=i;}}
         if (!found) {throw std::invalid_argument("Animation name does not exist.");}return *found;
@@ -101,7 +112,7 @@ class WebHost {
         if (disposed_) {Fail(lv::ErrorCode::InvalidState,"Viewer is disposed.");}
         if (op=="initialize") {
             if (context_) {Fail(lv::ErrorCode::InvalidState,"Viewer is already initialized.");}
-            width_=r.at("width").get<int>();height_=r.at("height").get<int>();if (width_<1 || height_<1 || width_>8192 || height_>8192) {throw std::invalid_argument("Invalid Canvas extent.");}
+            width_=Integer<int>(r.at("width"));height_=Integer<int>(r.at("height"));if (width_<1 || height_<1 || width_>8192 || height_>8192) {throw std::invalid_argument("Invalid Canvas extent.");}
             profile_=Profile(r.value("quality",Json("low")));if (!lease_.Acquire()) {Fail(lv::ErrorCode::InvalidState,"This module already owns a graphics context.");}
             EmscriptenWebGLContextAttributes a;emscripten_webgl_init_context_attributes(&a);a.majorVersion=2;a.minorVersion=0;a.alpha=false;a.antialias=false;a.depth=true;a.stencil=true;a.preserveDrawingBuffer=true;
             context_=emscripten_webgl_create_context(r.at("selector").get<std::string>().c_str(),&a);
@@ -133,7 +144,7 @@ class WebHost {
         }
         if (op=="tick") {
             if (lost_ || emscripten_is_webgl_context_lost(context_)) {Fail(lv::ErrorCode::InvalidState,"Context is lost.");}Current();const auto dt=r.value("dt",0.0);if (!std::isfinite(dt) || dt<0 || dt>1) {throw std::invalid_argument("Frame delta must be in [0,1].");}
-            const int w=r.value("width",width_),h=r.value("height",height_);if (w<1 || h<1 || w>8192 || h>8192) {throw std::invalid_argument("Invalid Canvas extent.");}
+            const int w=r.contains("width") ? Integer<int>(r.at("width")):width_,h=r.contains("height") ? Integer<int>(r.at("height")):height_;if (w<1 || h<1 || w>8192 || h>8192) {throw std::invalid_argument("Invalid Canvas extent.");}
             if (w!=width_ || h!=height_) {Check(surface_->Resize(world_,w,h));width_=w;height_=h;}
             world_.UpdateAnimations(dt);now_+=dt;const bool rendered=surface_->Render(world_,now_,r.value("force",false),{.025f,.035f,.055f,1});
             sg_pass pass{};pass.swapchain.width=width_;pass.swapchain.height=height_;pass.swapchain.sample_count=1;pass.swapchain.color_format=SG_PIXELFORMAT_RGBA8;pass.swapchain.depth_format=SG_PIXELFORMAT_DEPTH_STENCIL;pass.swapchain.gl.framebuffer=0;pass.action.colors[0].load_action=SG_LOADACTION_DONTCARE;
@@ -150,7 +161,8 @@ class WebHost {
             if (r.contains("rotation")) {const auto& q=r.at("rotation");if (q.size()!=4) {throw std::invalid_argument("Expected four quaternion components.");}t.Rotation={q[0],q[1],q[2],q[3]};}world_.SetTransform(id,t);return nullptr;
         }
         if (op=="material") {
-            auto mat=world_.GetMaterial(id,r.value("index",0u));const auto& v=r.at("value");if (v.contains("baseColor")) {mat.BaseColor=v.at("baseColor").get<std::array<float,4>>();}if (v.contains("metallic")) {mat.MetallicFactor=v.at("metallic").get<float>();mat.Shading=lv::ShadingModel::Pbr;}if (v.contains("roughness")) {mat.RoughnessFactor=v.at("roughness").get<float>();mat.Shading=lv::ShadingModel::Pbr;}if (v.contains("unlit")) {mat.Unlit=v.at("unlit").get<bool>();}world_.SetMaterial(id,r.value("index",0u),mat);return nullptr;
+            const auto index=r.contains("index") ? Integer<std::size_t>(r.at("index")):0;
+            auto mat=world_.GetMaterial(id,index);const auto& v=r.at("value");if (v.contains("baseColor")) {mat.BaseColor=v.at("baseColor").get<std::array<float,4>>();}if (v.contains("metallic")) {mat.MetallicFactor=v.at("metallic").get<float>();mat.Shading=lv::ShadingModel::Pbr;}if (v.contains("roughness")) {mat.RoughnessFactor=v.at("roughness").get<float>();mat.Shading=lv::ShadingModel::Pbr;}if (v.contains("unlit")) {mat.Unlit=v.at("unlit").get<bool>();}world_.SetMaterial(id,index,mat);return nullptr;
         }
         auto& player=world_.GetAnimation(id);
         if (op=="play") {player.Play(Clip(object,r.at("clip")));}
@@ -158,8 +170,8 @@ class WebHost {
         else if (op=="stop") {player.Stop();}
         else if (op=="seek") {player.Seek(r.at("time").get<double>(),r.value("collect",false) ? lv::AnimationSeekEvents::Collect:lv::AnimationSeekEvents::Silent);}
         else if (op=="speed") {player.SetSpeed(r.at("speed").get<double>());}
-        else if (op=="morph") {const auto weights=r.at("weights").get<std::vector<float>>();player.SetMorphWeights(r.at("node").get<lv::JointId>(),weights);}
-        else if (op=="clearMorph") {player.ClearMorphWeights(r.at("node").get<lv::JointId>());}
+        else if (op=="morph") {const auto weights=r.at("weights").get<std::vector<float>>();player.SetMorphWeights(Integer<lv::JointId>(r.at("node")),weights);}
+        else if (op=="clearMorph") {player.ClearMorphWeights(Integer<lv::JointId>(r.at("node")));}
         else if (op=="tree") {
             lv::BlendTreeDesc d;d.Name=r.value("name",std::string("Web Blend"));d.ParameterX=r.value("parameterX",std::string("Speed"));d.ParameterY=r.value("parameterY",std::string("Direction"));const auto kind=r.value("kind",std::string("1d"));if (kind!="1d" && kind!="2d") {throw std::invalid_argument("Unknown blend tree kind.");}d.Kind=kind=="2d" ? lv::BlendTreeKind::Blend2D:lv::BlendTreeKind::Blend1D;
             for (const auto& sample:r.at("samples")) {d.Samples.push_back({Clip(object,sample.at("clip")),sample.at("x").get<float>(),sample.value("y",0.f)});}
