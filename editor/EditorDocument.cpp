@@ -185,6 +185,9 @@ Result<void> EditorDocument::SetLocalLights(std::vector<PointLight> points,std::
 }
 Result<void> EditorDocument::PlayAnimation(ObjectId object, std::size_t clip) { return ChangeAnimation(object,[&](auto& p) { p.Play(clip); }); }
 Result<void> EditorDocument::CrossFadeAnimation(ObjectId object,std::size_t clip,double duration) {return ChangeAnimation(object,[&](auto& p) {p.CrossFade(clip,duration);});}
+Result<void> EditorDocument::PlayBlendTree(ObjectId object,BlendTreeHandle tree,bool restart) {return ChangeAnimation(object,[&](auto& p){p.PlayBlendTree(std::move(tree),restart);});}
+Result<void> EditorDocument::SetBlendParameter(ObjectId object,std::string_view name,float value) {return ChangeAnimation(object,[&](auto& p){p.SetBlendParameter(name,value);});}
+Result<void> EditorDocument::SeekBlendTree(ObjectId object,double phase) {return ChangeAnimation(object,[&](auto& p){p.SeekBlendTree(phase);});}
 Result<void> EditorDocument::SetMaterial(ObjectId object,std::size_t index,const MaterialAsset& material) {return Change([&] {world_.SetMaterial(object,index,material);MarkChanged();});}
 Result<void> EditorDocument::ResetMaterial(ObjectId object,std::size_t index) {return Change([&] {world_.ResetMaterial(object,index);MarkChanged();});}
 Result<void> EditorDocument::SetMorphWeights(ObjectId object,JointId node,std::span<const float> weights) {return ChangeAnimation(object,[&](auto& player){player.SetMorphWeights(node,weights);});}

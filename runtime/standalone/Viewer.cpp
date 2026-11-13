@@ -163,6 +163,15 @@ Result<void> Viewer::CrossFadeAnimation(ObjectId id,std::size_t clip,double dura
     try {state_->World.GetAnimation(id).CrossFade(clip,duration);return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid animation clip, nonnegative duration and compatible scale signs."));}
 }
+Result<void> Viewer::PlayBlendTree(ObjectId id,BlendTreeHandle tree,bool restart) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).PlayBlendTree(std::move(tree),restart);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a Blend Tree compatible with this model."));}
+}
+Result<void> Viewer::SetBlendParameter(ObjectId id,std::string_view name,float value) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetBlendParameter(name,value);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a tree parameter name and finite value."));}
+}
+Result<void> Viewer::SeekBlendTree(ObjectId id,double phase) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SeekBlendTree(phase);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a normalized tree phase in [0,1]."));}
+}
 Result<void> Viewer::SetMaterial(ObjectId id,std::size_t index,const MaterialAsset& material) {
     auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.SetMaterial(id,index,material);return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid instance material and model-local textures."));}

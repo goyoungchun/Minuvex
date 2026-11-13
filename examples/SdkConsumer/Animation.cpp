@@ -46,7 +46,13 @@ int main(int argc,char** argv) {
         if (std::abs(player.BlendWeight()-.5f)>1e-6f) {throw std::runtime_error("Pause must freeze the transition.");}
         player.Resume();scene.UpdateAnimations(.25);
         if (player.Blend()) {throw std::runtime_error("Cross-fade must finish at its duration.");}
-        std::printf("Animation/Pose: %zu nodes, %.3f seconds; PoseBuffer, independent instances, Pose IO and cross-fade passed.\n",model->Skeleton.Joints.size(),player.Time());
+        lv::BlendTreeDesc treeDesc;treeDesc.Samples={{0,0,0},{model->Animations.size()>1 ? 1u:0u,1,0}};const auto tree=lv::CreateBlendTree(*model,treeDesc);
+        player.PlayBlendTree(tree);player.SetBlendParameter("Speed",.5f);player.SeekBlendTree(.5);player.Pause();
+        auto independent=player;independent.SetBlendParameter("Speed",1);
+        if (player.Tree()->Tree!=independent.Tree()->Tree || player.Tree()->X!=.5f || independent.Tree()->X!=1) {throw std::runtime_error("Blend Tree instance state must be independent.");}
+        const auto treePose=lv::ComposePose(model->Skeleton,lv::EvaluateBlendTree(*model,*tree,.5f,0,.5));const auto played=player.Evaluate();
+        for (std::size_t node=0;node<played.Global.size();++node) {for (std::size_t element=0;element<16;++element) {if (std::abs(treePose.Global[node].Elements[element]-played.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("Blend Tree facade and evaluator disagree.");}}}
+        std::printf("Animation/Pose: %zu nodes; PoseBuffer, Blend Tree, independent instances, Pose IO and cross-fade passed.\n",model->Skeleton.Joints.size());
         return 0;
     }catch (const std::exception& error) {std::fprintf(stderr,"%s\n",error.what());return 1;}
 }

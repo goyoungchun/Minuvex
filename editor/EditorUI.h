@@ -72,6 +72,10 @@ private:
     std::array<float,4> viewportRect_{};
     int transformTool_=0;
     float crossFadeSeconds_=.3f;
+    ObjectId treeObject_=NoObject;
+    ModelHandle treeModel_;
+    BlendTreeHandle treeDraftSource_;
+    BlendTreeDesc treeDraft_;
     bool grid_=true,gizmoVisible_=false,gizmoBlockInput_=false,gizmoEditing_=false,gizmoSuppressed_=false;
     bool cameraEditing_=false;
     ObjectId gizmoObject_=NoObject;
@@ -123,6 +127,7 @@ private:
     void Inspector();
     void BoneInspector();
     void AnimationControls();
+    void BlendTreeControls(ObjectId object,ModelHandle model);
     void QualitySettings();
     void PerformancePanel();
     const TelemetrySnapshot& RefreshQualityAnalysis();

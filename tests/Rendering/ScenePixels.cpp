@@ -25,6 +25,7 @@ using Pixel = std::array<std::uint8_t, 4>;
 bool failed = false;
 bool ran = false;
 bool animationTests = false;
+bool treeTests = false;
 bool qualityTests = false;
 bool compatibilityTests = false;
 bool pbrTests = false;
@@ -392,6 +393,22 @@ void RunBlend() {
     Check(changed<10,"GPU blend midpoint matches independently authored half-translation and half-rotation pose");
     player.Resume();scene.UpdateAnimations(.5);const auto finished=render();Check(!player.Blend() && finished != blended,"completed fade releases source and produces final GPU pose");
 }
+void RunTree() {
+    lv::AssetRegistry assets;auto model=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("AnimatedRibbon.gltf")));
+    lv::AnimationClip referenceClip;referenceClip.Name="Tree reference";referenceClip.Duration=1;const auto referenceIndex=model->Animations.size();model->Animations.push_back(referenceClip);
+    auto bent=model->Animations[0];bent.Name="Tree bent";bent.Duration=2;for (auto& track:bent.Tracks) {track.Times={0};track.Values={track.Values[1]};}const auto bentIndex=model->Animations.size();model->Animations.push_back(bent);
+    lv::BlendTreeDesc desc;desc.Samples={{referenceIndex,0,0},{bentIndex,1,0}};const auto tree=lv::CreateBlendTree(*model,desc);
+    lv::Scene scene;scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};scene.Sun.Intensity=0;scene.Sun.Ambient=1;const auto id=scene.AddModel(model);auto& player=scene.GetAnimation(id);player.PlayBlendTree(tree);player.Pause();
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Low);profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare tree rendering.");double clock=1;
+    const auto render=[&](const lv::Scene& world){Require(surface.Render(world,clock++,false,{0,0,0,1}),"Tree state failed to invalidate cached rendering.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    const auto original=render(scene);Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"paused unchanged tree reuses cached pixels");player.SetBlendParameter("Speed",.5f);const auto halfway=render(scene);Check(original!=halfway,"tree parameter edits deform actual GPU skinning pixels");
+    lv::Scene expected;expected.MainCamera=scene.MainCamera;expected.Sun=scene.Sun;const auto expectedId=expected.AddModel(model);auto pose=lv::ReferencePose(model->Skeleton);pose.Joints[1].Local.Position.X=.25f;pose.Joints[2].Local.Rotation={0,0,std::sin(std::numbers::pi_v<float>/8),std::cos(std::numbers::pi_v<float>/8)};expected.GetAnimation(expectedId).ApplyPose(pose);
+    const auto authored=render(expected);const auto differences=[](const auto& a,const auto& b){std::size_t count=0;for (std::size_t i=0;i<a.size();++i) {count+=a[i]!=b[i];}return count;};Check(differences(halfway,authored)<10,"1D GPU blend matches independently authored half-translation and half-rotation");
+    desc.Kind=lv::BlendTreeKind::Blend2D;desc.Samples={{referenceIndex,0,0},{bentIndex,1,0},{bentIndex,0,1}};player.PlayBlendTree(lv::CreateBlendTree(*model,desc));player.SetBlendParameter("Speed",.25f);player.SetBlendParameter("Direction",.25f);player.Pause();Check(differences(render(scene),authored)<10,"2D barycentric GPU pose matches the independent midpoint reference");
+    player.SeekBlendTree(.5);(void)render(scene);Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"tree phase seek invalidates once and then caches");
+    player.SetBlendParameter("Speed",2);player.SetBlendParameter("Direction",2);const auto outside=render(scene);Check(outside!=halfway,"outside-hull parameters clamp to the boundary pose on GPU");
+    lv::Transform offset;offset.Position.X=-1.3f;const auto second=scene.AddModel(model,offset);scene.GetAnimation(second).PlayBlendTree(tree);scene.GetAnimation(second).Pause();(void)render(scene);Check(surface.Stats().ResidentModels==1 && surface.Stats().LastDrawCalls==2,"tree instances share GPU geometry while using separate playback state");
+}
 void RunPbr() {
     auto model=std::make_shared<lv::ModelAsset>();lv::MeshPrimitive primitive;primitive.Geometry.Vertices={{{-2,-2,0},{0,0,1},{1,1,1,1},{0,0}},{{2,-2,0},{0,0,1},{1,1,1,1},{1,0}},{{0,2,0},{0,0,1},{1,1,1,1},{.5f,1}}};primitive.Geometry.Indices={0,1,2};model->Meshes.push_back({"PBR triangle",{primitive}});model->Parts.push_back({0});model->ModelBounds={{-2,-2,0},{2,2,0}};model->Materials.push_back({});auto& material=model->Materials[0];material.Shading=lv::ShadingModel::Pbr;material.BaseColor={.8f,.4f,.2f,1};material.MetallicFactor=0;material.RoughnessFactor=.6f;
     lv::Scene scene;const auto id=scene.AddModel(model);scene.MainCamera.Position={0,0,4};scene.MainCamera.Target={};scene.MainCamera.Projection=lv::CameraProjection::Orthographic;scene.MainCamera.OrthographicHeight=4;scene.Sun.Direction={-.6f,0,-.8f};scene.Sun.Intensity=2;scene.Sun.Ambient=0;
@@ -458,7 +475,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunPbr();RunMorph();} else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunTree();RunPbr();RunMorph();} else if (treeTests) {RunTree();}else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -467,6 +484,7 @@ void Cleanup() { if (sg_isvalid()) { sg_shutdown(); } }
 
 int main(int argc, char** argv) {
     animationTests = argc > 1 && std::strcmp(argv[1],"--animation") == 0;
+    treeTests = argc > 1 && std::strcmp(argv[1],"--tree") == 0;
     qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
     compatibilityTests=argc > 1 && std::strcmp(argv[1],"--compatibility") == 0;
     pbrTests=argc > 1 && std::strcmp(argv[1],"--pbr") == 0;

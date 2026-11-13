@@ -85,19 +85,31 @@ void Materials(const Json& entries,Scene& scene,ObjectId id) {
         const auto texture=[&](const char* key)->std::optional<std::size_t> {const auto& value=entry.at(key);return value.is_null() ? std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(UInt(value)));};m.BaseColorTexture=texture("baseTexture");m.NormalTexture=texture("normalTexture");m.MetallicRoughnessTexture=texture("metallicRoughnessTexture");scene.SetMaterial(id,index,m);
     }
 }
-std::string MorphFingerprint(const ModelAsset& model) {char text[17];std::snprintf(text,sizeof(text),"%016llx",static_cast<unsigned long long>(MorphSignature(model)));return text;}
+std::string Fingerprint(std::uint64_t value) {char text[17];std::snprintf(text,sizeof(text),"%016llx",static_cast<unsigned long long>(value));return text;}
+std::string MorphFingerprint(const ModelAsset& model) {return Fingerprint(MorphSignature(model));}
+Json TreeDefinition(const BlendTreeAsset& tree) {
+    const auto& d=tree.Description();Json result{{"name",String(d.Name)},{"x",String(d.ParameterX)},{"y",String(d.ParameterY)},{"kind",d.Kind==BlendTreeKind::Blend1D ? "1d":"2d"},{"signature",Fingerprint(tree.Signature())},{"samples",Json::array()}};
+    for (const auto& s:d.Samples) {result["samples"].push_back({{"clip",s.Clip},{"x",s.X},{"y",s.Y}});}return result;
+}
+BlendTreeHandle TreeDefinition(const Json& json,const ModelAsset& model) {
+    BlendTreeDesc d;d.Name=String(json.at("name"));d.ParameterX=String(json.at("x"));d.ParameterY=String(json.at("y"));const auto kind=String(json.at("kind"));Require(kind=="1d" || kind=="2d","Unknown Blend Tree kind.");d.Kind=kind=="1d" ? BlendTreeKind::Blend1D:BlendTreeKind::Blend2D;
+    const auto& samples=json.at("samples");Require(samples.is_array() && samples.size()<=MaxBlendSamples,"Invalid tree samples.");for (const auto& s:samples) {d.Samples.push_back({static_cast<std::size_t>(UInt(s.at("clip"))),Float(s.at("x")),Float(s.at("y"))});}auto tree=CreateBlendTree(model,std::move(d));Require(String(json.at("signature"))==Fingerprint(tree->Signature()),"Saved tree skeleton/morph/clip identity changed.");return tree;
+}
+using TreeIds=std::unordered_map<const BlendTreeAsset*,std::size_t>;
+using Trees=std::unordered_map<std::uint64_t,BlendTreeHandle>;
 Json Morphs(const std::vector<MorphPose>& poses) {Json result=Json::array();for (const auto& pose:poses) {result.push_back({{"node",pose.Node},{"weights",pose.Weights}});}return result;}
 std::vector<MorphPose> Morphs(const Json& json,const ModelAsset& model) {
     Require(json.is_array() && json.size()<=model.Nodes.size(),"Invalid morph pose list.");std::vector<MorphPose> result;std::unordered_set<JointId> seen;
     for (const auto& entry:json) {MorphPose pose;pose.Node=static_cast<JointId>(UInt(entry.at("node"),UINT32_MAX));Require(seen.insert(pose.Node).second,"Duplicate morph node.");const auto& weights=entry.at("weights");Require(weights.is_array() && weights.size()<=MaxMorphTargets,"Invalid morph weights.");for (const auto& weight:weights) {pose.Weights.push_back(Float(weight));}ValidateMorphWeights(model,pose.Node,pose.Weights);result.push_back(std::move(pose));}return result;
 }
-Json Animation(const SceneObject& object) {
+Json Animation(const SceneObject& object,const TreeIds& trees) {
     if (!object.Model) { return nullptr; }
     const auto& player = object.Animation;
     Require(player.Model() == object.Model,"Scene player was rebound to a foreign model; use Scene::SetModel.");
     (void)player.Evaluate();
     Json json{{"clip",nullptr},{"clipName",""},{"time",player.Time()},{"speed",player.Speed()},{"loop",player.Loop()},
-        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
+        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"tree",nullptr},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
+    if (player.Tree()) {const auto& state=*player.Tree();ValidateBlendTree(*object.Model,*state.Tree);json["tree"]={{"id",trees.at(state.Tree.get())},{"phase",state.Phase},{"x",state.X},{"y",state.Y}};}
     if (player.Clip()) { json["clip"] = *player.Clip(); json["clipName"] = String(object.Model->Animations.at(*player.Clip()).Name); }
     if (player.Blend()) {
         const auto& blend=*player.Blend();
@@ -107,14 +119,17 @@ Json Animation(const SceneObject& object) {
     }
     return json;
 }
-void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph) {
+void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph,const Trees* trees) {
     const auto& object = scene.GetObject(id);
     if (!object.Model) { Require(json.is_null(),"Empty object cannot have animation state."); return; }
     auto& player = scene.GetAnimation(id);
     player.SetSpeed(Number(json.at("speed"))); player.SetLoop(json.at("loop").get<bool>());
     const auto state = UInt(json.at("state"),2); const auto time = Number(json.at("time"));
     Require(std::isfinite(time) && time >= 0,"Invalid playback time.");
-    if (!json.at("clip").is_null()) {
+    if (trees && !json.at("tree").is_null()) {
+        Require(json.at("clip").is_null() && String(json.at("clipName")).empty() && json.at("blend").is_null() && time==0,"Tree playback cannot also select a clip/cross-fade.");const auto& saved=json.at("tree");const auto tree=UInt(saved.at("id"));Require(trees->contains(tree),"Unknown Blend Tree ID.");player.PlayBlendTree(trees->at(tree));const auto& desc=player.Tree()->Tree->Description();player.SetBlendParameter(desc.ParameterX,Float(saved.at("x")));const auto y=Float(saved.at("y"));if (desc.Kind==BlendTreeKind::Blend2D) {player.SetBlendParameter(desc.ParameterY,y);}else {Require(y==0,"Blend1D Y parameter must be zero.");}
+        if (state==static_cast<unsigned>(PlaybackState::Stopped)) {player.Stop();}else {player.Resume();if (state==static_cast<unsigned>(PlaybackState::Paused)) {player.Pause();}}player.SeekBlendTree(Number(saved.at("phase")));
+    } else if (!json.at("clip").is_null()) {
         const auto clip = UInt(json.at("clip"));
         Require(clip < object.Model->Animations.size(),"Saved animation clip no longer exists.");
         Require(String(json.at("clipName")) == object.Model->Animations[clip].Name,"Saved animation clip identity has changed.");
@@ -124,7 +139,7 @@ void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, b
         if (state == static_cast<unsigned>(PlaybackState::Paused)) { player.Pause(); }
         player.Seek(time);
     } else { Require(time == 0 && state == static_cast<unsigned>(PlaybackState::Stopped),"A clipless player must be stopped at time zero."); }
-    if (restoreMorph) {const auto signature=String(json.at("morphSignature"));std::uint64_t fingerprint=0;const auto [end,error]=std::from_chars(signature.data(),signature.data()+signature.size(),fingerprint,16);Require(signature.size()==16 && error==std::errc{} && end==signature.data()+signature.size(),"Invalid morph signature.");const auto morphs=Morphs(json.at("morphOverrides"),*object.Model);if (player.Clip() || !morphs.empty() || !json.at("blend").is_null()) {Require(fingerprint==MorphSignature(*object.Model),"Saved morph layout/defaults changed.");}for (const auto& pose:morphs) {player.SetMorphWeights(pose.Node,pose.Weights);}}
+    if (restoreMorph) {const auto signature=String(json.at("morphSignature"));std::uint64_t fingerprint=0;const auto [end,error]=std::from_chars(signature.data(),signature.data()+signature.size(),fingerprint,16);Require(signature.size()==16 && error==std::errc{} && end==signature.data()+signature.size(),"Invalid morph signature.");const auto morphs=Morphs(json.at("morphOverrides"),*object.Model);if (player.Clip() || player.Tree() || !morphs.empty() || !json.at("blend").is_null()) {Require(fingerprint==MorphSignature(*object.Model),"Saved morph layout/defaults changed.");}for (const auto& pose:morphs) {player.SetMorphWeights(pose.Node,pose.Weights);}}
     player.ApplyPose(Pose(json.at("overrides"),object.Model->Skeleton));
     if (restoreBlend && !json.at("blend").is_null()) {
         const auto& saved=json.at("blend");AnimationBlendState blend;
@@ -200,7 +215,8 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",8},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",9},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
+        TreeIds trees;
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -222,10 +238,11 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
         for (auto id : objects) {
             const auto& object = scene.GetObject(id); const auto& t = object.LocalTransform;
             if (object.Model) { addAsset(object.Model); }
+            if (object.Model && object.Animation.Tree()) {const auto& tree=object.Animation.Tree()->Tree;if (!trees.contains(tree.get())) {Require(trees.size()<1024,"Scene tree limit exceeded.");const auto treeId=trees.size()+1;trees.emplace(tree.get(),treeId);root["blendTrees"].push_back({{"id",treeId},{"model",assetIds.at(object.Model.get())},{"definition",TreeDefinition(*tree)}});}}
             const Json rotation = Json::array({t.Rotation.X,t.Rotation.Y,t.Rotation.Z,t.Rotation.W});
             root["objects"].push_back({{"id",ids.at(id)},{"parent",object.Parent ? ids.at(object.Parent) : 0},
                 {"name",String(object.Name)},{"visible",object.Visible},{"asset",object.Model ? assetIds.at(object.Model.get()) : 0},
-                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object)},{"materials",Materials(object)}});
+                {"position",Vector(t.Position)},{"rotation",rotation},{"scale",Vector(t.Scale)},{"animation",Animation(object,trees)},{"materials",Materials(object)}});
         }
         const auto& c = scene.MainCamera; const auto& l = scene.Sun;
         root["camera"] = {{"position",Vector(c.Position)},{"target",Vector(c.Target)},{"up",Vector(c.Up)},
@@ -243,7 +260,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 8),"Unsupported scene format/version.");
+        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 9),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -301,10 +318,12 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
             models.emplace(UInt(asset.at("id")),model);
             if (std::find(archive.Assets.begin(),archive.Assets.end(),model) == archive.Assets.end()) { archive.Assets.push_back(std::move(model)); }
         }
+        Trees trees;
+        if (version>=9) {const auto& saved=root.at("blendTrees");Require(saved.is_array() && saved.size()<=1024,"Invalid scene tree list.");for (const auto& entry:saved) {const auto id=UInt(entry.at("id")),asset=UInt(entry.at("model"));Require(id && !trees.contains(id) && models.contains(asset),"Invalid/duplicate tree ID or model reference.");trees.emplace(id,TreeDefinition(entry.at("definition"),*models.at(asset)));}}
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
-            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8); }
+            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8,version>=9 ? &trees:nullptr); }
             if (version>=7) {Materials(object.at("materials"),scene,ids.at(UInt(object.at("id"))));}
         }
         ValidateScene(scene);

@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lv {
@@ -77,6 +78,41 @@ struct PoseBuffer {
     std::vector<PoseChannels> Channels; // Per-node authored TRS bits; missing channels use reference values.
 };
 struct EvaluatedPose { std::vector<Mat4> Local, Global; };
+enum class BlendTreeKind { Blend1D, Blend2D };
+inline constexpr std::size_t MaxBlendSamples = 64;
+struct BlendSample { std::size_t Clip = 0; float X = 0, Y = 0; };
+struct BlendTreeDesc {
+    std::string Name = "Blend Tree", ParameterX = "Speed", ParameterY = "Direction";
+    BlendTreeKind Kind = BlendTreeKind::Blend1D;
+    std::vector<BlendSample> Samples; // 1D: strictly increasing X. 2D: unique, non-collinear points.
+};
+class BlendTreeAsset;
+using BlendTreeHandle = std::shared_ptr<const BlendTreeAsset>;
+class BlendTreeAsset {
+public:
+    const BlendTreeDesc& Description() const noexcept { return description_; }
+    std::span<const std::array<std::size_t,3>> Triangles() const noexcept { return triangles_; }
+    std::uint64_t Signature() const noexcept { return signature_; }
+private:
+    BlendTreeAsset() = default;
+    BlendTreeDesc description_;
+    std::vector<std::array<std::size_t,3>> triangles_;
+    std::vector<std::array<std::size_t,2>> hull_;
+    std::vector<std::string> clipNames_;
+    std::uint64_t skeleton_ = 0, morph_ = 0, signature_ = 0;
+    friend BlendTreeHandle CreateBlendTree(const ModelAsset&, BlendTreeDesc);
+    friend void ValidateBlendTree(const ModelAsset&, const BlendTreeAsset&);
+    friend std::vector<float> EvaluateBlendWeights(const BlendTreeAsset&, float, float);
+};
+struct BlendTreeState {
+    BlendTreeHandle Tree;
+    double Phase = 0; // Normalized [0,1], shared by all samples; zero-duration clips sample at zero.
+    float X = 0, Y = 0;
+};
+BlendTreeHandle CreateBlendTree(const ModelAsset& model, BlendTreeDesc description);
+void ValidateBlendTree(const ModelAsset& model, const BlendTreeAsset& tree);
+std::vector<float> EvaluateBlendWeights(const BlendTreeAsset& tree, float x, float y = 0);
+PoseBuffer EvaluateBlendTree(const ModelAsset& model, const BlendTreeAsset& tree, float x, float y, double phase);
 enum class PlaybackState { Stopped, Playing, Paused };
 struct AnimationBlendState {
     std::optional<std::size_t> SourceClip; // Live source; absent means a frozen full SourcePose.
@@ -118,9 +154,15 @@ public:
     PlaybackState State() const noexcept { return state_; }
     const PoseAsset& Overrides() const noexcept { return overrides_; }
     const std::optional<AnimationBlendState>& Blend() const noexcept { return blend_; }
+    const std::optional<BlendTreeState>& Tree() const noexcept { return tree_; }
     float BlendWeight() const noexcept; // Target weight; 1 when no transition is active.
     bool NeedsEvaluation() const noexcept;
     void Play(std::size_t clip, bool restart = true);
+    void PlayBlendTree(BlendTreeHandle tree, bool restart = true);
+    void SetBlendParameter(std::string_view name, float value);
+    void SeekBlendTree(double phase);
+    std::vector<float> BlendWeights() const;
+    double BlendTreeDuration() const; // Weighted cycle duration in seconds at current parameters.
     void CrossFade(std::size_t clip, double durationSeconds = .3); // Restarts target; zero switches immediately.
     void RestoreBlend(const AnimationBlendState& state); // Validated Scene restore on a selected, non-stopped target.
     void Pause() noexcept;
@@ -152,6 +194,7 @@ private:
     PlaybackState state_ = PlaybackState::Stopped;
     PoseAsset overrides_;
     std::optional<AnimationBlendState> blend_;
+    std::optional<BlendTreeState> tree_;
     std::vector<MorphPose> morphOverrides_;
     std::vector<float> EvaluateMorphClip(JointId node, std::optional<std::size_t> clip, double time) const;
     std::vector<float> EvaluateMorphBase(JointId node) const;

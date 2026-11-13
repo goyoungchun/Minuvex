@@ -448,33 +448,62 @@ void EditorUI::AnimationControls() {
             const auto model=Document.GetScene().GetObject(object).Model;const auto& clips=model->Animations;
             const auto& player=Document.GetScene().GetObject(object).Animation;
             const auto clip=player.Clip();const auto playback=player.State();const auto overrides=player.Overrides().Joints.size();
+            const auto tree=player.Tree();
             double time=player.Time();float speed=static_cast<float>(player.Speed());bool loop=player.Loop();
             const auto blending=player.Blend().has_value();const auto weight=player.BlendWeight();const auto elapsed=blending ? player.Blend()->Elapsed:0,durationBlend=blending ? player.Blend()->Duration:0;
             if (clips.empty()) { ImGui::TextUnformatted("This model has no animation clips. Pose editing remains available."); }
             else {
                 ImGui::SliderFloat("Cross-fade (s)",&crossFadeSeconds_,0,2,"%.2f");
-                if (ImGui::BeginCombo("Clip",clip ? clips[*clip].Name.c_str() : "<none>")) {
+                if (ImGui::BeginCombo("Clip",clip ? clips[*clip].Name.c_str() : tree ? "<Blend Tree>":"<none>")) {
                     for (std::size_t i=0;i<clips.size();++i) { ImGui::PushID(static_cast<int>(i));
                         if (ImGui::Selectable(clips[i].Name.c_str(),clip == i)) { Report(Document.CrossFadeAnimation(object,i,crossFadeSeconds_)); } ImGui::PopID(); }
                     ImGui::EndCombo();
                 }
-                if (ImGui::Button("Play / Restart")) { Report(Document.PlayAnimation(object,clip.value_or(0))); }
+                if (ImGui::Button("Play / Restart")) {if (tree) {Report(Document.PlayBlendTree(object,tree->Tree));}else { Report(Document.PlayAnimation(object,clip.value_or(0))); }}
                 ImGui::SameLine(); if (ImGui::Button(playback == PlaybackState::Playing ? "Pause" : "Resume")) {
                     if (playback == PlaybackState::Playing) { Report(Document.PauseAnimation(object)); }
-                    else if (clip) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
+                    else if (clip || tree) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
                 }
                 ImGui::SameLine(); if (ImGui::Button("Stop")) { Report(Document.StopAnimation(object)); }
                 if (clip) {
                     double zero = 0, duration = clips[*clip].Duration;
                     if (ImGui::SliderScalar("Time",ImGuiDataType_Double,&time,&zero,&duration,"%.3f s")) { Report(Document.SeekAnimation(object,time)); }
                 }
+                if (tree) {double phase=tree->Phase,zero=0,one=1;if (ImGui::SliderScalar("Tree phase",ImGuiDataType_Double,&phase,&zero,&one,"%.3f")) {Report(Document.SeekBlendTree(object,phase));}}
                 if (ImGui::DragFloat("Speed",&speed,0.05f,-100,100)) { Report(Document.SetAnimationSpeed(object,speed)); }
                 if (ImGui::Checkbox("Loop",&loop)) { Report(Document.SetAnimationLoop(object,loop)); }
                 ImGui::Text("%s | %zu joint overrides",playback == PlaybackState::Playing ? "Playing" : playback == PlaybackState::Paused ? "Paused" : "Stopped",overrides);
                 if (blending) {ImGui::ProgressBar(weight);ImGui::Text("Cross-fade: %.2f / %.2f s",elapsed,durationBlend);}
+                BlendTreeControls(object,model);
             }
         }
     } ImGui::End();
+}
+void EditorUI::BlendTreeControls(ObjectId object,ModelHandle model) {
+    if (!ImGui::CollapsingHeader("Blend Tree")) {return;}const auto active=Document.GetScene().GetObject(object).Animation.Tree();const auto source=active ? active->Tree:BlendTreeHandle{};
+    if (treeObject_!=object || treeModel_!=model || treeDraftSource_!=source) {treeObject_=object;treeModel_=model;treeDraftSource_=source;treeDraft_=source ? source->Description():BlendTreeDesc{};if (!source) {for (std::size_t i=0;i<std::min<std::size_t>(model->Animations.size(),2);++i) {treeDraft_.Samples.push_back({i,static_cast<float>(i),0});}}}
+    const auto text=[](const char* label,std::string& value) {char buffer[257]{};std::copy_n(value.c_str(),std::min<std::size_t>(value.size(),256),buffer);if (ImGui::InputText(label,buffer,sizeof(buffer))) {value=buffer;}};
+    text("Tree name",treeDraft_.Name);int kind=treeDraft_.Kind==BlendTreeKind::Blend1D ? 0:1;
+    if (ImGui::Combo("Tree type",&kind,"Blend1D\0Blend2D\0")) {treeDraft_.Kind=kind==0 ? BlendTreeKind::Blend1D:BlendTreeKind::Blend2D;treeDraft_.Samples.clear();for (std::size_t i=0;i<(kind==0 ? 2u:3u);++i) {treeDraft_.Samples.push_back({std::min(i,model->Animations.size()-1),i==1 ? 1.0f:0.0f,i==2 ? 1.0f:0.0f});}}
+    text("Parameter X",treeDraft_.ParameterX);const bool two=treeDraft_.Kind==BlendTreeKind::Blend2D;if (two) {text("Parameter Y",treeDraft_.ParameterY);}
+    std::optional<std::size_t> remove;
+    for (std::size_t i=0;i<treeDraft_.Samples.size();++i) {auto& sample=treeDraft_.Samples[i];ImGui::PushID(static_cast<int>(i));ImGui::Text("Sample %zu",i);
+        if (ImGui::BeginCombo("Animation",model->Animations.at(sample.Clip).Name.c_str())) {for (std::size_t clip=0;clip<model->Animations.size();++clip) {ImGui::PushID(static_cast<int>(clip));if (ImGui::Selectable(model->Animations[clip].Name.c_str(),sample.Clip==clip)) {sample.Clip=clip;}ImGui::PopID();}ImGui::EndCombo();}
+        ImGui::DragFloat(two ? "X":"Threshold",&sample.X,.02f);if (two) {ImGui::DragFloat("Y",&sample.Y,.02f);}if (treeDraft_.Samples.size()>(two ? 3u:1u) && ImGui::Button("Remove sample")) {remove=i;}ImGui::PopID();
+    }
+    if (remove) {treeDraft_.Samples.erase(treeDraft_.Samples.begin()+static_cast<std::ptrdiff_t>(*remove));}
+    if (treeDraft_.Samples.size()<MaxBlendSamples && ImGui::Button("Add sample")) {const auto x=treeDraft_.Samples.back().X+1;treeDraft_.Samples.push_back({0,x,two ? .5f:0.0f});}
+    if (ImGui::Button("Apply / Play tree")) {try {auto tree=CreateBlendTree(*model,treeDraft_);Report(Document.PlayBlendTree(object,std::move(tree)));}catch (const std::exception& e) {Record(ConsoleLevel::Error,e.what());}}
+    if (!active) {return;}const auto& desc=active->Tree->Description();float x=active->X,y=active->Y;
+    ImGui::PushID("Tree parameters");if (ImGui::DragFloat(desc.ParameterX.c_str(),&x,.02f)) {Report(Document.SetBlendParameter(object,desc.ParameterX,x));}if (desc.Kind==BlendTreeKind::Blend2D && ImGui::DragFloat(desc.ParameterY.c_str(),&y,.02f)) {Report(Document.SetBlendParameter(object,desc.ParameterY,y));}ImGui::PopID();
+    const auto weights=EvaluateBlendWeights(*active->Tree,active->X,active->Y);ImGui::TextUnformatted("Active sample weights");
+    for (std::size_t i=0;i<weights.size();++i) {ImGui::Text("%zu: %s  %.3f",i,model->Animations[desc.Samples[i].Clip].Name.c_str(),weights[i]);}
+    if (desc.Kind!=BlendTreeKind::Blend2D) {return;}
+    const auto origin=ImGui::GetCursorScreenPos();const ImVec2 size{std::max(120.0f,ImGui::GetContentRegionAvail().x),170};ImGui::InvisibleButton("Triangulation",size);auto* draw=ImGui::GetWindowDrawList();draw->AddRectFilled(origin,{origin.x+size.x,origin.y+size.y},IM_COL32(25,29,35,255));
+    double minX=desc.Samples[0].X,maxX=minX,minY=desc.Samples[0].Y,maxY=minY;for (const auto& s:desc.Samples) {minX=std::min(minX,double(s.X));maxX=std::max(maxX,double(s.X));minY=std::min(minY,double(s.Y));maxY=std::max(maxY,double(s.Y));}
+    const auto point=[&](float px,float py){return ImVec2{origin.x+10+static_cast<float>(std::clamp((double(px)-minX)/(maxX-minX),0.0,1.0))*(size.x-20),origin.y+size.y-10-static_cast<float>(std::clamp((double(py)-minY)/(maxY-minY),0.0,1.0))*(size.y-20)};};
+    for (const auto& t:active->Tree->Triangles()) {for (int k=0;k<3;++k) {const auto& a=desc.Samples[t[k]];const auto& b=desc.Samples[t[(k+1)%3]];draw->AddLine(point(a.X,a.Y),point(b.X,b.Y),IM_COL32(130,145,160,255));}}
+    for (std::size_t i=0;i<desc.Samples.size();++i) {const auto p=point(desc.Samples[i].X,desc.Samples[i].Y);draw->AddCircleFilled(p,3+weights[i]*4,IM_COL32(90,180,240,255));draw->AddText(p,IM_COL32_WHITE,std::to_string(i).c_str());}draw->AddCircleFilled(point(active->X,active->Y),4,IM_COL32(255,135,90,255));
 }
 void EditorUI::QualitySettings() {
     if (!quality_) {return;}

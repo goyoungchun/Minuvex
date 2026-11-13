@@ -7,7 +7,7 @@
 
 namespace lv {
 
-// Writes version 8 with morph state; reads versions 1..8.
+// Writes version 9 with shared Blend Trees and per-player state; reads versions 1..9.
 // External model references, library, hierarchy, TRS, camera, lights, animation/pose.
 // Runtime ObjectId/AssetId values are remapped when opening an archive.
 struct SceneArchive {

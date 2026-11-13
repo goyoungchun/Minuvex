@@ -107,6 +107,9 @@ public:
     Result<void> FrameScene();
     Result<void> PlayAnimation(ObjectId id, std::size_t clip);
     Result<void> CrossFadeAnimation(ObjectId id, std::size_t clip, double durationSeconds = .3);
+    Result<void> PlayBlendTree(ObjectId id, BlendTreeHandle tree, bool restart = true);
+    Result<void> SetBlendParameter(ObjectId id, std::string_view name, float value);
+    Result<void> SeekBlendTree(ObjectId id, double phase);
     Result<void> PauseAnimation(ObjectId id);
     Result<void> StopAnimation(ObjectId id);
     Result<void> SetPose(ObjectId id, const PoseAsset& pose); // Manual override after animation.

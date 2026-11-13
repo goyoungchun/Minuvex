@@ -52,6 +52,9 @@ public:
     Result<void> SetLocalLights(std::vector<PointLight> points,std::vector<SpotLight> spots);
     Result<void> PlayAnimation(ObjectId object, std::size_t clip);
     Result<void> CrossFadeAnimation(ObjectId object, std::size_t clip, double durationSeconds = .3);
+    Result<void> PlayBlendTree(ObjectId object, BlendTreeHandle tree, bool restart = true);
+    Result<void> SetBlendParameter(ObjectId object, std::string_view name, float value);
+    Result<void> SeekBlendTree(ObjectId object, double phase);
     Result<void> PauseAnimation(ObjectId object);
     Result<void> ResumeAnimation(ObjectId object);
     Result<void> StopAnimation(ObjectId object);

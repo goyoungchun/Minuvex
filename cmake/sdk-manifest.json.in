@@ -8,7 +8,7 @@
   "pointerBytes": @CMAKE_SIZEOF_VOID_P@,
   "configuration": "$<CONFIG>",
   "runtime": "@MINUVEX_SDK_RUNTIME@",
-  "sceneVersion": 8,
+  "sceneVersion": 9,
   "poseVersion": 1,
   "qualityVersion": 1,
   "importVersion": 6,

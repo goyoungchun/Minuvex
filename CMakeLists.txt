@@ -6,7 +6,7 @@ if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 endif()
-project(Minuvex VERSION 1.13.0 LANGUAGES CXX)
+project(Minuvex VERSION 1.14.0 LANGUAGES CXX)
 if(MSVC)
     if(POLICY CMP0141)
         # Reconfigured pre-CMP0141 build trees may retain /Zi in their cache.
@@ -82,7 +82,7 @@ add_library(minuvex_asset_codecs STATIC src/assets/ThirdParty.cpp src/assets/Thi
 target_include_directories(minuvex_asset_codecs SYSTEM PRIVATE third_party/cgltf third_party/stb third_party/tinyobjloader third_party/ufbx)
 target_compile_features(minuvex_asset_codecs PRIVATE cxx_std_20)
 
-add_library(minuvex_animation STATIC src/animation/Animation.cpp src/animation/PoseBlending.cpp)
+add_library(minuvex_animation STATIC src/animation/Animation.cpp src/animation/PoseBlending.cpp src/animation/BlendTree.cpp)
 add_library(minuvex::animation ALIAS minuvex_animation)
 target_link_libraries(minuvex_animation PUBLIC minuvex_core)
 minuvex_configure_target(minuvex_animation)

@@ -70,9 +70,9 @@ cmake --build build
 | **PBR** | Metallic/Roughness Material·Texture |
 | **Camera** | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking |
 | **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기 |
-| **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Clip Cross-fade, Timeline Scrubbing |
+| **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Blend1D/Blend2D, Clip Cross-fade, Timeline Scrubbing |
 | **실행 방식** | Standalone Viewer, Embedded Runtime, Editor |
-| **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Undo/Redo |
+| **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Blend Tree 편집, Undo/Redo |
 | **Debugging** | Wireframe, Normal·UV·Depth, Skeleton·Bone Weight, Shadow Map, Bounding Box, GPU Resource Inspector |
 | **Quality** | Low·Medium·High·Custom, 프로파일 저장·불러오기, 지원 기능 검사·Fallback |
 | **Hardware·Performance** | CPU/GPU/OS 정보, FPS·Frame Time, 메모리 사용량·예산, 품질 추천 |
