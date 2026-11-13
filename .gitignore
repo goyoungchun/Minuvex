@@ -6,6 +6,10 @@
 *.user
 /.minvex-editor.ini
 /.minvex-editor.json
+__pycache__/
+*.py[cod]
+*.egg-info/
+/dist/
 
 # Publish README and API; keep local planning documents and agent notes ignored.
 *.[mM][dD]

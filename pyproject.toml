@@ -1,0 +1,25 @@
+[build-system]
+requires = ["scikit-build-core>=1.1,<2", "pybind11>=3.0,<4", "ninja>=1.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "minvex"
+version = "1.18.0"
+description = "Lightweight C++20 3D graphics and animation SDK for Python"
+requires-python = ">=3.12,<3.13"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+wheel.packages = ["python/minvex"]
+build-dir = "out/python/{wheel_tag}"
+build.targets = ["minvex_python"]
+install.components = ["python"]
+sdist.exclude = ["out/**", ".vs/**", ".minvex-editor.*", "docs/**", "AGENTS.md"]
+
+[tool.scikit-build.cmake.define]
+MINVEX_BUILD_PYTHON = "ON"
+MINVEX_BUILD_EDITOR = "OFF"
+MINVEX_BUILD_EXAMPLES = "OFF"
+MINVEX_BUILD_BENCHMARKS = "OFF"
+MINVEX_INSTALL = "OFF"
+BUILD_TESTING = "OFF"

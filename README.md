@@ -78,6 +78,7 @@ cmake --build build
 | **Hardware·Performance** | CPU/GPU/OS 정보, FPS·Frame Time, 메모리 사용량·예산, 품질 추천 |
 | **Optimization** | Frustum Culling, Rigid LOD, Static Instancing, Mesh Optimization, BC3, On-Demand Rendering |
 | **SDK** | C++20, CMake 설치·연결, Facade API, Result/Error, 공식 예제, CPU-only 구성 |
+| **Python** | CPython 3.12, Viewer·Scene·Animation·Blend Tree·Morph·Material·Quality·Event API, Wheel |
 | **Platform** | Windows D3D11, macOS Metal |
 
 ## 최소 사양

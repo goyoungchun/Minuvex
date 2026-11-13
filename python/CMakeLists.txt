@@ -1,0 +1,32 @@
+if(NOT WIN32 AND NOT APPLE)
+    message(FATAL_ERROR "Minvex Python initially targets Windows and macOS.")
+endif()
+set(PYBIND11_FINDPYTHON ON)
+find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module)
+if(NOT Python_INTERPRETER_ID STREQUAL "Python" OR NOT Python_VERSION VERSION_LESS 3.13)
+    message(FATAL_ERROR "Minvex Python currently targets CPython 3.12 with the GIL.")
+endif()
+find_package(pybind11 3.0 CONFIG REQUIRED)
+pybind11_add_module(minvex_python MODULE NO_EXTRAS bindings/Module.cpp bindings/Values.cpp)
+set_target_properties(minvex_python PROPERTIES OUTPUT_NAME _native)
+target_link_libraries(minvex_python PRIVATE minvex::viewer minvex::scene_io)
+minvex_configure_target(minvex_python)
+if(MSVC)
+    target_compile_options(minvex_python PRIVATE /bigobj)
+endif()
+install(TARGETS minvex_python
+    LIBRARY DESTINATION minvex COMPONENT python
+    RUNTIME DESTINATION minvex COMPONENT python)
+install(FILES minvex/__init__.py DESTINATION minvex COMPONENT python)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/third_party/" DESTINATION minvex/licenses COMPONENT python
+    FILES_MATCHING PATTERN "LICENSE*" PATTERN "COPYING*")
+install(DIRECTORY licenses/ DESTINATION minvex/licenses COMPONENT python)
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/stb/stb_image.h" DESTINATION minvex/licenses/stb COMPONENT python)
+if(MINVEX_BUILD_RENDERER)
+    install(FILES "${sokol_SOURCE_DIR}/LICENSE" DESTINATION minvex/licenses/sokol COMPONENT python)
+endif()
+if(BUILD_TESTING)
+    # One opt-in suite; the default C++ CTest registration is unchanged.
+    add_test(NAME python.binding COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_binding.py"
+        --module-dir "$<TARGET_FILE_DIR:minvex_python>" --fixtures "${PROJECT_SOURCE_DIR}/examples/assets")
+endif()

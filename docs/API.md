@@ -1,13 +1,13 @@
 # Minvex API
 
-**C++20 Graphics SDK · Version 1.17.0 · Namespace `lv`**
+**C++20 Graphics SDK · Version 1.18.0 · Namespace `lv`**
 
 모듈별 주요 타입과 API를 정리한 사용 안내임. 전체 선언은 연결된 공개 헤더에서 확인할 수 있음.
 
 ## SDK 연결
 
 ```cmake
-find_package(Minvex 1.17 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minvex 1.18 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minvex::viewer)
 ```
@@ -126,7 +126,7 @@ Blend1D는 X 오름차순·Y=0인 1~64개 sample을 요구하며 인접 두 Clip
 
 Viewer·EditorDocument도 `PlayBlendTree/SetBlendParameter/SeekBlendTree` Result Facade를 제공함. Editor Animation Controls에서 이름·파라미터·Clip·threshold/좌표 편집과 Apply/Play, 현재 weight·2D 삼각분할 보기를 제공하며 편집은 Undo/Redo 대상임. Scene v11은 최대 1024개 공유 Tree 정의와 독립 phase/파라미터/재생 상태를 저장하며 reader는 v1~v11임. Reimport는 실제 Skeleton/Morph layout과 모든 참조 Clip index/name·Scale 호환성을 검사함.
 
-잘못된 입력/호환성은 low-level API에서 `std::invalid_argument`임. 반환한 handle은 정의의 수명을 유지하며 `Tree()` 참조는 Player/Scene 편집 후 다시 조회함. immutable 정의의 동시 조회·서로 다른 Player 사용은 가능하고 같은 Player의 동시 수정/평가는 금지임. SDK 1.17.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
+잘못된 입력/호환성은 low-level API에서 `std::invalid_argument`임. 반환한 handle은 정의의 수명을 유지하며 `Tree()` 참조는 Player/Scene 편집 후 다시 조회함. immutable 정의의 동시 조회·서로 다른 Player 사용은 가능하고 같은 Player의 동시 수정/평가는 금지임. SDK 1.18.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
 
 ### Additive Animation
 
@@ -149,7 +149,7 @@ Player는 TRS Additive 레이어 1개를 보유함. `SetAdditiveAnimation(clip, 
 
 Viewer·EditorDocument에도 같은 제어의 Result Facade를 제공함. Editor는 Clip·Skeleton/현재 base/Clip sample 기준 선택, weight·시간·속도·loop, Joint/Subtree mask, Base/Delta/Final 비교를 제공함. 편집은 Undo/Redo 대상이며 Scene v11은 레이어 reference·mask·재생 상태를 저장하고 reader는 v1~v11임. Reimport는 Skeleton·레이어 Clip index/name·시간과 reference/Scale 호환성을 검사함. Pose v1은 최종 TRS snapshot만 저장함.
 
-공유 Model/Clip은 수정하지 않으며 레이어·기준 Pose·mask는 Player별로 소유함. 상태 참조는 Player/Scene 편집 후 다시 조회하고 같은 Player의 동시 수정/평가는 금지임. weight 0 또는 전체 mask 0인 레이어의 시간 변화는 정적인 base의 On-Demand 이미지를 무효화하지 않음. SDK 1.17.0 소비자는 함께 재빌드해야 하며 ImportVersion 6은 유지함.
+공유 Model/Clip은 수정하지 않으며 레이어·기준 Pose·mask는 Player별로 소유함. 상태 참조는 Player/Scene 편집 후 다시 조회하고 같은 Player의 동시 수정/평가는 금지임. weight 0 또는 전체 mask 0인 레이어의 시간 변화는 정적인 base의 On-Demand 이미지를 무효화하지 않음. SDK 1.18.0 소비자는 함께 재빌드해야 하며 ImportVersion 6은 유지함.
 
 ### Animation Event
 
@@ -174,7 +174,7 @@ Player 큐는 최대 1024개임. 초과 시 `AnimationEventOverflow`를 던지�
 
 track당 최대 1024개, overlay 최대 256 track, 기본 track별·인스턴스 전체 overlay별 이름/페이로드 합계는 각각 1 MiB임. 이름은 1~256 bytes, payload는 최대 4096 bytes의 NUL 없는 UTF-8이며 시간은 유한한 [0,duration] 오름차순임. 잘못된 데이터는 `std::invalid_argument`임. Player/Scene의 동시 수정·평가는 금지이고 Viewer는 생성한 owner thread에서 사용함. callback은 명시적 Dispatch를 호출한 스레드에서 실행하며 전달된 참조는 해당 호출 동안만 유효함.
 
-Editor는 Timeline marker, 추가·삭제·시간·이름·payload 편집, 수집 Seek 선택과 발생 로그를 제공함. marker 편집은 Undo/Redo 대상이며 큐 배출·로그는 문서를 dirty로 만들지 않음. Scene v11은 overlay와 Clip identity를 저장하고 reader는 v1~v11임. 발생 큐·callback·로그는 저장하지 않으며 Undo/Redo는 과거 큐를 재발송하지 않음. Reimport는 overlay Clip identity/duration을 검사함. SDK 1.17.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
+Editor는 Timeline marker, 추가·삭제·시간·이름·payload 편집, 수집 Seek 선택과 발생 로그를 제공함. marker 편집은 Undo/Redo 대상이며 큐 배출·로그는 문서를 dirty로 만들지 않음. Scene v11은 overlay와 Clip identity를 저장하고 reader는 v1~v11임. 발생 큐·callback·로그는 저장하지 않으며 Undo/Redo는 과거 큐를 재발송하지 않음. Reimport는 overlay Clip identity/duration을 검사함. SDK 1.18.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
 
 ### PBR Material
 
@@ -240,7 +240,51 @@ auto changed = viewer.SetQuality(quality); // Result<void> 확인 필요
 
 `DebugView::ShadowBlockers / ShadowBlockerDepth / ShadowPenumbra / ShadowVisibility`는 각각 blocker 수/검색 수, 수신면 기준으로 보정한 평균 선형 깊이, 반경/최대 반경, 최종 가시성의 grayscale임. blocker가 없으면 깊이=1·반경=0임. 앞의 세 뷰는 PCSS, Visibility는 활성 shadow가 필요하며 부적합한 뷰/품질 전환은 `UnsupportedFeature`이고 이전 상태를 유지함. Editor Quality Settings와 Debugger에서 같은 설정·뷰를 제공하며 `minvex_rendering_enhancement --pcss`는 접촉·부유 그림자 예제임.
 
-`ExpandQuality`는 비유한 값·범위 초과를 `InvalidArgument`로 반환함. `ResolveQuality`는 `QualityCapabilities::ShadowMapping`을 요구하고 `AllowFallback=true`인 경우만 shadow를 끔. 설정은 값으로 복사하며 Viewer/Embedded/Editor 적용은 기존 owner/graphics thread에서 pass 밖에 호출함. 변경은 On-Demand 이미지를 무효화함. Quality writer v2는 PCSS 키를 저장하고 reader는 v1~v2임. v1에 없는 값은 기본값이며 정적 SDK 1.17 소비자는 공개 구조체 변경에 따라 재빌드가 필요함.
+`ExpandQuality`는 비유한 값·범위 초과를 `InvalidArgument`로 반환함. `ResolveQuality`는 `QualityCapabilities::ShadowMapping`을 요구하고 `AllowFallback=true`인 경우만 shadow를 끔. 설정은 값으로 복사하며 Viewer/Embedded/Editor 적용은 기존 owner/graphics thread에서 pass 밖에 호출함. 변경은 On-Demand 이미지를 무효화함. Quality writer v2는 PCSS 키를 저장하고 reader는 v1~v2임. v1에 없는 값은 기본값이며 정적 SDK 1.18 소비자는 공개 구조체 변경에 따라 재빌드가 필요함.
+
+### Python Binding
+
+`import minvex as mvx`로 기존 C++ 엔진을 사용함. CPython 3.12·Windows/macOS 대상이며 `MINVEX_BUILD_PYTHON=ON`일 때만 pybind11을 요구함. GPU resource handle·Shader·Embedded Host는 Python에 노출하지 않음. 기본 C++ 구성은 Python 의존성이 없음.
+
+```sh
+python -m pip wheel . --wheel-dir out/wheels
+python -m pip install out/wheels/minvex-1.18.0-cp312-cp312-win_amd64.whl
+python python/examples/viewer.py examples/assets/MorphRibbon.gltf --frames 60
+```
+
+루트 `pyproject.toml`의 scikit-build-core 빌드이며 CMake·C++20 도구와 플랫폼 SDK가 필요함. Windows는 x64 MSVC 런타임을 사용함. macOS wheel 파일명은 빌드 환경에 따름. `-C cmake.define.MINVEX_BUILD_RENDERER=OFF`로 CPU-only wheel을 만들 수 있으며 이 구성의 `run()`은 `UnsupportedFeature`임. 같은 버전의 Native/CPU wheel 교체에는 `--force-reinstall`을 사용함. PyPI 공개 설치를 전제로 하지 않으며 위 명령은 로컬 wheel 생성·설치임.
+
+```python
+import minvex as mvx
+
+with mvx.Viewer() as viewer:
+    model = viewer.add_model("character.glb")
+    model.play_animation("Walk")  # index도 가능함
+    quality = mvx.make_quality_profile(mvx.QualityPreset.Medium)
+    quality.overrides.pbr = True
+    viewer.set_quality(quality)
+    material = model.get_material(0)
+    material.shading = mvx.ShadingModel.Pbr
+    material.roughness_factor = .3
+    model.set_material(0, material)
+    viewer.run(on_event=lambda e: print(e.occurrence.event.name))
+```
+
+| 대상 | 주요 API |
+|---|---|
+| `Viewer` | `ViewerOptions`, `add_model`, `scene`, `set_quality`, `quality`, `set_debug_view`, `frame_scene`, `request_redraw`, `run`, `request_close`, `is_running`, `close` |
+| `Scene / Object` | `create_object`, `objects`, `object(id)`, `camera/sun`, `save/load`, `update_animations`; Object의 `id/name/transform/visible`, `set_parent`, `remove` |
+| Animation / Blend Tree | `animation_clips`, `play_animation`, `pause/resume/stop_animation`, `seek_animation`, `animation_speed/loop/time`, `create_blend_tree(BlendTreeDesc)`, `play_blend_tree`, `set_blend_parameter`, `seek_blend_tree`, `blend_weights` |
+| Morph / Material | `morph_nodes`, `get/set/clear_morph_weights`; `get/set/reset_material`, `Material`의 PBR·texture·alpha 필드 |
+| Quality / Event | `make_quality_profile`, `QualityProfile.overrides`, `expand/save/load_quality`; `AnimationEvent`, `set/reset_animation_events`, `poll/dispatch_animation_events`, `clear_animation_events` |
+
+`Vec3`·`Quaternion`·`Transform`·Camera·Material·Quality·프레임/이벤트는 값 타입임. `model.transform`·`get_material()`·`scene.camera` 조회값을 수정한 뒤 다시 대입/설정해야 반영함. Clip 이름이 중복이면 index를 요구함. Morph node ID와 기본/현재 weight는 `morph_nodes`로 조회함. PBR 렌더링에는 C++과 같이 Advanced lighting·Pbr 품질 설정이 필요함.
+
+Viewer가 C++ 소유자이며 Scene/Object는 약한 핸들임. Viewer 소멸·`close()` 후 접근은 `InvalidState`, 제거된 객체 접근은 `InvalidHandle`임. id는 식별자 값으로 유지됨. Scene load는 ID를 재매핑하고 이전 핸들을 무효화하며 `run/dispatch` 밖에서 호출함. `close()`는 owner thread에서 반복 호출 가능하고 실행/dispatch 중에는 `InvalidState`임. 실행 중에는 `request_close()` 후 run 반환 뒤 닫음.
+
+생성 스레드에서 모델/Scene/애니메이션을 사용하며 위반은 `WrongThread`임. `request_close/is_running`만 다른 스레드에서 사용 가능함. macOS `run`은 main thread임. Blocking `run`·Import·파일 IO 중에는 GIL을 해제하고 Python callback은 owner thread에서 GIL을 확보함. `on_frame(viewer, info)` 뒤 `on_event(event)`를 전달하며 callback은 run 동안만 유지됨. 프레임·이벤트 복사본은 callback 반환·객체 삭제 후에도 유효함. 자동 애니메이션 진행을 끄려면 `advance_animations=False`임.
+
+`mvx.Error`는 `RuntimeError` 계열이며 `code/message/hint/source_path`를 제공함. C++ Result·검증 예외를 변환하고 Python callback 예외는 `CallbackFailure`·`__cause__`로 원인을 보존함. Python 인수의 타입 오류는 `TypeError`일 수 있음. 이벤트 polling·수집 Seek·큐 배출·1회 전달은 기존 C++ 계약과 같으며 Python 객체를 저장 형식에 직렬화하지 않음.
 
 ### Embedded Runtime
 
@@ -286,12 +330,12 @@ Facade·IO는 Result를 사용하고, low-level Asset/Scene/Animation API는 `Im
 
 Scene v11은 이전 SDK reader로 읽을 수 없음. Scene/Pose/Quality 저장은 임시 파일 작성 후 교체하며 모델 파일 자체를 Scene에 내장하지 않음. Undo 이력·UI 상태·Telemetry는 Scene에 저장하지 않음.
 
-Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND·Python/WebAssembly는 후속 범위임.
+Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND·WebAssembly는 후속 범위임.
 
 ## 검증 범위
 
-SDK 1.17.0의 Windows Release 전체 빌드와 핵심 CTest 4종(Quality·Telemetry·Viewer·Editor), D3D11 PCSS 15개·PBR 15개, Viewer 품질 적용 17개, PCSS 공개 예제를 확인함. 거리별 penumbra·PCF 비교·0도 광원·맵 경계·경사 수신면·Morph/Skinning과 8/32/64 샘플의 GPU timestamp 비교가 범위임. HLSL5·Metal 셰이더 생성을 확인함.
+SDK 1.18.0의 Windows x64·CPython 3.12.14에서 Native/CPU-only Release wheel 빌드·설치와 공백 경로 독립 환경 import를 확인함. Scene·한글 경로·TRS·PBR·Animation/Morph/Blend Tree·Quality·Event·수명·스레드·오류 핵심 5종을 검사함. CPU-only run의 UnsupportedFeature, sdist 필수 파일·분리 소스 CMake 구성, Python OFF의 기본 C++ 구성·core 빌드도 확인함.
 
-CPU-only Debug SDK와 공백 포함 설치 경로의 공개 헤더 18개·독립 PCSS 설정/Quality v2 소비자를 확인함. 기본 CTest 등록은 13종으로 유지하며 macOS 실기기·전체 회귀는 이번 검증 범위에 포함하지 않았음.
+Native 실행·프레임/이벤트 예외 원인 보존·GIL 해제 중 worker 종료 요청은 별도 프로세스 4종으로 검사하고 Python Viewer 예제를 실행함. HLSL5·Metal 셰이더 생성을 확인했으며 macOS wheel/실기기와 원격 CI는 이번에 실행하지 않았음. Windows/macOS wheel 빌드·설치 검사를 CI에 추가함. C++ 전체 회귀는 반복하지 않았으며 Python OFF의 기본 CTest 13종에 검사를 추가하지 않음.
 
 [기능·빌드 안내](../README.md) · [공식 SDK 예제](../examples/SdkConsumer) · [공개 헤더](../include/minvex)

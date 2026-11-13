@@ -6,7 +6,7 @@ if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 endif()
-project(Minvex VERSION 1.17.0 LANGUAGES CXX)
+project(Minvex VERSION 1.18.0 LANGUAGES CXX)
 if(MSVC)
     if(POLICY CMP0141)
         # Reconfigured pre-CMP0141 build trees may retain /Zi in their cache.
@@ -29,6 +29,11 @@ option(MINVEX_ENABLE_RENDER_SMOKE_TEST "Register a test requiring a desktop and 
 option(MINVEX_ENABLE_EXTENDED_TESTS "Register detailed legacy desktop regression cases in addition to the compact suite" OFF)
 option(MINVEX_INSTALL "Generate SDK install rules and binary packages" ${PROJECT_IS_TOP_LEVEL})
 option(MINVEX_BUILD_BENCHMARKS "Build the optional reproducible SDK benchmark" OFF)
+option(MINVEX_BUILD_PYTHON "Build the optional CPython module (requires pybind11)" OFF)
+if(MINVEX_BUILD_PYTHON)
+    # The static engine is linked into a Python shared module on macOS.
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 
 include(CTest)
 
@@ -256,6 +261,10 @@ if(MINVEX_BUILD_BENCHMARKS)
         message(FATAL_ERROR "MINVEX_BUILD_BENCHMARKS requires MINVEX_BUILD_RENDERER.")
     endif()
     add_subdirectory(benchmarks/Minvex)
+endif()
+
+if(MINVEX_BUILD_PYTHON)
+    add_subdirectory(python)
 endif()
 
 if(MINVEX_INSTALL)

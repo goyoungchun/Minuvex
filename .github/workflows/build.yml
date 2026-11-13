@@ -8,6 +8,34 @@ permissions:
   contents: read
 
 jobs:
+  python-wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Build native CPython wheel
+        run: python -m pip wheel . --no-deps --wheel-dir out/wheels
+      - name: Install wheel and check binding contracts without opening a window
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem out/wheels/minvex-*.whl).FullName
+          python -m pip install --no-deps $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python python/tests/test_binding.py --fixtures examples/assets
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Minvex-Python-${{ runner.os }}-${{ runner.arch }}-cp312
+          path: out/wheels/minvex-*.whl
+          if-no-files-found: error
   build:
     strategy:
       fail-fast: false

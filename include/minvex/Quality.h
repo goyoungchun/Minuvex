@@ -104,7 +104,7 @@ Result<RenderSettings> ExpandQuality(const QualityProfile& profile); // Syntacti
 Result<QualityState> ResolveQuality(const QualityProfile& profile, const QualityCapabilities& capabilities,
                                    int outputWidth, int outputHeight);
 std::uint64_t RenderTargetBytes(const RenderSettings& settings, int width, int height);
-// CPU-only profile IO, independent of Scene and Editor (.mvxquality.json v1).
+// CPU-only profile IO, independent of Scene and Editor (.mvxquality.json writer v2, reader v1..v2).
 Result<void> SaveQuality(const QualityProfile& profile, const std::filesystem::path& path);
 Result<QualityProfile> LoadQuality(const std::filesystem::path& path);
 
