@@ -120,7 +120,7 @@ public:
     void Invalidate() noexcept { valid_ = false; }
 private:
     bool valid_ = false;
-    double last_ = 0;
+    double last_ = 0, epoch_ = 0;
     std::uint64_t signature_ = 0;
 };
 } // namespace lv

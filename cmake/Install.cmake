@@ -43,7 +43,8 @@ install(DIRECTORY examples/SdkConsumer DESTINATION "${_sdk_share}/examples")
 install(FILES examples/EmbeddedViewer/MainD3D11.cpp examples/EmbeddedViewer/MainMetal.mm
     DESTINATION "${_sdk_share}/examples/EmbeddedViewer")
 install(FILES examples/RenderingEnhancement/Main.cpp DESTINATION "${_sdk_share}/examples/RenderingEnhancement")
-install(FILES examples/Equipment/Main.cpp DESTINATION "${_sdk_share}/examples/Equipment")
+install(FILES examples/Equipment/Main.cpp examples/Equipment/EquipmentScene.h examples/Equipment/Diagnostics.h
+    DESTINATION "${_sdk_share}/examples/Equipment")
 install(DIRECTORY examples/assets/ DESTINATION "${_sdk_share}/examples/assets")
 install(DIRECTORY benchmarks/ DESTINATION "${_sdk_share}/benchmarks")
 # Documentation is an explicit opt-in until the local drafts are published.

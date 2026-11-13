@@ -129,8 +129,18 @@ bool IntersectsFrustum(const Bounds& b,const Mat4& world,const Mat4& vp) {
 }
 bool RenderScheduler::Due(double now,int fps) const {
     Require(std::isfinite(now) && now >= 0 && fps >= 0 && fps <= 240,"Invalid scheduler time/FPS.");
-    return !valid_ || fps == 0 || now < last_ || now-last_+1e-9 >= 1.0/fps;
+    if (!valid_ || fps == 0 || now < last_) { return true; }
+    const double interval = 1.0 / fps;
+    // Keep a stable deadline grid instead of resetting the deadline to each
+    // slightly late VSync callback. A bounded early margin absorbs timer jitter
+    // without allowing a second submission in the same scheduled slot.
+    const double tolerance = std::min(.0005, interval * .05);
+    const double nextSlot = std::floor((last_ - epoch_ + tolerance + 1e-9) / interval) + 1;
+    return now - epoch_ + tolerance + 1e-9 >= nextSlot * interval;
 }
 bool RenderScheduler::NeedsRender(OnDemandMode mode,std::uint64_t signature,bool dynamic) const noexcept {return !valid_ || mode == OnDemandMode::Off || dynamic || signature != signature_;}
-void RenderScheduler::Submitted(double now,std::uint64_t signature) noexcept {valid_=true;last_=now;signature_=signature;}
+void RenderScheduler::Submitted(double now,std::uint64_t signature) noexcept {
+    if (!valid_ || now < last_) { epoch_ = now; }
+    valid_=true;last_=now;signature_=signature;
+}
 } // namespace lv

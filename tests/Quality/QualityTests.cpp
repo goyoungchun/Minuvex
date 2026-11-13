@@ -97,6 +97,27 @@ void CullingAndPacing() {
     Check(scheduler.NeedsRender(lv::OnDemandMode::Auto,10,true) && scheduler.NeedsRender(lv::OnDemandMode::Off,10,false),"animation and continuous policy keep rendering");
     Check(scheduler.Due(1,0) && scheduler.Due(.5,60),"unlimited FPS and clock reset are supported");scheduler.Invalidate();Check(scheduler.NeedsRender(lv::OnDemandMode::On,10,false),"explicit invalidation wakes static rendering");
     Rejects([&]{(void)scheduler.Due(-1,30);},"invalid pacing clock rejected");
+    // Reproduce a 60 Hz callback arriving alternately just before/after its
+    // nominal deadline. Measuring only from the last submission drops half.
+    for (int fps : {30, 60}) {
+        lv::RenderScheduler paced; paced.Submitted(10, 1); int rendered = 0;
+        for (int tick = 1; tick <= 240; ++tick) {
+            const double now = 10 + tick / 60.0 + (tick % 2 ? -.0002 : .0002);
+            if (paced.Due(now, fps)) {
+                ++rendered; paced.Submitted(now, 1);
+                Check(!paced.Due(now + .0001, fps), "early VSync tolerance cannot submit the same slot twice");
+            }
+        }
+        Check(rendered == fps * 4, "jittered VSync preserves target cadence without skipped deadlines");
+    }
+    lv::RenderScheduler fast; fast.Submitted(0, 1); int rendered = 0;
+    for (int tick = 1; tick <= 4000; ++tick) {
+        const double now = tick / 1000.0;
+        if (fast.Due(now, 60)) { ++rendered; fast.Submitted(now, 1); }
+    }
+    Check(rendered == 240, "deadline grid preserves 60 FPS average on a faster host callback");
+    fast.Submitted(20, 1); Check(!fast.Due(20.001, 60), "a long stall does not trigger immediate catch-up submissions");
+    fast.Submitted(1, 1); Check(fast.Due(1 + 1.0 / 60, 60), "clock rollback resets the pacing epoch");
 }
 }
 void PbrPolicy() {

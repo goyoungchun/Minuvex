@@ -5,6 +5,7 @@
 #include <minvex/PoseIO.h>
 #include <minvex/Debug.h>
 #include <json.hpp>
+#include "../../examples/Equipment/EquipmentScene.h"
 
 using namespace test;
 namespace {
@@ -112,6 +113,32 @@ void Leader() {
     scene.SetLeaderPose(partial, full);
     Check(scene.GetObject(partial).LeaderPose == full, "follower may use a compatible subset of canonical bones");
 }
+void Motion() {
+    const auto bodyModel = equipment::Character(false), clothingModel = equipment::Character(true);
+    const auto shared = lv::CreateSharedSkeleton(bodyModel->Skeleton);
+    lv::Scene scene; const auto body = scene.AddModel(bodyModel), clothes = scene.AddModel(clothingModel);
+    scene.SetSharedSkeleton(body, shared); scene.SetSharedSkeleton(clothes, shared); scene.SetLeaderPose(clothes, body);
+    auto& player = scene.GetAnimation(body); player.Play(0);
+    constexpr double step = 1.0 / 240;
+    double previousAngle = 1, previousVelocity = 0, maxVelocityChange = 0, followerError = 0, minAngle = 1, maxAngle = -1;
+    for (int frame = 1; frame <= 960; ++frame) {
+        scene.UpdateAnimations(step);
+        const auto pose = scene.EvaluatePose(body), follower = scene.EvaluatePose(clothes);
+        const auto& matrix = pose.Local[4].Elements;
+        const double angle = std::atan2(double(matrix[1]), matrix[0]), velocity = (angle - previousAngle) / step;
+        minAngle = std::min(minAngle, angle); maxAngle = std::max(maxAngle, angle);
+        if (frame > 1) { maxVelocityChange = std::max(maxVelocityChange, std::abs(velocity - previousVelocity)); }
+        previousAngle = angle; previousVelocity = velocity;
+        for (std::size_t bone = 0; bone < 7; ++bone) { for (std::size_t i = 0; i < 16; ++i) {
+            followerError = std::max(followerError, std::abs(double(pose.Global[bone].Elements[i]) - follower.Global[bone].Elements[i]));
+        } }
+    }
+    Check(maxVelocityChange < .2, "equipment swing eases through both direction changes and loop seam without velocity snaps");
+    Check(minAngle < -.99 && maxAngle > .99, "smooth equipment motion retains the original full arm swing range");
+    Check(followerError == 0, "Leader Pose follows every sampled bone exactly over two smooth animation loops");
+    Check(!player.Blend() && !player.Tree(), "equipment preview uses single-clip Slerp rather than an animation blend transition");
+    std::printf("Equipment motion: maximum per-sample angular velocity change %.6f rad/s, follower error %.8g\n", maxVelocityChange, followerError);
+}
 void Persistence() {
     TemporaryDirectory temp;
     lv::EditorDocument doc;
@@ -188,7 +215,7 @@ void Persistence() {
 }
 }
 int main(int argc, char** argv) {
-    try { if (argc == 2 && std::string_view(argv[1]) == "sockets") { Sockets(); } else if (argc == 2 && std::string_view(argv[1]) == "leader") { Leader(); } else if (argc == 2 && std::string_view(argv[1]) == "persistence") { Persistence(); } else { Check(false, "select an equipment issue test"); } }
+    try { if (argc == 2 && std::string_view(argv[1]) == "sockets") { Sockets(); } else if (argc == 2 && std::string_view(argv[1]) == "leader") { Leader(); } else if (argc == 2 && std::string_view(argv[1]) == "persistence") { Persistence(); } else if (argc == 2 && std::string_view(argv[1]) == "motion") { Motion(); } else { Check(false, "select an equipment issue test"); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     return Finish();
 }

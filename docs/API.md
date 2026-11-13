@@ -275,6 +275,18 @@ Mesh당 최대 8개 target이며 `ImportSettings::MaxMorphTargets`로 더 낮출
 
 Scene v11은 node별 override와 frozen source Morph, layout signature를 저장함. 사용 중인 node/mesh·target 이름/순서·vertex 수·기본값 변경은 Reimport에서 거부함. Pose v1은 Morph를 저장하지 않음. 반환된 override 참조는 Player/Scene 편집 후 다시 조회하며 기존 owner-thread·오류 계약을 따름. `--morph` 렌더링 예제와 `examples/assets/MorphRibbon.gltf`를 제공함.
 
+### Frame Pacing / 장착 예제 진단
+
+`RenderScheduler`는 caller thread에서 사용하는 CPU 값 타입임. `Due(now, targetFps)`는 유한한 0 이상 초와 FPS 0~240을 받으며 잘못된 입력은 `std::invalid_argument`임. 0은 제한 없음이고, `Submitted(now, signature)`는 실제 제출을 기록함. `Invalidate()`는 다음 제출을 즉시 허용하고 새 epoch를 시작함. 시계가 뒤로 이동한 경우에도 다음 제출에서 epoch를 재설정함. On-Demand의 signature/dynamic 판정과 FPS 제한은 독립적임.
+
+제한 시간은 첫 제출 epoch에 고정된 시간 격자를 사용함. 각 callback의 작은 지연을 다음 deadline에 누적하지 않으며, VSync 경계에서는 `min(0.5ms, framePeriod × 0.05)`의 이른 제출을 허용함. 허용한 프레임의 시간 slot은 다음 제출 시 계산에 포함되어 동일 slot을 중복 제출하지 않음. 높은 callback 빈도에서도 목표 평균 FPS를 유지하며, Viewer·Embedded·Editor의 공통 RenderSurface에 적용됨. VSync와 FPS 제한은 서로 다른 기능이며, 화면 주사율 그대로 재생할 애니메이션 미리보기는 `ViewerOptions::VSync=true`와 `Quality.Overrides.TargetFps=0`을 함께 사용할 수 있음. 서로 나누어떨어지지 않는 주사율/목표 FPS 조합의 표시 간격은 여전히 달라질 수 있음.
+
+`minvex_equipment`는 위 VSync 설정을 기본으로 사용하며 `--target-fps 0..240`·`--no-vsync`로 비교할 수 있음. 팔 회전·몸 translation은 60 Hz cosine key로 방향 전환과 loop 경계를 완화하고 기존 Clip Slerp/Lerp로 평가함. `--profile path.json --frames 270`은 30프레임 warmup 후 wall-clock callback 간격을 기록함. 시뮬레이션 delta가 긴 stall 이후 clamp되어도 실제 간격을 기록하며, JSON 요약·frame별 CSV·기존 Telemetry JSON을 생성함. profile은 동기식 파일 IO이며 해당 path에 쓰기 권한이 필요하고 실패 시 예제는 오류를 출력하고 종료 코드 1을 반환함. 측정은 opt-in이며 수집된 본 행렬 비교는 Scene 상태를 변경하지 않음.
+
+Windows D3D11 측정에서 기존 VSync+60 FPS 제한은 32.8 FPS·P95 33.9ms였고, 제한만 해제한 A/B는 60.0 FPS·P95 17.1ms였음. 수정 후 기본/명시적 60 FPS 제한 모두 60 FPS 근처, Body/Follower 행렬 오차 0으로 확인함. 팔의 240 Hz 두 루프 검사에서 인접 sample 각속도 변화의 최댓값은 0.165 rad/s 미만임. Native CTest 20/20·CPU-only 13/13·설치 SDK 소비자 검증을 실행함. macOS/WebGL2 결과는 실행 미검증임.
+
+`RenderScheduler`의 비공개 저장 상태(epoch)가 추가되어 구조체 크기가 변경됨. 공개 함수 인수·Quality/Scene 파일 형식은 유지하며 정적 SDK 소비자는 헤더/라이브러리를 함께 재빌드해야 함. 바이너리 ABI는 고정하지 않음.
+
 ### PCSS Shadow
 
 단일 Directional Sun의 직교 그림자에 blocker search → 거리별 penumbra → 가변 반경 PCF를 적용함. R32F raw map을 재사용하며 Spot/Point shadow·atlas·cascade는 제공하지 않음. Low는 Off, Medium은 Basic, High는 PCF 기본값을 유지하고 Custom에서 PCSS를 선택함.
