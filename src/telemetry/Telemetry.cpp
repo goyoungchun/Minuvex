@@ -28,7 +28,7 @@ ResourceCost Cost(const Scene& scene,const QualityState& quality,std::uint64_t& 
             for (const auto& primitive:asset.Meshes.at(part.MeshIndex).Primitives) {
                 if (firstMesh) {
                     cost.BufferBytes=Add(cost.BufferBytes,Add(Multiply(primitive.Geometry.Vertices.size(),sizeof(Vertex)),Multiply(primitive.Geometry.Indices.size(),sizeof(std::uint32_t))));
-                    if (settings.Lod) {for (const auto& lod:primitive.Lods) {cost.BufferBytes=Add(cost.BufferBytes,Multiply(lod.Indices.size(),sizeof(std::uint32_t)));}}cost.TextureBytes=Add(cost.TextureBytes,4);
+                    if (settings.Lod) {for (const auto& lod:primitive.Lods) {cost.BufferBytes=Add(cost.BufferBytes,Multiply(lod.Indices.size(),sizeof(std::uint32_t)));}}cost.TextureBytes=Add(cost.TextureBytes,4);cost.BufferBytes=Add(cost.BufferBytes,Multiply(Multiply(primitive.Geometry.Vertices.size(),primitive.MorphTargets.size()),48));
                 }
                 const auto& material=scene.GetMaterial(item.Object,primitive.MaterialIndex);
                 for (int role=0;role<3;++role) {

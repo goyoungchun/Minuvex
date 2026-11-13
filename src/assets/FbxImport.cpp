@@ -18,6 +18,15 @@ Mat4 Matrix(const ufbx_matrix& m) {Mat4 result=Mat4::Identity();for (std::size_t
     if (error.type == UFBX_ERROR_MEMORY_LIMIT || error.type == UFBX_ERROR_ALLOCATION_LIMIT || error.type == UFBX_ERROR_OUT_OF_MEMORY) {ImportLimit(message);}
     ImportInvalid(std::string("FBX: ")+message);
 }
+std::vector<float> BlendWeights(const ufbx_blend_channel& channel,double weight) {
+    std::vector<float> result(channel.keyframes.count,0);std::ptrdiff_t negative=-1;
+    for (std::size_t i=0;i<channel.keyframes.count;++i) {const auto& key=channel.keyframes[i];if (!key.shape || !std::isfinite(key.target_weight) || key.target_weight==0 || (i && key.target_weight<=channel.keyframes[i-1].target_weight)) {ImportInvalid("Invalid FBX progressive shape thresholds.");}if (key.target_weight<0) {negative=static_cast<std::ptrdiff_t>(i);}}
+    std::ptrdiff_t prev=-1,next=-1;const auto count=static_cast<std::ptrdiff_t>(channel.keyframes.count);
+    if (weight>0) {if (negative>=0) {prev=negative;}for (auto i=negative+1;i<count;++i) {prev=next;next=i;if (channel.keyframes[static_cast<std::size_t>(i)].target_weight>weight) {break;}}}
+    else {if (negative+1<count) {prev=negative+1;}for (auto i=negative;i>=0;--i) {prev=next;next=i;if (channel.keyframes[static_cast<std::size_t>(i)].target_weight<weight) {break;}}}
+    const auto threshold=[&](std::ptrdiff_t i) {return i<0 ? 0.0:static_cast<double>(channel.keyframes[static_cast<std::size_t>(i)].target_weight);};const auto delta=threshold(next)-threshold(prev);
+    if (delta!=0) {const auto t=(weight-threshold(prev))/delta;if (prev>=0) {result[static_cast<std::size_t>(prev)]=Float(1-t);}if (next>=0) {result[static_cast<std::size_t>(next)]=Float(t);}}return result;
+}
 std::optional<std::size_t> Texture(ImportContext& context,const ufbx_material_map& map,std::map<const ufbx_texture*,std::optional<std::size_t>>& cache) {
     if (!map.texture || !map.texture_enabled) {return {};}
     const auto* texture=map.texture;
@@ -64,13 +73,18 @@ std::shared_ptr<ModelAsset> ImportFbx(const std::filesystem::path& path,const Im
         model->Materials.push_back(std::move(material));
     }}
     const auto fallback=model->Materials.size();model->Materials.push_back({});
-    bool reducedWeights=false;
+    bool reducedWeights=false;std::vector<std::vector<const ufbx_blend_channel*>> morphChannels;
     for (const auto* node:scene->nodes) {
         if (!node->mesh || !node->mesh->num_triangles) {continue;}
         const auto& source=*node->mesh;
         if (!source.vertex_normal.exists) {ImportInvalid("FBX mesh lacks normals; enable GenerateMissingNormals.");}
         if (source.num_vertices>settings.MaxVertices || source.num_triangles>settings.MaxIndices/3) {ImportLimit("FBX mesh exceeds vertex/index limits.");}
-        if (source.blend_deformers.count || source.cache_deformers.count) {model->Warnings.push_back("FBX morph/geometry cache deformation is not imported: "+Text(node->name));}
+        if (source.cache_deformers.count) {model->Warnings.push_back("FBX geometry cache is not imported: "+Text(node->name));}
+        std::vector<const ufbx_blend_channel*> channels;std::vector<const ufbx_blend_shape*> shapes;std::vector<std::string> shapeNames;std::vector<float> defaults;
+        for (const auto* blend:source.blend_deformers) {for (const auto* channel:blend->channels) {if (!channel->keyframes.count) {continue;}channels.push_back(channel);const auto weights=BlendWeights(*channel,channel->weight);defaults.insert(defaults.end(),weights.begin(),weights.end());for (std::size_t i=0;i<channel->keyframes.count;++i) {const auto* shape=channel->keyframes[i].shape;shapes.push_back(shape);shapeNames.push_back(Text(channel->name)+"/"+Text(shape->name)+"/"+std::to_string(i));
+            if (shapes.size()>settings.MaxMorphTargets) {ImportLimit("FBX progressive shapes exceed MaxMorphTargets.");}if (shape->offset_vertices.count!=shape->num_offsets || shape->position_offsets.count!=shape->num_offsets || (shape->normal_offsets.count && shape->normal_offsets.count!=shape->num_offsets) || (shape->offset_weights.count && shape->offset_weights.count!=shape->num_offsets)) {ImportInvalid("FBX shape delta counts differ.");}for (auto vertex:shape->offset_vertices) {if (vertex>=source.num_vertices) {ImportInvalid("FBX shape references an unknown control point.");}}
+        }}}
+
         if (source.skin_deformers.count>1) {throw ImportError(ImportErrorCode::UnsupportedFeature,"FBX mesh has multiple skin deformers.");}
         const auto* deformer=source.skin_deformers.count ? source.skin_deformers[0]:nullptr;
         std::optional<std::size_t> skinIndex;std::size_t fallbackJoint=0;
@@ -90,7 +104,8 @@ std::shared_ptr<ModelAsset> ImportFbx(const std::filesystem::path& path,const Im
         MeshAsset mesh;mesh.Name=Text(node->name);
         for (const auto& segment:source.material_parts) {
             if (!segment.num_triangles) {continue;}
-            MeshPrimitive primitive;primitive.HasSkinning=skinIndex.has_value();primitive.MaterialIndex=fallback;
+            MeshPrimitive primitive;primitive.MorphTargets.resize(shapes.size());for (std::size_t i=0;i<shapes.size();++i) {primitive.MorphTargets[i].Name=shapeNames[i];}
+primitive.HasSkinning=skinIndex.has_value();primitive.MaterialIndex=fallback;
             if (settings.ImportMaterials && segment.index<node->materials.count) {primitive.MaterialIndex=node->materials[segment.index]->typed_id;}
             for (auto faceIndex:segment.face_indices) {
                 const auto face=source.faces[faceIndex];if (face.num_indices<3) {continue;}
@@ -110,12 +125,16 @@ std::shared_ptr<ModelAsset> ImportFbx(const std::filesystem::path& path,const Im
                         else {v.Joints[0]=static_cast<std::uint16_t>(fallbackJoint);v.Weights[0]=1;}
                         if (vertex.num_weights>4) {reducedWeights=true;}
                     }
+                    for (std::size_t t=0;t<shapes.size();++t) {const auto* shape=shapes[t];const auto vertex=source.vertex_indices[index];const auto offset=ufbx_get_blend_shape_offset_index(shape,vertex);Vec3 position{},normal{};
+                        if (offset!=UFBX_NO_INDEX) {const auto weight=shape->offset_weights.count ? shape->offset_weights[offset]:1.0;const auto p=shape->position_offsets[offset];position=Vector({p.x*weight,p.y*weight,p.z*weight});if (shape->normal_offsets.count) {const auto n=shape->normal_offsets[offset];normal=Vector({n.x*weight,n.y*weight,n.z*weight});}}
+                        context.Reserve(sizeof(Vec3)*(shape->normal_offsets.count ? 2:1));primitive.MorphTargets[t].PositionDeltas.push_back(position);if (shape->normal_offsets.count) {primitive.MorphTargets[t].NormalDeltas.push_back(normal);}
+                    }
                     primitive.Geometry.Indices.push_back(static_cast<std::uint32_t>(primitive.Geometry.Vertices.size()));primitive.Geometry.Vertices.push_back(v);
                 }
             }
             mesh.Primitives.push_back(std::move(primitive));
         }
-        if (!mesh.Primitives.empty()) {const auto meshIndex=model->Meshes.size();model->Meshes.push_back(std::move(mesh));auto& target=model->Nodes[node->typed_id];target.MeshIndex=meshIndex;target.SkinIndex=skinIndex;model->Parts.push_back({meshIndex,Matrix(node->node_to_world),node->typed_id,skinIndex});}
+        if (!mesh.Primitives.empty()) {const auto meshIndex=model->Meshes.size();mesh.MorphWeights=defaults;model->Meshes.push_back(std::move(mesh));morphChannels.push_back(channels);auto& target=model->Nodes[node->typed_id];target.MeshIndex=meshIndex;target.SkinIndex=skinIndex;model->Parts.push_back({meshIndex,Matrix(node->node_to_world),node->typed_id,skinIndex});}
     }
     if (reducedWeights) {model->Warnings.push_back("FBX vertices with more than four influences use the strongest four, renormalized.");}
     std::size_t totalSamples=0;
@@ -137,9 +156,14 @@ std::shared_ptr<ModelAsset> ImportFbx(const std::filesystem::path& path,const Im
             }
             clip.Tracks.push_back(std::move(translation));clip.Tracks.push_back(std::move(rotation));clip.Tracks.push_back(std::move(scale));
         }
-        if (!clip.Tracks.empty()) {model->Animations.push_back(std::move(clip));}
+        for (std::size_t nodeIndex=0;nodeIndex<model->Nodes.size();++nodeIndex) {const auto& node=model->Nodes[nodeIndex];if (!node.MeshIndex || morphChannels.at(*node.MeshIndex).empty()) {continue;}MorphTrack track;track.Node=static_cast<JointId>(nodeIndex);track.TargetCount=model->Meshes[*node.MeshIndex].MorphWeights.size();
+            if (count>(settings.MaxAnimationSamples-totalSamples)/track.TargetCount) {ImportLimit("FBX morph bake exceeds MaxAnimationSamples.");}totalSamples+=count*track.TargetCount;context.Reserve(count*(track.TargetCount+1)*sizeof(float));
+            for (std::size_t sample=0;sample<count;++sample) {const auto seconds=std::min(static_cast<double>(sample)/settings.AnimationBakeRate,clip.Duration);track.Times.push_back(Float(seconds));for (const auto* channel:morphChannels[*node.MeshIndex]) {const auto weights=BlendWeights(*channel,ufbx_evaluate_blend_weight(stack->anim,channel,stack->time_begin+seconds));track.Values.insert(track.Values.end(),weights.begin(),weights.end());}}
+            clip.MorphTracks.push_back(std::move(track));
+        }
+        if (!clip.Tracks.empty() || !clip.MorphTracks.empty()) {model->Animations.push_back(std::move(clip));}
     }}
-    if (!model->Animations.empty()) {model->Warnings.push_back("FBX animation stacks/layers are sampled to local TRS at "+std::to_string(settings.AnimationBakeRate)+" Hz; interpolation between samples is approximate.");}
+    if (!model->Animations.empty()) {model->Warnings.push_back("FBX animation stacks/layers are sampled to local TRS/morph weights at "+std::to_string(settings.AnimationBakeRate)+" Hz; interpolation between samples is approximate.");}
     model->Warnings.push_back("FBX converted to right-handed Y-up meters; Basic base-color/normal materials retained. FBX PBR factors are not mapped; use an explicit instance PBR override.");
     FinishImportedModel(*model);return model;
 }

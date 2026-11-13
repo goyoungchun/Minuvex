@@ -356,6 +356,12 @@ void EditorUI::Inspector() {
             }
             ImGui::Separator();
         } else { ImGui::TextUnformatted("Select an object in Hierarchy."); }
+        if (id && Document.GetScene().Contains(id)) {const auto model=Document.GetScene().GetObject(id).Model;if (model && ImGui::CollapsingHeader("Morph Targets")) {
+            bool found=false;for (std::size_t i=0;i<model->Nodes.size();++i) {const auto& node=model->Nodes[i];if (!node.MeshIndex || model->Meshes[*node.MeshIndex].MorphWeights.empty()) {continue;}found=true;const auto joint=static_cast<JointId>(i);auto weights=Document.GetScene().GetObject(id).Animation.EvaluateMorphWeights(joint);ImGui::PushID(static_cast<int>(i));ImGui::Text("Node %zu: %s",i,node.Name.c_str());bool edited=false;
+                for (std::size_t t=0;t<weights.size();++t) {ImGui::PushID(static_cast<int>(t));const auto& name=model->Meshes[*node.MeshIndex].Primitives[0].MorphTargets[t].Name;edited=ImGui::SliderFloat(name.c_str(),&weights[t],-1,1,"%.3f") || edited;ImGui::PopID();}
+                if (edited) {Report(Document.SetMorphWeights(id,joint,weights));}if (ImGui::Button("Reset morph override")) {Report(Document.ClearMorphWeights(id,joint));}ImGui::PopID();
+            }ImGui::TextUnformatted(found ? "Overrides apply after animation. Reset resumes animated/default weights.":"This model has no morph targets.");
+        }}
         if (ImGui::CollapsingHeader("Camera")) {
             auto camera = Document.GetScene().MainCamera;
             bool changed = VecInput("Eye",camera.Position); changed = VecInput("Target",camera.Target) || changed;

@@ -14,6 +14,7 @@ void Summary(const ModelAsset& model) {
     ImGui::Text("Reduced LOD indices: %zu",info.LodIndices);
     ImGui::Text("Nodes: %zu | Bones: %zu | Skins: %zu | Clips: %zu",info.Nodes,info.Bones,info.Skins,info.Animations);
     ImGui::Text("Geometry: %.2f MiB | Pixels: %.2f MiB | Animation keys: %zu",info.GeometryBytes/1048576.0,info.ImageBytes/1048576.0,info.AnimationSamples);
+    ImGui::Text("Morph targets (per primitive): %zu | Deltas: %.2f MiB",info.MorphTargets,info.MorphBytes/1048576.0);
     ImGui::Text("Bounds: (%.3g, %.3g, %.3g) - (%.3g, %.3g, %.3g)",model.ModelBounds.Min.X,model.ModelBounds.Min.Y,model.ModelBounds.Min.Z,model.ModelBounds.Max.X,model.ModelBounds.Max.Y,model.ModelBounds.Max.Z);
 }
 void Diagnostics(const ModelAsset& model) {

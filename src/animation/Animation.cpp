@@ -97,7 +97,36 @@ void ValidateAnimation(const SkeletonAsset& skeleton, const AnimationClip& clip)
             }
         }
     }
+    std::unordered_set<JointId> morphNodes;
+    for (const auto& track:clip.MorphTracks) {
+        Require(track.Node<skeleton.Joints.size() && morphNodes.insert(track.Node).second && track.TargetCount>0 && track.TargetCount<=MaxMorphTargets,"Invalid/duplicate morph channel.");
+        Require((track.Interpolation==AnimationInterpolation::Linear || track.Interpolation==AnimationInterpolation::Step) && !track.Times.empty() && track.Times.size()<=SIZE_MAX/track.TargetCount && track.Values.size()==track.Times.size()*track.TargetCount,"Invalid morph sample layout.");
+        for (std::size_t i=0;i<track.Times.size();++i) {Require(std::isfinite(track.Times[i]) && track.Times[i]>=0 && track.Times[i]<=clip.Duration && (!i || track.Times[i]>track.Times[i-1]),"Invalid morph key times.");}for (auto weight:track.Values) {Require(std::isfinite(weight) && std::abs(weight)<=100,"Invalid animated morph weight.");}
+    }
 }
+std::uint64_t MorphSignature(const ModelAsset& model) {
+    if (std::none_of(model.Meshes.begin(),model.Meshes.end(),[](const auto& mesh){return !mesh.MorphWeights.empty();})) {return 0;}
+    std::uint64_t hash=14695981039346656037ull;const auto number=[&](std::uint64_t value) {for (int i=0;i<8;++i) {hash^=(value>>(i*8))&255;hash*=1099511628211ull;}};
+    number(model.Meshes.size());for (const auto& mesh:model.Meshes) {number(mesh.MorphWeights.size());for (auto w:mesh.MorphWeights) {number(std::bit_cast<std::uint32_t>(w == 0 ? 0.0f:w));}for (const auto& primitive:mesh.Primitives) {number(primitive.Geometry.Vertices.size());number(primitive.MorphTargets.size());for (const auto& target:primitive.MorphTargets) {number(target.Name.size());for (unsigned char c:target.Name) {number(c);}}}}
+    number(model.Nodes.size());for (const auto& node:model.Nodes) {number(node.Name.size());for (unsigned char c:node.Name) {number(c);}number(node.Parent.value_or(SIZE_MAX));number(node.MeshIndex.value_or(SIZE_MAX));number(node.MorphWeights.size());for (auto w:node.MorphWeights) {number(std::bit_cast<std::uint32_t>(w == 0 ? 0.0f:w));}}return hash;
+}
+std::vector<float> AnimationPlayer::EvaluateMorphClip(JointId node,std::optional<std::size_t> clip,double time) const {
+    Require(model_ && node<model_->Nodes.size() && model_->Nodes[node].MeshIndex,"Morph evaluation requires a mesh node.");const auto& source=model_->Nodes[node];auto weights=source.MorphWeights.empty() ? model_->Meshes.at(*source.MeshIndex).MorphWeights:source.MorphWeights;
+    if (clip) {for (const auto& track:model_->Animations[*clip].MorphTracks) {if (track.Node!=node) {continue;}const auto upper=std::upper_bound(track.Times.begin(),track.Times.end(),time);const auto left=upper==track.Times.begin() ? 0:static_cast<std::size_t>(upper-track.Times.begin()-1),right=std::min(left+1,track.Times.size()-1);const auto t=track.Interpolation==AnimationInterpolation::Step || left==right || time<=track.Times.front() ? 0.0f:static_cast<float>((time-track.Times[left])/(track.Times[right]-track.Times[left]));for (std::size_t i=0;i<weights.size();++i) {weights[i]=std::lerp(track.Values[left*track.TargetCount+i],track.Values[right*track.TargetCount+i],t);}}}
+    return weights;
+}
+std::vector<float> AnimationPlayer::EvaluateMorphBase(JointId node) const {
+    auto weights=EvaluateMorphClip(node,clip_,time_);if (!blend_) {return weights;}auto source=EvaluateMorphClip(node,blend_->SourceClip,blend_->SourceTime);
+    if (!blend_->SourceClip) {const auto found=std::find_if(blend_->SourceMorph.begin(),blend_->SourceMorph.end(),[&](const auto& pose) {return pose.Node==node;});Require(found!=blend_->SourceMorph.end(),"Frozen blend is missing a morph node.");source=found->Weights;}
+    for (std::size_t i=0;i<weights.size();++i) {weights[i]=std::lerp(source[i],weights[i],BlendWeight());}return weights;
+}
+std::vector<float> AnimationPlayer::EvaluateMorphWeights(JointId node) const {
+    auto weights=EvaluateMorphBase(node);const auto found=std::find_if(morphOverrides_.begin(),morphOverrides_.end(),[&](const auto& pose){return pose.Node==node;});if (found!=morphOverrides_.end()) {weights=found->Weights;}ValidateMorphWeights(*model_,node,weights);return weights;
+}
+void AnimationPlayer::SetMorphWeights(JointId node,std::span<const float> weights) {
+    Require(bool(model_),"Bind a model before editing morph weights.");ValidateMorphWeights(*model_,node,weights);auto next=morphOverrides_;auto found=std::find_if(next.begin(),next.end(),[&](const auto& pose){return pose.Node==node;});if (found==next.end()) {next.push_back({node,{weights.begin(),weights.end()}});}else {found->Weights.assign(weights.begin(),weights.end());}morphOverrides_=std::move(next);
+}
+void AnimationPlayer::ClearMorphWeights(JointId node) {const auto defaults=EvaluateMorphClip(node,std::nullopt,0);ValidateMorphWeights(*model_,node,defaults);std::erase_if(morphOverrides_,[&](const auto& pose){return pose.Node==node;});}
 void AnimationPlayer::Bind(ModelHandle model) {
     if (model) {
         ValidateSkeleton(model->Skeleton);
@@ -119,10 +148,12 @@ void AnimationPlayer::Bind(ModelHandle model) {
             }
         }
     }
+    if (model) {ValidateMorphModel(*model);}
+    morphOverrides_.clear();
     model_ = std::move(model); clip_.reset(); time_ = 0; speed_ = 1; loop_ = true; state_ = PlaybackState::Stopped;
     blend_.reset();overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
 }
-bool AnimationPlayer::NeedsEvaluation() const noexcept { return model_ && (clip_.has_value() || !overrides_.Joints.empty() || !model_->Skins.empty()); }
+bool AnimationPlayer::NeedsEvaluation() const noexcept { return model_ && (clip_.has_value() || !overrides_.Joints.empty() || !model_->Skins.empty() || std::any_of(model_->Meshes.begin(),model_->Meshes.end(),[](const auto& mesh){return !mesh.MorphWeights.empty();})); }
 void AnimationPlayer::Rebind(ModelHandle model) {
     Require(bool(model),"Rebind requires a nonempty replacement model.");
     AnimationPlayer next; next.Bind(std::move(model));
@@ -140,6 +171,8 @@ void AnimationPlayer::Rebind(ModelHandle model) {
     }
     if (!overrides_.Joints.empty()) {next.ApplyPose(overrides_);}
     else {next.overrides_.Name = overrides_.Name;}
+    if (!morphOverrides_.empty() || clip_ || blend_) {Require(MorphSignature(*model_)==MorphSignature(*next.model_),"Reimport changed a morph target/default layout in use.");}
+    for (const auto& pose:morphOverrides_) {next.SetMorphWeights(pose.Node,pose.Weights);}
     if (blend_) {
         if (blend_->SourceClip) {const auto source=*blend_->SourceClip;Require(source<next.model_->Animations.size() && next.model_->Animations[source].Name == model_->Animations[source].Name,"Reimport changed the blend source clip identity.");}
         next.RestoreBlend(*blend_);
@@ -161,6 +194,7 @@ void AnimationPlayer::CrossFade(std::size_t clip,double duration) {
     AnimationBlendState state;state.Duration=duration;
     if (!blend_ && clip_ && state_ == PlaybackState::Playing) {state.SourceClip=clip_;state.SourceTime=time_;}
     else {const auto base=EvaluateBase();state.SourcePose.Name="Blend source";state.SourcePose.SkeletonSignature=SkeletonSignature(model_->Skeleton);for (std::size_t i=0;i<base.size();++i) {if (model_->Skeleton.Joints[i].Editable) {state.SourcePose.Joints.push_back({static_cast<JointId>(i),base[i]});}}}
+    if (!state.SourceClip) {for (std::size_t i=0;i<model_->Nodes.size();++i) {const auto& node=model_->Nodes[i];if (node.MeshIndex && !model_->Meshes[*node.MeshIndex].MorphWeights.empty()) {state.SourceMorph.push_back({static_cast<JointId>(i),EvaluateMorphBase(static_cast<JointId>(i))});}}}
     auto next=*this;next.Play(clip);next.RestoreBlend(state);*this=std::move(next);
 }
 void AnimationPlayer::ValidateBlend(const AnimationBlendState& state) const {
@@ -173,6 +207,9 @@ void AnimationPlayer::ValidateBlend(const AnimationBlendState& state) const {
     }else {
         ValidatePose(model_->Skeleton,state.SourcePose);const auto count=std::count_if(model_->Skeleton.Joints.begin(),model_->Skeleton.Joints.end(),[](const auto& joint){return joint.Editable;});
         Require(state.SourceTime == 0 && state.SourcePose.Joints.size() == static_cast<std::size_t>(count),"Frozen blend source requires a complete pose and zero source time.");
+    }
+    if (state.SourceClip) {Require(state.SourceMorph.empty(),"Live source cannot contain a frozen morph pose.");}else {
+        std::size_t expected=0;for (const auto& node:model_->Nodes) {expected+=node.MeshIndex && !model_->Meshes[*node.MeshIndex].MorphWeights.empty();}Require(state.SourceMorph.size()==expected,"Frozen blend requires every morph node.");std::unordered_set<JointId> nodes;for (const auto& pose:state.SourceMorph) {Require(nodes.insert(pose.Node).second,"Duplicate frozen morph node.");ValidateMorphWeights(*model_,pose.Node,pose.Weights);}
     }
     auto source=EvaluateClip(state.SourceClip,state.SourceTime);if (!state.SourceClip) {for (const auto& joint:state.SourcePose.Joints) {source[joint.Joint]=joint.Local;}}
     const auto target=EvaluateClip(clip_,time_);
@@ -215,7 +252,7 @@ void AnimationPlayer::ClearJointOverride(JointId joint) {
     std::erase_if(overrides_.Joints,[&](const auto& p) { return p.Joint == joint; });
 }
 void AnimationPlayer::ClearOverrides() noexcept { overrides_.Joints.clear(); }
-void AnimationPlayer::ResetPose() noexcept { clip_.reset(); time_ = 0; state_ = PlaybackState::Stopped;blend_.reset();ClearOverrides(); }
+void AnimationPlayer::ResetPose() noexcept { clip_.reset(); time_ = 0; state_ = PlaybackState::Stopped;blend_.reset();ClearOverrides();ClearMorphOverrides(); }
 std::vector<Transform> AnimationPlayer::EvaluateClip(std::optional<std::size_t> clip,double time) const {
     Require(bool(model_),"Bind a model before evaluating its pose.");
     std::vector<Transform> local; local.reserve(model_->Skeleton.Joints.size());
@@ -270,7 +307,9 @@ Bounds AnimationPlayer::GetBounds() const {
     for (const auto& part : model_->Parts) {
         const auto matrix = part.Node == NoJoint ? part.Transform : pose.Global.at(part.Node);
         for (const auto& primitive : model_->Meshes.at(part.MeshIndex).Primitives) {
-            for (const auto& vertex : primitive.Geometry.Vertices) {
+            const auto geometry=primitive.MorphTargets.empty() ? MeshData{}:EvaluateMorph(primitive,EvaluateMorphWeights(part.Node));
+            const auto& vertices=primitive.MorphTargets.empty() ? primitive.Geometry.Vertices:geometry.Vertices;
+            for (const auto& vertex : vertices) {
                 const Vec3 p{vertex.Position[0],vertex.Position[1],vertex.Position[2]}; Vec3 point;
                 if (part.SkinIndex) {
                     const auto& skin = model_->Skins.at(*part.SkinIndex);

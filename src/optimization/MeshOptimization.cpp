@@ -17,7 +17,7 @@ MeshOptimization OptimizeMesh(const MeshData& mesh,std::span<const MeshLod> lods
     for (auto& index:remap) {if (index == ~0u) {index=static_cast<unsigned>(used++);}}
     for (std::size_t i=0;i<mesh.Vertices.size();++i) {result.Geometry.Vertices[remap[i]]=mesh.Vertices[i];}
     for (auto& i:indices) {i=remap[i];}for (auto& level:result.Lods) {for (auto& i:level.Indices) {i=remap[i];}}
-    result.CacheMissesAfter=Misses(indices);return result;
+    result.VertexRemap=std::move(remap);result.CacheMissesAfter=Misses(indices);return result;
 }
 std::vector<MeshLod> GenerateMeshLods(const MeshData& mesh,float error) {
     ValidateMesh(mesh);if (!std::isfinite(error) || error<0 || error>1) {throw std::invalid_argument("LOD error must be finite in [0,1].");}

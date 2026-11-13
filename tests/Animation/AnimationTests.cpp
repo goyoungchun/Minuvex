@@ -13,7 +13,7 @@ void MatrixNear(const lv::Mat4& a, const lv::Mat4& b, const char* label) {
 }
 void DataAndPlayer() {
     lv::AssetRegistry registry; auto model = registry.LoadModel(Fixture("AnimatedRibbon.gltf"));
-    Check(model->ImportVersion == 5 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
+    Check(model->ImportVersion == 6 && model->Skins.size() == 1 && model->Animations.size() == 4,"skin and four clips imported");
     Check(model->Skeleton.Joints.size() == 4 && model->Skeleton.Joints[1].IsJoint && model->Skeleton.Joints[2].Parent == 1,"joint mapping includes non-joint ancestors");
     Check(model->Skins[0].Joints == std::vector<lv::JointId>({1,2}) && Near(model->Skins[0].InverseBindMatrices[1].Elements[13],-1),"inverse binds and joint mapping retained");
     Check(model->Parts.size() == 1 && model->Parts[0].SkinIndex == 0 && model->Parts[0].Node == 3,"part keeps skin and node identity");
@@ -125,7 +125,7 @@ void BlendPersistence() {
     Check(bool(doc.PlayAnimation(id,0)) && bool(doc.SeekAnimation(id,.5)),"prepare blend source");Check(bool(doc.CrossFadeAnimation(id,1,1)) && doc.IsDirty(),"Editor cross-fade records an undoable edit");
     Check(bool(doc.Undo()) && !doc.GetScene().GetObject(id).Animation.Blend() && bool(doc.Redo()) && doc.GetScene().GetObject(id).Animation.Blend(),"Undo/Redo restores transition state");
     Check(bool(doc.UpdateAnimations(.25)) && bool(doc.PauseAnimation(id)),"pause blend preview");const auto file=temp.File("Blend.mvxscene.json");Check(bool(doc.Save(file)),"active transition saves");
-    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 7 && bool(loaded.Open(file)),"Scene v7 restores active live-source blend");
+    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 8 && bool(loaded.Open(file)),"Scene v8 restores active live-source blend");
     const auto other=loaded.GetScene().ObjectIds()[0];const auto& restored=loaded.GetScene().GetObject(other).Animation;
     Check(restored.State() == lv::PlaybackState::Paused && restored.Blend()->SourceClip == 0 && restored.Blend()->SourceTime == .75 && restored.Time() == .25 && restored.Blend()->Elapsed == .25,"paused transition clocks and clip identities survive serialization");
     MatrixNear(restored.Evaluate().Global[2],doc.GetScene().GetObject(id).Animation.Evaluate().Global[2],"live blend roundtrip preserves evaluated pose");
@@ -231,8 +231,26 @@ void ImportValidation() {
     auto identity = registry.LoadModel(temp.File("identity.gltf")); Check(Near(identity->Skins[0].InverseBindMatrices[1].Elements[13],0) && Near(identity->ModelBounds.Max.Y,3),"missing inverse binds default to identity");
 }
 }
+void MorphPlayback() {
+    lv::AssetRegistry assets;const auto model=assets.LoadModel(Fixture("MorphRibbon.gltf"));lv::AnimationPlayer player;player.Bind(model);
+    Check(model->Meshes[0].Primitives[0].MorphTargets.size() == 2 && model->Animations[4].MorphTracks.size() == 1,"glTF morph channels and flattened weight animation imported");
+    Check(Near(player.EvaluateMorphWeights(3)[0],.6f) && Near(player.EvaluateMorphWeights(4)[0],.2f),"node defaults override mesh defaults independently on a shared mesh");
+    const auto& primitive=model->Meshes[0].Primitives[0];const std::array<float,2> half{.5f,0};const auto evaluated=lv::EvaluateMorph(primitive,half);
+    Check(Near(evaluated.Vertices[0].Position[0],primitive.Geometry.Vertices[0].Position[0]+.25f) && Near(std::hypot(evaluated.Vertices[0].Normal[0],evaluated.Vertices[0].Normal[2]),1) && evaluated.Vertices[0].Tangent[3] == primitive.Geometry.Vertices[0].Tangent[3],"CPU morph evaluates deltas and normalizes directions while retaining tangent handedness");
+    player.Play(4);player.Seek(.5);Check(Near(player.EvaluateMorphWeights(3)[0],.5f) && Near(player.EvaluateMorphWeights(4)[0],.2f),"LINEAR morph samples affect only the target node");player.Pause();player.Update(1);Check(Near(player.EvaluateMorphWeights(3)[0],.5f),"Pause holds animated morph weights");
+    player.Play(5);player.Seek(.99);Check(player.EvaluateMorphWeights(3)[0] == 0,"STEP morph holds previous sample");player.Seek(1);Check(player.EvaluateMorphWeights(3)[0] == 1,"STEP morph switches at the exact key");
+    const std::array<float,2> manual{-.5f,1.5f};player.SetMorphWeights(3,manual);auto other=player;other.ClearMorphWeights(3);Check(player.EvaluateMorphWeights(3) == std::vector<float>(manual.begin(),manual.end()) && other.EvaluateMorphWeights(3)[0] == 1,"signed/out-of-unit weights are supported with independent copied overrides");
+    const std::array<float,1> wrong{0};Rejects([&]{player.SetMorphWeights(3,wrong);},"wrong target count rejected");const std::array<float,2> bad{NAN,0};Rejects([&]{player.SetMorphWeights(3,bad);},"nonfinite weight rejected");Check(player.MorphOverrides()[0].Weights[0] == -.5f,"failed morph edit preserves previous override");
+    player.ResetPose();Check(Near(player.EvaluateMorphWeights(3)[0],.6f) && player.MorphOverrides().empty(),"ResetPose restores node/mesh default weights");
+    player.Play(4);player.Seek(.5);player.CrossFade(5,1);player.Update(.5);Check(Near(player.EvaluateMorphWeights(3)[0],.5f),"live clip cross-fade blends morph channels");player.CrossFade(0,1);Check(Near(player.EvaluateMorphWeights(3)[0],.5f),"interrupted cross-fade captures current base morph without popping");player.Update(.5);Check(Near(player.EvaluateMorphWeights(3)[0],.55f),"frozen morph source blends to target reference defaults");
+    auto renamed=std::make_shared<lv::ModelAsset>(*model);renamed->Meshes[0].Primitives[0].MorphTargets[0].Name="Renamed";Rejects([&]{player.Rebind(renamed);},"rebind rejects a changed target identity in use");
+    const auto sparse=assets.LoadModel(Fixture("MorphSparse.gltf"));const auto& delta=sparse->Meshes[0].Primitives[0].MorphTargets[0].PositionDeltas;Check(delta[0].X == 0 && delta[1].X == 1 && delta[2].X == 0,"sparse morph deltas retain implicit zeros");
+    lv::ImportSettings limited;limited.MaxMorphTargets=1;ImportRejects([&]{assets.LoadModel(Fixture("MorphRibbon.gltf"),limited);},lv::ImportErrorCode::ResourceLimit,"morph target budget overflow is explicit");
+    const auto fbx=assets.LoadModel(Fixture("MorphProgressive.fbx"));lv::AnimationPlayer fbxPlayer;fbxPlayer.Bind(fbx);const auto node=fbx->Parts[0].Node;
+    Check(fbx->Meshes[0].MorphWeights.size() == 2 && Near(fbxPlayer.EvaluateMorphWeights(node)[0],.5f),"FBX progressive shapes become independent targets with normalized default weights");fbxPlayer.Play(0);fbxPlayer.Seek(.75);const auto weights=fbxPlayer.EvaluateMorphWeights(node);Check(Near(weights[0],.5f) && Near(weights[1],.5f),"FBX progressive animation bake interpolates between shape thresholds");
+}
 int main() {
-    try { DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport(); }
+    try { DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport();MorphPlayback(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

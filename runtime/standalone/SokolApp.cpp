@@ -7,6 +7,7 @@
 #include <sokol_log.h>
 
 #include "RuntimePlatform.h"
+#include "WindowIcon.h"
 
 #if defined(__APPLE__)
 // The stock Sokol macOS loop terminates the process on window close. A
@@ -47,10 +48,15 @@ bool StandaloneApplicationAvailable() noexcept {
 }
 
 void RunStandaloneApplication(const sapp_desc& description) {
+    auto branded = description;
+    if (!branded.icon.sokol_default && !branded.icon.images[0].pixels.ptr) {
+        branded.icon = WindowIcon();
+    }
 #if defined(__APPLE__)
     [MinuvexStandaloneApplication sharedApplication];
 #endif
-    sapp_run(description);
+    SetApplicationIcon();
+    sapp_run(branded);
 #if defined(__APPLE__)
     // stop: returns from NSApp.run without applicationWillTerminate. Perform
     // its Sokol cleanup here, before discarding the native device/window.

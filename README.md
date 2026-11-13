@@ -1,5 +1,9 @@
 # Minuvex
 
+<p align="center">
+  <img src="assets/branding/Minvex_banner_transparent.png" alt="Minvex — Lightweight 3D Graphics Engine" width="760">
+</p>
+
 **Lightweight 3D Graphics Engine**
 
 ### 한국어
@@ -24,6 +28,7 @@ cmake --build --preset windows-release --parallel 4
 ./out/build/windows-release/bin/minuvex_editor.exe
 # 금속/비금속·거칠기 비교 예제
 ./out/build/windows-release/bin/minuvex_rendering_enhancement.exe --pbr
+./out/build/windows-release/bin/minuvex_rendering_enhancement.exe --morph
 ```
 
 ### macOS
@@ -43,7 +48,7 @@ cmake --install out/build/windows-release --config Release --prefix out/sdk-nati
 ```
 
 ```cmake
-find_package(Minuvex 1.11 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minuvex 1.12 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minuvex::viewer)
 ```
@@ -57,10 +62,12 @@ cmake --build build
 
 | 분야 | 현재 지원 기능 |
 |---|---|
-| **Asset** | glTF/GLB, OBJ/MTL, FBX(Static·Skin·Animation Bake), 검사·재임포트·Hot Reload·비동기 로딩 |
+| **Asset** | glTF/GLB, OBJ/MTL, FBX(Static·Skin·Animation·Blend Shape Bake), 검사·재임포트·Hot Reload·비동기 로딩 |
 | **Scene** | 객체 계층·Transform, 모델 인스턴스 공유, Scene 저장·불러오기 |
-| **Mesh** | Static/Skeletal Mesh, GPU Skinning(정점당 최대 4개 영향) |
-| **Material·Lighting** | Base Color·Texture·Normal Map, PBR Metallic/Roughness, Directional/Point/Spot Light, Basic/PCF Shadow, HDR·FXAA |
+| **Mesh** | Static/Skeletal Mesh, GPU Skinning, 정점당 최대 4개 Bone 영향 |
+| **Morph** | Morph Target, GPU Morph, 노드별 독립 Weight, Weight Animation |
+| **Material·Lighting** | Base Color·Texture·Normal Map, Directional/Point/Spot Light, Basic/PCF Shadow, HDR·FXAA |
+| **PBR** | Metallic/Roughness Material·Texture |
 | **Camera** | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking |
 | **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기 |
 | **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Clip Cross-fade, Timeline Scrubbing |
@@ -73,19 +80,11 @@ cmake --build build
 | **SDK** | C++20, CMake 설치·연결, Facade API, Result/Error, 공식 예제, CPU-only 구성 |
 | **Platform** | Windows D3D11, macOS Metal |
 
-**PBR 범위:** 직접광 기반임. Low/Medium 기본 OFF, High ON이며 Custom에서 설정 가능함. IBL·Emissive/Occlusion·Alpha BLEND는 미지원임.
-
-**미지원·후속 개발:** Morph Target, Blend Tree·Additive·Animation Event, PCSS, Python·WebAssembly 바인딩.
-
-**확장 진행:** Phase 1(PBR) 구현·Windows 검증 완료임. Phase 2(Morph) 이후는 후속 개발임.
-
-**검증:** Windows Release 핵심 6종·CPU-only Scene/재질 1종, PBR GPU 단독 15개 검사, SDK ZIP·독립 소비자·공개 헤더 18개 통과함. macOS 실기기는 미검증임.
-
 ## 최소 사양
 
 | 항목 | 사양 |
 |---|---|
 | **Windows** | x64, DirectX 11 Feature Level 11_0 이상 |
-| **macOS** | Metal 지원 GPU(최소 OS·장치 및 실기기 미검증) |
-| **RAM** | 4GB 목표, 실측 최소 용량 미확정 |
+| **macOS** | Metal 지원 GPU |
+| **RAM** | 4GB 목표 |
 | **개발 도구** | CMake 3.24+, C++20 컴파일러, Ninja, 플랫폼 SDK |

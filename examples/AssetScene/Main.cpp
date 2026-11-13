@@ -2,6 +2,7 @@
 #include <minuvex/Scene.h>
 
 #include "renderer/SceneRenderer.h"
+#include "RuntimePlatform.h"
 
 #include <sokol_gfx.h>
 #include <sokol_app.h>
@@ -156,6 +157,6 @@ int main(int argc, char* argv[]) {
     window.init_cb = Initialize; window.frame_cb = Frame; window.cleanup_cb = Cleanup; window.event_cb = Event;
     window.width = 1280; window.height = 720; window.sample_count = 1; window.high_dpi = true; window.srgb = true;
     window.window_title = "Minuvex | Phase 2 - Shared Asset & Scene"; window.logger.func = Log;
-    sapp_run(window);
+    lv::detail::RunStandaloneApplication(window);
     return app.Failed || (app.Smoke && app.Frames < 8) ? 1 : 0;
 }

@@ -45,6 +45,8 @@ public:
     Result<void> SetVisible(ObjectId object, bool visible);
     Result<void> SetMaterial(ObjectId object, std::size_t index, const MaterialAsset& material);
     Result<void> ResetMaterial(ObjectId object, std::size_t index);
+    Result<void> SetMorphWeights(ObjectId object, JointId node, std::span<const float> weights);
+    Result<void> ClearMorphWeights(ObjectId object, JointId node);
     Result<void> SetCamera(const Camera& camera);
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> SetLocalLights(std::vector<PointLight> points,std::vector<SpotLight> spots);

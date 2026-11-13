@@ -8,6 +8,7 @@ struct MeshOptimization {
     MeshData Geometry;
     std::vector<MeshLod> Lods;
     std::uint64_t CacheMissesBefore=0,CacheMissesAfter=0; // Simulated 16-entry LRU, not hardware measurements.
+    std::vector<std::uint32_t> VertexRemap; // Source vertex -> optimized vertex, including unused vertices.
 };
 // Reorders triangles/vertices without changing attributes or source data. Retains unused vertices.
 MeshOptimization OptimizeMesh(const MeshData& mesh,std::span<const MeshLod> lods={});

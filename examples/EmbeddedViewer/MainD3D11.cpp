@@ -101,7 +101,7 @@ struct Application {
     void Initialize(const std::filesystem::path& model) {
         // The Host controls DPI policy; texture/viewport dimensions are physical client pixels.
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        WNDCLASSW wc{};wc.lpfnWndProc=Events;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"MinuvexNativeHost";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);
+        WNDCLASSW wc{};wc.lpfnWndProc=Events;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"MinuvexNativeHost";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(wc.hInstance,MAKEINTRESOURCEW(1));RegisterClassW(&wc);
         RECT bounds{0,0,800,600};AdjustWindowRect(&bounds,WS_OVERLAPPEDWINDOW,FALSE);
         Window=CreateWindowExW(0,wc.lpszClassName,L"Minuvex Embedded Viewer - native D3D11 Host",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,nullptr,nullptr,wc.hInstance,this);Require(Window != nullptr,"Cannot create Host window.");
         RECT client{};GetClientRect(Window,&client);PendingWidth=client.right;PendingHeight=client.bottom;

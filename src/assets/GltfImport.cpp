@@ -171,9 +171,9 @@ const cgltf_accessor* Attribute(const cgltf_primitive& primitive, cgltf_attribut
     return result;
 }
 
-MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
+MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive,std::vector<MorphTarget>& morphs) {
     if (primitive.type != cgltf_primitive_type_triangles) { Unsupported("Phase 2 supports TRIANGLES primitives only."); }
-    if (primitive.has_draco_mesh_compression || primitive.targets_count) { Unsupported("Draco compression and morph targets are not supported in Phase 2."); }
+    if (primitive.has_draco_mesh_compression) {Unsupported("Draco compression is not supported.");}if (primitive.targets_count>context.Model.Settings.MaxMorphTargets) {Limit("Morph target count exceeds MaxMorphTargets (at most 8).");}
     const auto* position = Attribute(primitive, cgltf_attribute_type_position);
     const auto* normal = Attribute(primitive, cgltf_attribute_type_normal);
     const auto* tangent = Attribute(primitive, cgltf_attribute_type_tangent);
@@ -262,6 +262,15 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
     if (primitive.material && (primitive.material->pbr_metallic_roughness.base_color_texture.texture || primitive.material->normal_texture.texture || primitive.material->pbr_metallic_roughness.metallic_roughness_texture.texture) && !uv) {
         Invalid("Textured primitive requires TEXCOORD_0.");
     }
+    for (std::size_t i=0;i<primitive.targets_count;++i) {
+        const auto& source=primitive.targets[i];MorphTarget target;target.Name="Target "+std::to_string(i);if (!source.attributes_count) {Invalid("Morph target has no attributes.");}
+        for (std::size_t k=0;k<source.attributes_count;++k) {const auto& attribute=source.attributes[k];const auto* accessor=attribute.data;std::vector<Vec3>* values=nullptr;
+            if (attribute.index!=0) {Unsupported("Morph attribute sets other than zero are not supported.");}
+            if (attribute.type==cgltf_attribute_type_position) {values=&target.PositionDeltas;}else if (attribute.type==cgltf_attribute_type_normal && normal) {values=&target.NormalDeltas;}else if (attribute.type==cgltf_attribute_type_tangent && tangent) {values=&target.TangentDeltas;}else {Invalid("Morph attribute requires a matching POSITION/NORMAL/TANGENT base channel.");}
+            if (!values->empty() || !accessor || accessor->count!=count || accessor->type!=cgltf_type_vec3 || accessor->component_type!=cgltf_component_type_r_32f || accessor->normalized) {Invalid("Morph deltas require matching float VEC3 accessors.");}
+            context.Reserve(count*sizeof(Vec3));values->resize(count);for (std::size_t v=0;v<count;++v) {float delta[3];if (!cgltf_accessor_read_float(accessor,v,delta,3)) {Invalid("Cannot decode morph delta.");}for (auto x:delta) {if (!std::isfinite(x)) {Invalid("Nonfinite morph delta.");}}(*values)[v]={delta[0],delta[1],delta[2]};}
+        }morphs.push_back(std::move(target));
+    }
     if (!normal) {
         if (!context.Model.Settings.GenerateMissingNormals) { Invalid("Mesh has no NORMAL; enable GenerateMissingNormals."); }
         if (indexCount > context.Model.Settings.MaxVertices - context.Vertices) { Limit("Generated flat normals exceed MaxVertices."); }
@@ -281,6 +290,7 @@ MeshData ImportGeometry(Context& context, const cgltf_primitive& primitive) {
             a.Normal = b.Normal = c.Normal = {static_cast<float>(x/length), static_cast<float>(y/length), static_cast<float>(z/length)};
             flat.insert(flat.end(), {a, b, c});
         }
+        for (auto& target:morphs) {for (auto* values:{&target.PositionDeltas,&target.NormalDeltas,&target.TangentDeltas}) {if (values->empty()) {continue;}context.Reserve(indexCount*sizeof(Vec3));std::vector<Vec3> expanded;expanded.reserve(indexCount);for (auto index:mesh.Indices) {expanded.push_back((*values)[index]);}*values=std::move(expanded);}}
         mesh.Vertices = std::move(flat);
         std::iota(mesh.Indices.begin(), mesh.Indices.end(), 0u);
     }
@@ -469,6 +479,8 @@ void ImportNodes(Context& context, const cgltf_data& data) {
         for (std::size_t k = source.children_count; k > 0; --k) { stack.push_back({cgltf_node_index(&data, source.children[k - 1]), world}); }
     }
     if (!hasBounds) { Invalid("Selected glTF scene contains no renderable geometry."); }
+    for (std::size_t i=0;i<data.nodes_count;++i) {const auto& source=data.nodes[i];if (source.weights_count) {context.Reserve(source.weights_count*sizeof(float));model.Nodes[i].MorphWeights.assign(source.weights,source.weights+source.weights_count);try {ValidateMorphWeights(model,static_cast<JointId>(i),model.Nodes[i].MorphWeights);}catch (const std::invalid_argument& error) {Invalid(error.what());}}}
+
 }
 
 void ImportRig(Context& context, const cgltf_data& data) {
@@ -509,13 +521,21 @@ void ImportRig(Context& context, const cgltf_data& data) {
     for (std::size_t i=0;model.Settings.ImportAnimations && i<data.animations_count;++i) {
         const auto& source = data.animations[i]; AnimationClip clip;
         clip.Name = source.name ? source.name : "Animation " + std::to_string(i);
-        if (source.channels_count > model.Nodes.size()*3) { Limit("Animation exceeds the per-node track limit."); }
+        if (source.channels_count > model.Nodes.size()*4) { Limit("Animation exceeds the per-node track limit."); }
         for (std::size_t k=0;k<source.channels_count;++k) {
             const auto& channel = source.channels[k]; const auto* sampler = channel.sampler;
             if (!channel.target_node) { Invalid("Animation channel has no target node."); }
             if (!sampler || !sampler->input || !sampler->output) { Invalid("Animation channel has an incomplete sampler."); }
             if (sampler->interpolation != cgltf_interpolation_type_linear && sampler->interpolation != cgltf_interpolation_type_step) { Unsupported("CUBICSPLINE animation interpolation is deferred; use STEP or LINEAR."); }
-            if (channel.target_path == cgltf_animation_path_type_weights) { Unsupported("Morph-weight animation is not supported."); }
+            if (channel.target_path == cgltf_animation_path_type_weights) {
+                const auto node=static_cast<JointId>(cgltf_node_index(&data,channel.target_node));if (!model.Nodes[node].MeshIndex) {Invalid("Morph animation requires a mesh node.");}const auto width=model.Meshes.at(*model.Nodes[node].MeshIndex).MorphWeights.size();const auto& input=*sampler->input;const auto& output=*sampler->output;
+                if (!width || input.type!=cgltf_type_scalar || input.component_type!=cgltf_component_type_r_32f || input.normalized || !input.count || output.type!=cgltf_type_scalar || output.component_type!=cgltf_component_type_r_32f || output.normalized) {Invalid("Morph animation requires float times and flattened scalar weights.");}
+                if (input.count>model.Settings.MaxAnimationSamples/width) {Limit("Morph animation exceeds MaxAnimationSamples.");}if (output.count!=input.count*width) {Invalid("Morph scalar weight sample count differs from target count.");}
+                context.Reserve(input.count*(width+1)*sizeof(float));MorphTrack track;track.Node=node;track.TargetCount=width;track.Interpolation=sampler->interpolation==cgltf_interpolation_type_step ? AnimationInterpolation::Step:AnimationInterpolation::Linear;track.Times.resize(input.count);track.Values.resize(output.count);
+                for (std::size_t key=0;key<input.count;++key) {if (!cgltf_accessor_read_float(&input,key,&track.Times[key],1)) {Invalid("Cannot decode morph times.");}}
+                for (std::size_t key=0;key<output.count;++key) {if (!cgltf_accessor_read_float(&output,key,&track.Values[key],1)) {Invalid("Cannot decode morph weights.");}}
+                clip.Duration=std::max(clip.Duration,double(track.Times.back()));clip.MorphTracks.push_back(std::move(track));continue;
+            }
             if (channel.target_node->has_matrix) { Invalid("glTF animated nodes must use TRS, not matrix."); }
             AnimationTrack track;
             track.Joint = static_cast<JointId>(cgltf_node_index(&data,channel.target_node));
@@ -587,14 +607,16 @@ std::shared_ptr<ModelAsset> ImportGltf(const std::filesystem::path& path, const 
         if (sourceMesh.name) { mesh.Name = sourceMesh.name; }
         for (std::size_t k = 0; k < sourceMesh.primitives_count; ++k) {
             const auto& primitive = sourceMesh.primitives[k];
-            mesh.Primitives.push_back({ImportGeometry(context, primitive), settings.ImportMaterials ? (primitive.material ? cgltf_material_index(data.get(), primitive.material) : data->materials_count):0,Attribute(primitive,cgltf_attribute_type_joints) != nullptr});
+            MeshPrimitive converted;converted.Geometry=ImportGeometry(context,primitive,converted.MorphTargets);converted.MaterialIndex=settings.ImportMaterials ? (primitive.material ? cgltf_material_index(data.get(),primitive.material):data->materials_count):0;converted.HasSkinning=Attribute(primitive,cgltf_attribute_type_joints)!=nullptr;
+            if (sourceMesh.target_names_count && sourceMesh.target_names_count!=converted.MorphTargets.size()) {Invalid("Morph target names/count mismatch.");}for (std::size_t t=0;t<sourceMesh.target_names_count;++t) {converted.MorphTargets[t].Name=sourceMesh.target_names[t];}mesh.Primitives.push_back(std::move(converted));
         }
         if (mesh.Primitives.empty()) { Invalid("Mesh has no primitives."); }
+        const auto targets=mesh.Primitives.front().MorphTargets.size();if (sourceMesh.weights_count && sourceMesh.weights_count!=targets) {Invalid("Mesh morph defaults/count mismatch.");}context.Reserve(targets*sizeof(float));mesh.MorphWeights.assign(targets,0);if (sourceMesh.weights_count) {std::copy_n(sourceMesh.weights,targets,mesh.MorphWeights.begin());}
         model->Meshes.push_back(std::move(mesh));
     }
     ImportNodes(context, *data);
     ImportRig(context,*data);
-    if (!model->Skins.empty()) {
+    if (!model->Skins.empty() || std::any_of(model->Meshes.begin(),model->Meshes.end(),[](const auto& m){return !m.MorphWeights.empty();})) {
         try { AnimationPlayer reference; reference.Bind(model); model->ModelBounds = reference.GetBounds(); }
         catch (const std::invalid_argument& e) { Invalid(e.what()); }
     }

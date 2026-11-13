@@ -16,7 +16,7 @@ void TestImports() {
     Check(gltf->Id != 0 && gltf->Id != glb->Id, "assets have unique nonzero IDs");
     Check(registry.Find(gltf->Id) == gltf && !registry.Find(0), "registry lookup and invalid asset ID");
     Check(registry.LoadModel(Fixture("../Fixtures/SharedBox.gltf")) == gltf, "canonical path load reuses the same CPU asset");
-    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 5, "registry retains import metadata");
+    Check(gltf->Settings == lv::ImportSettings{} && gltf->ImportVersion == 6, "registry retains import metadata");
     Check(gltf->ContentHash && gltf->SourcePath.is_absolute(), "asset has a content hash and canonical source");
     Check(gltf->Dependencies.size() == 1 && external->Dependencies.size() == 3, "embedded and external dependency lists");
     for (const auto& model : {gltf, glb, external}) {
@@ -210,10 +210,18 @@ void TestPbr() {
     json["materials"][0]["pbrMetallicRoughness"]["roughnessFactor"]=1.2;Write(temp.File("InvalidPbr.gltf"),json.dump());ImportRejects([&]{assets.LoadModel(temp.File("InvalidPbr.gltf"));},lv::ImportErrorCode::InvalidData,"out-of-range imported roughness rejected");
     json["materials"][0]["pbrMetallicRoughness"]["roughnessFactor"]=.25;json["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"]["texCoord"]=1;Write(temp.File("InvalidUv.gltf"),json.dump());ImportRejects([&]{assets.LoadModel(temp.File("InvalidUv.gltf"));},lv::ImportErrorCode::UnsupportedFeature,"unsupported MR UV set rejected");
 }
+void TestMorphInputs() {
+    TemporaryDirectory temp;lv::AssetRegistry assets;auto json=nlohmann::json::parse(Read(Fixture("MorphSparse.gltf")));json["meshes"][0]["primitives"][0]["attributes"].erase("NORMAL");const auto path=temp.File("FlatMorph.gltf");Write(path,json.dump());const auto flat=assets.LoadModel(path),original=assets.LoadModel(Fixture("MorphSparse.gltf"));const auto& primitive=flat->Meshes[0].Primitives[0];const auto point=original->Meshes[0].Primitives[0].Geometry.Vertices[1].Position;bool correct=primitive.Geometry.Vertices.size() == primitive.Geometry.Indices.size();
+    for (std::size_t i=0;i<primitive.Geometry.Vertices.size();++i) {const auto& p=primitive.Geometry.Vertices[i].Position;const bool matching=p == point;correct &= primitive.MorphTargets[0].PositionDeltas[i].X == (matching ? 1.0f:0.0f);}
+    Check(correct,"generated flat normals expand sparse morph deltas with the original vertex indices");
+    json=nlohmann::json::parse(Read(Fixture("MorphRibbon.gltf")));auto& mesh=json["meshes"][0];const auto target=mesh["primitives"][0]["targets"][0];mesh["primitives"][0]["targets"]=nlohmann::json::array();mesh["weights"]=nlohmann::json::array();mesh["extras"]["targetNames"]=nlohmann::json::array();for (int i=0;i<9;++i) {mesh["primitives"][0]["targets"].push_back(target);mesh["weights"].push_back(0);mesh["extras"]["targetNames"].push_back("Target "+std::to_string(i));}json["nodes"][3]["weights"]=mesh["weights"];json.erase("animations");Write(temp.File("TooManyMorphs.gltf"),json.dump());ImportRejects([&]{assets.LoadModel(temp.File("TooManyMorphs.gltf"));},lv::ImportErrorCode::ResourceLimit,"GPU target limit overflow is rejected rather than truncated");
+    json=nlohmann::json::parse(Read(Fixture("MorphRibbon.gltf")));json["animations"]=nlohmann::json::array({json["animations"][4]});Write(temp.File("MorphSampleLimit.gltf"),json.dump());lv::ImportSettings limited;limited.MaxAnimationSamples=5;ImportRejects([&]{assets.LoadModel(temp.File("MorphSampleLimit.gltf"),limited);},lv::ImportErrorCode::ResourceLimit,"morph scalar sample budget reports ResourceLimit");
+    auto model=std::make_shared<lv::ModelAsset>(*original);model->Meshes[0].Primitives[0].MorphTargets[0].NormalDeltas={{0,0,1}};Rejects([&]{lv::ValidateModel(*model);},"mismatched morph channel length rejected");
+}
 int main(int argc,char** argv) {
     try {
         if (argc>1 && std::string_view(argv[1]) == "--compatibility") {TestCompatibility();return Finish();}
-        TestImports();TestFailuresAndLimits();TestLargeIndices();TestCompatibility();TestPbr();
+        TestImports();TestFailuresAndLimits();TestLargeIndices();TestCompatibility();TestPbr();TestMorphInputs();
         {
             TemporaryDirectory temp;const auto file=temp.File("reimport.gltf");const auto source=Read(Fixture("SharedBox.gltf"));Write(file,source);
             lv::AssetRegistry registry;const auto old=registry.LoadModel(file);Write(file,source+"\n");const auto fresh=registry.ReimportModel(old->Id);

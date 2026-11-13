@@ -2,6 +2,7 @@
 #include <minuvex/Mesh.h>
 
 #include "renderer/MeshRenderer.h"
+#include "RuntimePlatform.h"
 
 #include <sokol_app.h>
 #include <sokol_glue.h>
@@ -146,6 +147,6 @@ int main(int argc, char* argv[]) {
     window.high_dpi = true;
     window.window_title = "Minuvex | Phase 1 - Foundation Mesh";
     window.logger.func = Log;
-    sapp_run(window);
+    lv::detail::RunStandaloneApplication(window);
     return (app.Failed || (app.SmokeTest && app.Frames < 8)) ? 1 : 0;
 }

@@ -1,5 +1,6 @@
 add_executable(minuvex_foundation Main.cpp)
 target_link_libraries(minuvex_foundation PRIVATE minuvex::renderer minuvex_sokol_app)
 target_include_directories(minuvex_foundation PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(minuvex_foundation PRIVATE "${PROJECT_SOURCE_DIR}/runtime/standalone")
 set_target_properties(minuvex_foundation PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 minuvex_configure_target(minuvex_foundation)

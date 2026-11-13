@@ -29,6 +29,16 @@ layout(binding=2) uniform skin_params {
 in uvec4 joint_indices;
 in vec4 joint_weights;
 @end
+@block morph_common
+struct morph_delta {vec4 position;vec4 normal;vec4 tangent;};
+layout(binding=4) readonly buffer morph_data {morph_delta deltas[];};
+layout(binding=3) uniform morph_params {vec4 morph_meta;vec4 morph_weights0;vec4 morph_weights1;};
+void apply_morph(inout vec4 p,inout vec3 n,inout vec3 t) {
+    vec3 original_n=n,original_t=t;bool morph_active=false;
+    for (int i=0;i<8;++i) {if (float(i)<morph_meta.y) {vec4 weights=i<4 ? morph_weights0:morph_weights1;int component=i&3;float w=component==0 ? weights.x:component==1 ? weights.y:component==2 ? weights.z:weights.w;morph_active=morph_active || w!=0.0;int index=i*int(morph_meta.x)+gl_VertexIndex;p.xyz+=deltas[index].position.xyz*w;n+=deltas[index].normal.xyz*w;t+=deltas[index].tangent.xyz*w;}}
+    if (morph_active) {n=dot(n,n)>1e-16 ? normalize(n):original_n;t=dot(t,t)>1e-16 ? normalize(t):original_t;}
+}
+@end
 @vs mesh_vs
 @include_block vertex_common
 void main() {
@@ -50,6 +60,38 @@ void main() {
         p=skin*p;mat3 linear=mat3(skin);
         vec3 a=cross(linear[1],linear[2]);vec3 b=cross(linear[2],linear[0]);vec3 c=cross(linear[0],linear[1]);float d=dot(linear[0],a);
         n=abs(d) > 0.00000001 ? (mat3(a,b,c)*normal)/d:linear*normal;
+        if (dot(n,n) < 0.00000001) {n=normal;}t=linear*t;handed*=sign(d);
+    }
+    gl_Position=mvp*p;world_position=(model_matrix*p).xyz;world_normal=mat3(normal_matrix)*n;
+    world_tangent=vec4(mat3(model_matrix)*t,handed*sign(determinant(mat3(model_matrix))));
+    shadow_position=shadow_matrix*p;color=color0;uv=texcoord0;
+    bone_weight=skin_options.y < 0.0 ? max(max(joint_weights.x,joint_weights.y),max(joint_weights.z,joint_weights.w)):dot(joint_weights,vec4(equal(joint_indices,uvec4(uint(skin_options.y)))));
+    if (skin_options.x < .5) {bone_weight=0.0;}
+}
+@end
+@vs morph_mesh_vs
+@include_block vertex_common
+@include_block morph_common
+void main() {
+    vec4 p=vec4(position,1.0);vec3 n=normal,t=tangent.xyz;apply_morph(p,n,t);
+    gl_Position=mvp*p;
+    world_position=(model_matrix*p).xyz;
+    world_normal=mat3(normal_matrix)*n;
+    world_tangent=vec4(mat3(model_matrix)*t,tangent.w*sign(determinant(mat3(model_matrix))));
+    shadow_position=shadow_matrix*p;color=color0;uv=texcoord0;bone_weight=0.0;
+}
+@end
+@vs morph_skin_vs
+@include_block vertex_common
+@include_block skin_common
+@include_block morph_common
+void main() {
+    vec4 p=vec4(position,1.0);vec3 n=normal;vec3 t=tangent.xyz;float handed=tangent.w;apply_morph(p,n,t);
+    if (skin_options.x > 0.5) {
+        mat4 skin=joint_weights.x*joint_matrices[joint_indices.x]+joint_weights.y*joint_matrices[joint_indices.y]+joint_weights.z*joint_matrices[joint_indices.z]+joint_weights.w*joint_matrices[joint_indices.w];
+        p=skin*p;mat3 linear=mat3(skin);
+        vec3 a=cross(linear[1],linear[2]);vec3 b=cross(linear[2],linear[0]);vec3 c=cross(linear[0],linear[1]);float d=dot(linear[0],a);
+        n=abs(d) > 0.00000001 ? (mat3(a,b,c)*n)/d:linear*n;
         if (dot(n,n) < 0.00000001) {n=normal;}t=linear*t;handed*=sign(d);
     }
     gl_Position=mvp*p;world_position=(model_matrix*p).xyz;world_normal=mat3(normal_matrix)*n;
@@ -183,6 +225,8 @@ void main() {
 @end
 @program mesh mesh_vs mesh_fs
 @program skin skin_vs mesh_fs
+@program morph_mesh morph_mesh_vs mesh_fs
+@program morph_skin morph_skin_vs mesh_fs
 @program mesh_instances instance_vs mesh_fs
 
 @vs shadow_vs
@@ -219,3 +263,24 @@ void main() {if (shadow_mask.x >= 0.0 && texture(sampler2D(mask_texture,mask_sam
 @program shadow_mesh shadow_vs shadow_fs
 @program shadow_skin shadow_skin_vs shadow_fs
 @program shadow_instances shadow_instance_vs shadow_fs
+
+@vs morph_shadow_vs
+@include_block morph_common
+layout(binding=0) uniform shadow_params {mat4 light_mvp;};
+in vec3 position;in vec4 color0;in vec2 texcoord0;
+out vec2 shadow_uv;out float shadow_alpha;
+void main() {vec4 p=vec4(position,1);vec3 n=vec3(0,0,1),t=vec3(1,0,0);apply_morph(p,n,t);gl_Position=light_mvp*p;shadow_uv=texcoord0;shadow_alpha=color0.a;}
+@end
+@vs morph_shadow_skin_vs
+layout(binding=0) uniform shadow_params {mat4 light_mvp;};
+@include_block skin_common
+@include_block morph_common
+in vec3 position;in vec4 color0;in vec2 texcoord0;
+out vec2 shadow_uv;out float shadow_alpha;
+void main() {
+    vec4 p=vec4(position,1.0);vec3 n=vec3(0,0,1),t=vec3(1,0,0);apply_morph(p,n,t);if (skin_options.x > .5) {p=(joint_weights.x*joint_matrices[joint_indices.x]+joint_weights.y*joint_matrices[joint_indices.y]+joint_weights.z*joint_matrices[joint_indices.z]+joint_weights.w*joint_matrices[joint_indices.w])*p;}
+    gl_Position=light_mvp*p;shadow_uv=texcoord0;shadow_alpha=color0.a;
+}
+@end
+@program morph_shadow_mesh morph_shadow_vs shadow_fs
+@program morph_shadow_skin morph_shadow_skin_vs shadow_fs

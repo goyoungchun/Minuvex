@@ -17,7 +17,40 @@ AssetInspection InspectModel(const ModelAsset& model) {
     for (const auto& image:model.Images) {info.ImageBytes+=image.Rgba.size();}
     for (const auto& clip:model.Animations) {for (const auto& track:clip.Tracks) {info.AnimationSamples+=track.Times.size();}}
     for (const auto& mesh:model.Meshes) {for (const auto& p:mesh.Primitives) {for (const auto& lod:p.Lods) {info.LodIndices+=lod.Indices.size();}}}
-    info.GeometryBytes=info.Vertices*sizeof(Vertex)+(info.Indices+info.LodIndices)*sizeof(std::uint32_t);return info;
+    for (const auto& mesh:model.Meshes) {for (const auto& primitive:mesh.Primitives) {info.MorphTargets+=primitive.MorphTargets.size();for (const auto& target:primitive.MorphTargets) {info.MorphBytes+=(target.PositionDeltas.size()+target.NormalDeltas.size()+target.TangentDeltas.size())*sizeof(Vec3);}}}
+    for (const auto& clip:model.Animations) {for (const auto& track:clip.MorphTracks) {info.AnimationSamples+=track.Values.size();}}
+    info.GeometryBytes=info.MorphBytes+info.Vertices*sizeof(Vertex)+(info.Indices+info.LodIndices)*sizeof(std::uint32_t);return info;
+}
+void ValidateMorphWeights(const ModelAsset& model,JointId node,std::span<const float> weights) {
+    if (node>=model.Nodes.size() || !model.Nodes[node].MeshIndex || *model.Nodes[node].MeshIndex>=model.Meshes.size()) {throw std::invalid_argument("Morph weights require a mesh node.");}
+    const auto& mesh=model.Meshes.at(*model.Nodes[node].MeshIndex);
+    if (mesh.MorphWeights.empty() || weights.size()!=mesh.MorphWeights.size()) {throw std::invalid_argument("Morph weight count does not match the node targets.");}
+    for (auto weight:weights) {if (!std::isfinite(weight) || std::abs(weight)>100) {throw std::invalid_argument("Morph weights must be finite and in [-100,100].");}}
+}
+void ValidateMorphModel(const ModelAsset& model) {
+    const auto require=[](bool ok,const char* message) {if (!ok) {throw std::invalid_argument(message);}};
+    for (const auto& mesh:model.Meshes) {
+        const auto count=mesh.MorphWeights.size();require(!mesh.Primitives.empty(),"Empty mesh.");require(count<=model.Settings.MaxMorphTargets && count<=MaxMorphTargets,"Morph target limit exceeded.");
+        for (auto weight:mesh.MorphWeights) {require(std::isfinite(weight) && std::abs(weight)<=100,"Invalid default morph weight.");}
+        for (const auto& primitive:mesh.Primitives) {
+            require(primitive.MorphTargets.size()==count && (!count || primitive.Lods.empty()),"Morph primitives require matching targets and no reduced LOD.");
+            for (std::size_t i=0;i<count;++i) {const auto& target=primitive.MorphTargets[i];require(target.Name==mesh.Primitives.front().MorphTargets[i].Name,"Morph target names/order differ between primitives.");
+                for (const auto* channel:{&target.PositionDeltas,&target.NormalDeltas,&target.TangentDeltas}) {require(channel->empty() || channel->size()==primitive.Geometry.Vertices.size(),"Morph delta count differs from base vertices.");for (const auto& v:*channel) {require(std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z),"Nonfinite morph delta.");}}
+            }
+        }
+    }
+    for (std::size_t i=0;i<model.Nodes.size();++i) {const auto& node=model.Nodes[i];require(!node.MeshIndex || *node.MeshIndex<model.Meshes.size(),"Invalid morph node mesh index.");if (!node.MorphWeights.empty()) {ValidateMorphWeights(model,static_cast<JointId>(i),node.MorphWeights);}}
+    for (const auto& part:model.Parts) {require(part.MeshIndex<model.Meshes.size(),"Invalid part mesh.");if (!model.Meshes.at(part.MeshIndex).MorphWeights.empty()) {require(part.Node<model.Nodes.size() && model.Nodes[part.Node].MeshIndex==part.MeshIndex,"Morph parts require an owning mesh node.");}}
+    for (const auto& clip:model.Animations) {for (const auto& track:clip.MorphTracks) {require(track.Node<model.Nodes.size() && model.Nodes[track.Node].MeshIndex && track.TargetCount==model.Meshes.at(*model.Nodes[track.Node].MeshIndex).MorphWeights.size(),"Morph animation target layout changed.");}}
+}
+MeshData EvaluateMorph(const MeshPrimitive& primitive,std::span<const float> weights) {
+    if (weights.size()!=primitive.MorphTargets.size()) {throw std::invalid_argument("Morph target/weight count mismatch.");}auto result=primitive.Geometry;bool active=false;
+    for (auto weight:weights) {if (!std::isfinite(weight) || std::abs(weight)>100) {throw std::invalid_argument("Invalid morph weight.");}active|=weight!=0;}if (!active) {return result;}
+    for (std::size_t t=0;t<weights.size();++t) {const auto& target=primitive.MorphTargets[t];for (const auto* delta:{&target.PositionDeltas,&target.NormalDeltas,&target.TangentDeltas}) {if (!delta->empty() && delta->size()!=result.Vertices.size()) {throw std::invalid_argument("Morph delta count mismatch.");}}}
+    for (std::size_t i=0;i<result.Vertices.size();++i) {auto& v=result.Vertices[i];for (std::size_t t=0;t<weights.size();++t) {const auto& target=primitive.MorphTargets[t];const auto add=[&](auto& out,const auto& values) {if (!values.empty()) {out[0]+=weights[t]*values[i].X;out[1]+=weights[t]*values[i].Y;out[2]+=weights[t]*values[i].Z;}};add(v.Position,target.PositionDeltas);add(v.Normal,target.NormalDeltas);add(v.Tangent,target.TangentDeltas);}
+        const auto normalize=[](auto& v,const auto& fallback) {const double length=std::hypot(double(v[0]),double(v[1]),double(v[2]));if (!std::isfinite(length)) {throw std::invalid_argument("Morphed direction exceeds numeric range.");}if (length>1e-8) {for (int k=0;k<3;++k) {v[k]=static_cast<float>(v[k]/length);}}else {for (int k=0;k<3;++k) {v[k]=fallback[k];}}};normalize(v.Normal,primitive.Geometry.Vertices[i].Normal);if (v.Tangent[3]!=0) {normalize(v.Tangent,primitive.Geometry.Vertices[i].Tangent);}
+        for (auto value:v.Position) {if (!std::isfinite(value)) {throw std::invalid_argument("Morphed position exceeds numeric range.");}}
+    }return result;
 }
 void ValidateMaterial(const MaterialAsset& m,const ModelAsset& model) {
     const auto require=[](bool ok,const char* message) {if (!ok) {throw std::invalid_argument(message);}};
@@ -28,7 +61,7 @@ void ValidateMaterial(const MaterialAsset& m,const ModelAsset& model) {
     for (auto texture:{m.BaseColorTexture,m.NormalTexture,m.MetallicRoughnessTexture}) {if (texture) {require(*texture<model.Textures.size(),"Invalid material texture index.");const auto image=model.Textures[*texture].ImageIndex;require(image<model.Images.size() && !model.Images[image].Rgba.empty(),"Material references an undecoded image.");}}
 }
 void ValidateModel(const ModelAsset& model) {
-    detail::ValidateImportSettings(model.Settings);
+    detail::ValidateImportSettings(model.Settings);ValidateMorphModel(model);
     const auto require=[](bool valid,const char* message) {if (!valid) {throw std::invalid_argument(message);}};
     const auto info=InspectModel(model);const auto& settings=model.Settings;
     if (info.Vertices>settings.MaxVertices || info.Indices>settings.MaxIndices || info.Nodes>settings.MaxNodes || info.AnimationSamples>settings.MaxAnimationSamples || info.GeometryBytes>settings.MaxResourceBytes || info.ImageBytes>settings.MaxResourceBytes-info.GeometryBytes) {detail::ImportLimit("Converted model exceeds its import budget.");}
@@ -69,7 +102,7 @@ void ValidateModel(const ModelAsset& model) {
 
 namespace lv::detail {
 void ValidateImportSettings(const ImportSettings& s) {
-    if (!s.MaxFileBytes || !s.MaxResourceBytes || !s.MaxVertices || !s.MaxIndices || !s.MaxNodes || s.MaxImageDimension<=0 || s.MaxFileBytes>INT_MAX || s.MaxVertices>UINT32_MAX || s.MaxIndices>INT_MAX || s.MaxNodes>UINT32_MAX || !s.MaxAnimationSamples || !std::isfinite(s.AnimationBakeRate) || s.AnimationBakeRate<1 || s.AnimationBakeRate>240) {throw std::invalid_argument("Invalid model import limits or FBX bake rate (1..240).");}
+    if (!s.MaxMorphTargets || s.MaxMorphTargets>MaxMorphTargets || !s.MaxFileBytes || !s.MaxResourceBytes || !s.MaxVertices || !s.MaxIndices || !s.MaxNodes || s.MaxImageDimension<=0 || s.MaxFileBytes>INT_MAX || s.MaxVertices>UINT32_MAX || s.MaxIndices>INT_MAX || s.MaxNodes>UINT32_MAX || !s.MaxAnimationSamples || !std::isfinite(s.AnimationBakeRate) || s.AnimationBakeRate<1 || s.AnimationBakeRate>240) {throw std::invalid_argument("Invalid model import limits or FBX bake rate (1..240).");}
 }
 void ImportContext::Reserve(std::size_t bytes) {if (bytes>Model.Settings.MaxResourceBytes-Bytes) {ImportLimit("Model exceeds MaxResourceBytes.");}Bytes+=bytes;}
 void ImportContext::Geometry(std::size_t vertices,std::size_t indices) {
@@ -113,7 +146,7 @@ void FinishImportedModel(ModelAsset& model) {
     bool first=true;for (const auto& part:model.Parts) {for (const auto& primitive:model.Meshes.at(part.MeshIndex).Primitives) {for (const auto& vertex:primitive.Geometry.Vertices) {const auto p=part.Transform.TransformPoint({vertex.Position[0],vertex.Position[1],vertex.Position[2]});if (first) {model.ModelBounds={p,p};first=false;}auto& b=model.ModelBounds;b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};}}}
     if (first) {ImportInvalid("Model contains no renderable triangles.");}
     ValidateModel(model);
-    if (!model.Skins.empty()) {AnimationPlayer player;player.Bind(std::make_shared<const ModelAsset>(model));model.ModelBounds=player.GetBounds();}
+    if (!model.Skins.empty() || std::any_of(model.Meshes.begin(),model.Meshes.end(),[](const auto& mesh){return !mesh.MorphWeights.empty();})) {AnimationPlayer player;player.Bind(std::make_shared<const ModelAsset>(model));model.ModelBounds=player.GetBounds();}
     model.Status=model.Warnings.empty() ? AssetImportStatus::Ready:AssetImportStatus::ReadyWithWarnings;
 }
 } // namespace lv::detail

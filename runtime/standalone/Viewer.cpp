@@ -171,6 +171,14 @@ Result<void> Viewer::ResetMaterial(ObjectId id,std::size_t index) {
     auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.ResetMaterial(id,index);return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid instance material index."));}
 }
+Result<void> Viewer::SetMorphWeights(ObjectId id,JointId node,std::span<const float> weights) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetMorphWeights(node,weights);return Result<void>::Success();}
+    catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use the mesh node's target count and finite weights in [-100,100]."));}
+}
+Result<void> Viewer::ClearMorphWeights(ObjectId id,JointId node) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).ClearMorphWeights(node);return Result<void>::Success();}
+    catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a morph mesh node in this instance."));}
+}
 Result<void> Viewer::PauseAnimation(ObjectId id) {
     auto ready = ObjectReady(*state_,id); if (!ready) { return ready; }
     try { state_->World.GetAnimation(id).Pause(); return Result<void>::Success(); }

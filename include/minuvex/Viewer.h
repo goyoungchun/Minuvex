@@ -100,6 +100,8 @@ public:
     Result<void> SetVisible(ObjectId id, bool visible);
     Result<void> SetMaterial(ObjectId id, std::size_t index, const MaterialAsset& material);
     Result<void> ResetMaterial(ObjectId id, std::size_t index);
+    Result<void> SetMorphWeights(ObjectId id, JointId node, std::span<const float> weights);
+    Result<void> ClearMorphWeights(ObjectId id, JointId node);
     Result<void> SetCamera(const Camera& camera); // Disables automatic framing.
     Result<void> SetLight(const DirectionalLight& light);
     Result<void> FrameScene();

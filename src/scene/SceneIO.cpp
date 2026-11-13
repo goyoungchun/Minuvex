@@ -85,23 +85,29 @@ void Materials(const Json& entries,Scene& scene,ObjectId id) {
         const auto texture=[&](const char* key)->std::optional<std::size_t> {const auto& value=entry.at(key);return value.is_null() ? std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(UInt(value)));};m.BaseColorTexture=texture("baseTexture");m.NormalTexture=texture("normalTexture");m.MetallicRoughnessTexture=texture("metallicRoughnessTexture");scene.SetMaterial(id,index,m);
     }
 }
+std::string MorphFingerprint(const ModelAsset& model) {char text[17];std::snprintf(text,sizeof(text),"%016llx",static_cast<unsigned long long>(MorphSignature(model)));return text;}
+Json Morphs(const std::vector<MorphPose>& poses) {Json result=Json::array();for (const auto& pose:poses) {result.push_back({{"node",pose.Node},{"weights",pose.Weights}});}return result;}
+std::vector<MorphPose> Morphs(const Json& json,const ModelAsset& model) {
+    Require(json.is_array() && json.size()<=model.Nodes.size(),"Invalid morph pose list.");std::vector<MorphPose> result;std::unordered_set<JointId> seen;
+    for (const auto& entry:json) {MorphPose pose;pose.Node=static_cast<JointId>(UInt(entry.at("node"),UINT32_MAX));Require(seen.insert(pose.Node).second,"Duplicate morph node.");const auto& weights=entry.at("weights");Require(weights.is_array() && weights.size()<=MaxMorphTargets,"Invalid morph weights.");for (const auto& weight:weights) {pose.Weights.push_back(Float(weight));}ValidateMorphWeights(model,pose.Node,pose.Weights);result.push_back(std::move(pose));}return result;
+}
 Json Animation(const SceneObject& object) {
     if (!object.Model) { return nullptr; }
     const auto& player = object.Animation;
     Require(player.Model() == object.Model,"Scene player was rebound to a foreign model; use Scene::SetModel.");
     (void)player.Evaluate();
     Json json{{"clip",nullptr},{"clipName",""},{"time",player.Time()},{"speed",player.Speed()},{"loop",player.Loop()},
-        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr}};
+        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
     if (player.Clip()) { json["clip"] = *player.Clip(); json["clipName"] = String(object.Model->Animations.at(*player.Clip()).Name); }
     if (player.Blend()) {
         const auto& blend=*player.Blend();
-        json["blend"]={{"sourceClip",nullptr},{"sourceClipName",""},{"sourceTime",blend.SourceTime},{"duration",blend.Duration},{"elapsed",blend.Elapsed},{"sourcePose",nullptr}};
+        json["blend"]={{"sourceClip",nullptr},{"sourceClipName",""},{"sourceTime",blend.SourceTime},{"duration",blend.Duration},{"elapsed",blend.Elapsed},{"sourcePose",nullptr},{"sourceMorph",Morphs(blend.SourceMorph)}};
         if (blend.SourceClip) {json["blend"]["sourceClip"]=*blend.SourceClip;json["blend"]["sourceClipName"]=String(object.Model->Animations.at(*blend.SourceClip).Name);}
         else {json["blend"]["sourcePose"]=Pose(blend.SourcePose,object.Model->Skeleton);}
     }
     return json;
 }
-void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend) {
+void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph) {
     const auto& object = scene.GetObject(id);
     if (!object.Model) { Require(json.is_null(),"Empty object cannot have animation state."); return; }
     auto& player = scene.GetAnimation(id);
@@ -118,6 +124,7 @@ void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend) {
         if (state == static_cast<unsigned>(PlaybackState::Paused)) { player.Pause(); }
         player.Seek(time);
     } else { Require(time == 0 && state == static_cast<unsigned>(PlaybackState::Stopped),"A clipless player must be stopped at time zero."); }
+    if (restoreMorph) {const auto signature=String(json.at("morphSignature"));std::uint64_t fingerprint=0;const auto [end,error]=std::from_chars(signature.data(),signature.data()+signature.size(),fingerprint,16);Require(signature.size()==16 && error==std::errc{} && end==signature.data()+signature.size(),"Invalid morph signature.");const auto morphs=Morphs(json.at("morphOverrides"),*object.Model);if (player.Clip() || !morphs.empty() || !json.at("blend").is_null()) {Require(fingerprint==MorphSignature(*object.Model),"Saved morph layout/defaults changed.");}for (const auto& pose:morphs) {player.SetMorphWeights(pose.Node,pose.Weights);}}
     player.ApplyPose(Pose(json.at("overrides"),object.Model->Skeleton));
     if (restoreBlend && !json.at("blend").is_null()) {
         const auto& saved=json.at("blend");AnimationBlendState blend;
@@ -126,6 +133,7 @@ void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend) {
             const auto source=UInt(saved.at("sourceClip"));Require(source<object.Model->Animations.size(),"Saved blend source clip no longer exists.");
             Require(String(saved.at("sourceClipName")) == object.Model->Animations[source].Name && saved.at("sourcePose").is_null(),"Saved blend source identity has changed.");blend.SourceClip=static_cast<std::size_t>(source);
         }else {Require(String(saved.at("sourceClipName")).empty(),"Frozen blend source must not name a clip.");blend.SourcePose=Pose(saved.at("sourcePose"),object.Model->Skeleton);}
+        if (restoreMorph) {blend.SourceMorph=Morphs(saved.at("sourceMorph"),*object.Model);}else if (!blend.SourceClip) {for (std::size_t i=0;i<object.Model->Nodes.size();++i) {const auto& node=object.Model->Nodes[i];if (node.MeshIndex && !object.Model->Meshes[*node.MeshIndex].MorphWeights.empty()) {blend.SourceMorph.push_back({static_cast<JointId>(i),node.MorphWeights.empty() ? object.Model->Meshes[*node.MeshIndex].MorphWeights:node.MorphWeights});}}}
         player.RestoreBlend(blend);
     }
     (void)player.Evaluate();
@@ -141,7 +149,7 @@ Json Settings(const ImportSettings& s) {
         {"maxResourceBytes",s.MaxResourceBytes},{"maxVertices",s.MaxVertices},{"maxIndices",s.MaxIndices},
         {"maxNodes",s.MaxNodes},{"maxImageDimension",s.MaxImageDimension},
         {"importAnimations",s.ImportAnimations},{"importMaterials",s.ImportMaterials},
-        {"animationBakeRate",s.AnimationBakeRate},{"maxAnimationSamples",s.MaxAnimationSamples},{"textureDirectory",Utf8(s.TextureDirectory)}};
+        {"animationBakeRate",s.AnimationBakeRate},{"maxAnimationSamples",s.MaxAnimationSamples},{"maxMorphTargets",s.MaxMorphTargets},{"textureDirectory",Utf8(s.TextureDirectory)}};
 }
 ImportSettings Settings(const Json& j) {
     ImportSettings s, ceiling;
@@ -153,6 +161,7 @@ ImportSettings Settings(const Json& j) {
     s.MaxNodes = static_cast<std::size_t>(UInt(j.at("maxNodes"),ceiling.MaxNodes));
     s.MaxImageDimension = static_cast<int>(UInt(j.at("maxImageDimension"),ceiling.MaxImageDimension));
     Require(s.MaxFileBytes && s.MaxResourceBytes && s.MaxVertices && s.MaxIndices && s.MaxNodes && s.MaxImageDimension,"Import limits must be positive.");
+    if (j.contains("maxMorphTargets")) {s.MaxMorphTargets=static_cast<std::size_t>(UInt(j.at("maxMorphTargets"),MaxMorphTargets));Require(s.MaxMorphTargets>0,"Invalid morph target budget.");}
     if (j.contains("importAnimations")) {s.ImportAnimations=j.at("importAnimations").get<bool>();}
     if (j.contains("importMaterials")) {s.ImportMaterials=j.at("importMaterials").get<bool>();}
     if (j.contains("animationBakeRate")) {s.AnimationBakeRate=Number(j.at("animationBakeRate"));Require(s.AnimationBakeRate>=1 && s.AnimationBakeRate<=240,"Invalid FBX bake rate.");}
@@ -191,7 +200,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",7},{"assets",Json::array()},{"objects",Json::array()}};
+        Json root{{"format","MinuvexScene"},{"version",8},{"assets",Json::array()},{"objects",Json::array()}};
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
             Require(bool(model),"Asset library contains an empty model handle.");
@@ -234,7 +243,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 7),"Unsupported scene format/version.");
+        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 8),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -247,6 +256,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
             const auto id = UInt(assets[i].at("id"));
             Require(id && assetIndices.emplace(id,i).second,"Duplicate/zero asset ID.");
             (void)String(assets[i].at("path")); (void)Settings(assets[i].at("import"));
+            if (version>=8) {Require(assets[i].at("import").contains("maxMorphTargets"),"Scene v8 is missing the morph budget.");}
             if (version>=4) {for (const auto* field:{"importAnimations","importMaterials","animationBakeRate","maxAnimationSamples","textureDirectory"}) {Require(assets[i].at("import").contains(field),"Scene v4 is missing Import settings.");}}
         }
         for (const auto& object : objects) {
@@ -294,7 +304,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
-            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6); }
+            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8); }
             if (version>=7) {Materials(object.at("materials"),scene,ids.at(UInt(object.at("id"))));}
         }
         ValidateScene(scene);

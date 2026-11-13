@@ -5,7 +5,7 @@
 #include <cstdio>
 
 int main(int argc, char** argv) {
-    if (argc != 3) {std::puts("Usage: minuvex_sdk_cpu model.glb output-directory");return 2;}
+    if (argc != 3 && argc != 4) {std::puts("Usage: minuvex_sdk_cpu model.glb output-directory [morph-model.gltf]");return 2;}
     try {
         const auto& info=lv::GetBuildInfo();
         if (info.Version != lv::Version || info.PointerBits != sizeof(void*)*8) {return 1;}
@@ -37,6 +37,14 @@ int main(int argc, char** argv) {
         const auto optimized=lv::OptimizeMesh(lv::MakeCube());if (optimized.Geometry.Indices.size()!=36) {return 1;}
         const auto async=viewer.AddModelAsync(argv[1]);if (!async || !viewer.CancelModelLoad(async.Value()) || !viewer.SetHotReload(true) || !viewer.PollHotReload(0) || !viewer.GetAssetLoadError()) {return 1;}
         lv::EmbeddedRenderer embedded;if (embedded.IsInitialized()) {return 1;}
+        if (argc == 4) {
+            const auto morph=viewer.AddModel(argv[3]);if (!morph) {return 1;}const auto& instance=viewer.GetScene().GetObject(morph.Value());lv::JointId node=lv::NoJoint;
+            for (std::size_t i=0;i<instance.Model->Nodes.size();++i) {const auto& source=instance.Model->Nodes[i];if (source.MeshIndex && !instance.Model->Meshes[*source.MeshIndex].MorphWeights.empty()) {node=static_cast<lv::JointId>(i);break;}}if (node == lv::NoJoint) {return 1;}
+            auto weights=instance.Animation.EvaluateMorphWeights(node);weights[0]=weights[0]>.5f ? .25f:.75f;
+            if (!viewer.SetMorphWeights(morph.Value(),node,weights) || viewer.GetScene().GetObject(morph.Value()).Animation.EvaluateMorphWeights(node)!=weights || !viewer.ClearMorphWeights(morph.Value(),node)) {return 1;}
+            const auto asset=doc.ImportModel(argv[3]);if (!asset) {return 1;}const auto placed=doc.PlaceModel(asset.Value());if (!placed || !doc.SetMorphWeights(placed.Value(),node,weights) || !doc.Save(output/"Morph.mvxscene.json")) {return 1;}
+            lv::EditorDocument roundtrip;if (!roundtrip.Open(output/"Morph.mvxscene.json") || roundtrip.GetScene().GetObject(roundtrip.GetScene().ObjectIds().back()).Animation.EvaluateMorphWeights(node)!=weights || !doc.ClearMorphWeights(placed.Value(),node)) {return 1;}
+        }
         lv::EmbeddedFrameOptions frame;frame.Viewport={8,8,64,48};frame.TargetLoad=lv::EmbeddedTargetLoad::Preserve;
         const auto queue=embedded.GetMetalCommandQueue();if (queue || queue.Error().Code != lv::ErrorCode::InvalidState) {return 1;}
         const auto hardware=lv::SystemInfo::QueryHardware();

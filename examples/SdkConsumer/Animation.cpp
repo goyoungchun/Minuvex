@@ -29,6 +29,7 @@ int main(int argc,char** argv) {
             if (std::abs(actual.Global[node].Elements[element]-expected.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("Pose roundtrip changed the evaluated transforms.");}
         }}
         second.ResetPose();
+        for (std::size_t i=0;i<model->Nodes.size();++i) {const auto& node=model->Nodes[i];if (!node.MeshIndex || model->Meshes[*node.MeshIndex].MorphWeights.empty()) {continue;}const auto joint=static_cast<lv::JointId>(i);auto weights=player.EvaluateMorphWeights(joint);weights[0]=.75f;player.SetMorphWeights(joint,weights);const auto geometry=lv::EvaluateMorph(model->Meshes[*node.MeshIndex].Primitives[0],weights);if (geometry.Vertices.empty() || player.MorphOverrides().empty()) {throw std::runtime_error("CPU Morph evaluation failed.");}player.ClearMorphWeights(joint);}
         if (second.Clip() || !second.Overrides().Joints.empty()) {throw std::runtime_error("ResetPose must restore reference playback state.");}
         player.CrossFade(model->Animations.size()>1 ? 1:0,.5);
         scene.UpdateAnimations(.25);

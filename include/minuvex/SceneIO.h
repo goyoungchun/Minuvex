@@ -7,7 +7,7 @@
 
 namespace lv {
 
-// Writes version 7 with instance material overrides; reads versions 1..7.
+// Writes version 8 with morph state; reads versions 1..8.
 // External model references, library, hierarchy, TRS, camera, lights, animation/pose.
 // Runtime ObjectId/AssetId values are remapped when opening an archive.
 struct SceneArchive {

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@ namespace lv {
 using JointId = std::uint32_t;
 inline constexpr JointId NoJoint = UINT32_MAX;
 inline constexpr std::size_t MaxSkinJoints = 128;
+inline constexpr std::size_t MaxMorphTargets = 8;
 struct ModelAsset;
 using ModelHandle = std::shared_ptr<const ModelAsset>;
 
@@ -49,10 +51,18 @@ struct AnimationTrack {
     std::vector<float> Times;
     std::vector<std::array<float,4>> Values;
 };
+struct MorphTrack {
+    JointId Node = NoJoint;
+    std::size_t TargetCount = 0;
+    AnimationInterpolation Interpolation = AnimationInterpolation::Linear;
+    std::vector<float> Times, Values; // Sample-major scalar weights, Times.size()*TargetCount.
+};
+struct MorphPose { JointId Node = NoJoint; std::vector<float> Weights; };
 struct AnimationClip {
     std::string Name;
     double Duration = 0;
     std::vector<AnimationTrack> Tracks;
+    std::vector<MorphTrack> MorphTracks;
 };
 struct EvaluatedPose { std::vector<Mat4> Local, Global; };
 enum class PlaybackState { Stopped, Playing, Paused };
@@ -61,6 +71,7 @@ struct AnimationBlendState {
     double SourceTime = 0;
     PoseAsset SourcePose;
     double Duration = 0, Elapsed = 0; // Seconds; 0 <= Elapsed < Duration.
+    std::vector<MorphPose> SourceMorph;
 };
 
 // Invalid data/compatibility/numerics throw std::invalid_argument.
@@ -105,6 +116,11 @@ public:
     PoseAsset CapturePose(std::string name = {}) const;
     EvaluatedPose Evaluate() const;
     Bounds GetBounds() const; // Current deformed geometry bounds, for camera fitting.
+    std::vector<float> EvaluateMorphWeights(JointId node) const;
+    void SetMorphWeights(JointId node, std::span<const float> weights);
+    void ClearMorphWeights(JointId node);
+    void ClearMorphOverrides() noexcept { morphOverrides_.clear(); }
+    const std::vector<MorphPose>& MorphOverrides() const noexcept { return morphOverrides_; }
 private:
     ModelHandle model_;
     std::optional<std::size_t> clip_;
@@ -113,9 +129,14 @@ private:
     PlaybackState state_ = PlaybackState::Stopped;
     PoseAsset overrides_;
     std::optional<AnimationBlendState> blend_;
+    std::vector<MorphPose> morphOverrides_;
+    std::vector<float> EvaluateMorphClip(JointId node, std::optional<std::size_t> clip, double time) const;
+    std::vector<float> EvaluateMorphBase(JointId node) const;
     std::vector<Transform> EvaluateClip(std::optional<std::size_t> clip,double time) const;
     std::vector<Transform> EvaluateBase() const;
     void ValidateBlend(const AnimationBlendState& state) const;
     std::vector<Transform> EvaluateLocal() const;
 };
+std::uint64_t MorphSignature(const ModelAsset& model);
+void ValidateMorphWeights(const ModelAsset& model, JointId node, std::span<const float> weights);
 } // namespace lv

@@ -63,6 +63,7 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
             integer(item.Animation->Clip().has_value());integer(item.Animation->Clip().value_or(0));integer(std::bit_cast<std::uint64_t>(item.Animation->Time()));
             integer(item.Animation->Blend().has_value());
             if (const auto& blend=item.Animation->Blend()) {integer(blend->SourceClip.has_value());integer(blend->SourceClip.value_or(0));for (auto value:{blend->SourceTime,blend->Duration,blend->Elapsed}) {integer(std::bit_cast<std::uint64_t>(value));}integer(blend->SourcePose.Joints.size());for (const auto& joint:blend->SourcePose.Joints) {integer(joint.Joint);vector(joint.Local.Position);vector(joint.Local.Scale);const auto& q=joint.Local.Rotation;scalar(q.X);scalar(q.Y);scalar(q.Z);scalar(q.W);}}
+            const auto morphs=[&](const auto& poses) {integer(poses.size());for (const auto& pose:poses) {integer(pose.Node);for (auto weight:pose.Weights) {scalar(weight);}}};morphs(item.Animation->MorphOverrides());if (item.Animation->Blend()) {morphs(item.Animation->Blend()->SourceMorph);}
             integer(item.Animation->Overrides().Joints.size());
             for (const auto& joint:item.Animation->Overrides().Joints) {integer(joint.Joint);vector(joint.Local.Position);vector(joint.Local.Scale);const auto& q=joint.Local.Rotation;scalar(q.X);scalar(q.Y);scalar(q.Z);scalar(q.W);}
         }

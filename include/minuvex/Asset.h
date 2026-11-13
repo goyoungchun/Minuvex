@@ -27,7 +27,8 @@ struct ImportSettings {
     bool ImportAnimations = true;
     bool ImportMaterials = true;
     double AnimationBakeRate = 30; // FBX evaluation samples/second, in [1,240].
-    std::size_t MaxAnimationSamples = 2'000'000; // Total TRS keys, all clips.
+    std::size_t MaxAnimationSamples = 2'000'000; // Total TRS keys plus morph scalar samples, all clips.
+    std::size_t MaxMorphTargets = lv::MaxMorphTargets;
     std::filesystem::path TextureDirectory; // Optional explicit texture search directory.
     bool operator==(const ImportSettings&) const = default;
 };
@@ -75,16 +76,22 @@ struct MaterialAsset {
     std::optional<std::size_t> MetallicRoughnessTexture; // Linear data: G roughness, B metallic.
 };
 
+struct MorphTarget {
+    std::string Name;
+    std::vector<Vec3> PositionDeltas, NormalDeltas, TangentDeltas;
+};
 struct MeshPrimitive {
     MeshData Geometry;
     std::size_t MaterialIndex = 0;
     bool HasSkinning = false;
     std::vector<MeshLod> Lods; // Rigid LOD1..3; imported base vertex/index order is preserved.
+    std::vector<MorphTarget> MorphTargets;
 };
 
 struct MeshAsset {
     std::string Name;
     std::vector<MeshPrimitive> Primitives;
+    std::vector<float> MorphWeights;
 };
 
 struct ModelNode {
@@ -93,6 +100,7 @@ struct ModelNode {
     std::optional<std::size_t> MeshIndex;
     Mat4 LocalTransform = Mat4::Identity();
     std::optional<std::size_t> SkinIndex;
+    std::vector<float> MorphWeights; // Empty inherits mesh defaults.
 };
 
 struct ModelPart {
@@ -112,7 +120,7 @@ struct ModelAsset {
     std::vector<std::filesystem::path> Dependencies;
     // FNV-1a of source and loaded resource bytes, for change tracking, not security.
     std::uint64_t ContentHash = 0;
-    std::uint32_t ImportVersion = 5;
+    std::uint32_t ImportVersion = 6;
     std::vector<MeshAsset> Meshes;
     std::vector<MaterialAsset> Materials;
     std::vector<ImageAsset> Images;
@@ -134,10 +142,13 @@ struct AssetInspection {
     std::size_t Nodes=0, Bones=0, Skins=0, Animations=0, AnimationSamples=0;
     std::size_t GeometryBytes=0, ImageBytes=0;
     std::size_t LodIndices=0;
+    std::size_t MorphTargets=0, MorphBytes=0;
 };
 // CPU-only validation. Throws invalid_argument for malformed data, ImportError for budgets.
 void ValidateModel(const ModelAsset& model);
+void ValidateMorphModel(const ModelAsset& model);
 void ValidateMaterial(const MaterialAsset& material, const ModelAsset& model);
+MeshData EvaluateMorph(const MeshPrimitive& primitive, std::span<const float> weights);
 AssetInspection InspectModel(const ModelAsset& model);
 const char* AssetFormatName(AssetFormat format) noexcept;
 

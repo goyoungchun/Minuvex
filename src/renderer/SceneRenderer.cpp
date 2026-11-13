@@ -29,6 +29,7 @@ struct SceneRenderer::GpuModel {
     std::vector<GpuImage> Images;
     std::vector<sg_sampler> Samplers;
     std::vector<Bounds> MeshBounds;
+    std::vector<std::vector<Bounds>> MorphBounds;
     std::uint64_t TextureBytes=0,BufferBytes=0;
     std::vector<bool> NeededImages,NeededSamplers;
 
@@ -44,19 +45,23 @@ struct SceneRenderer::GpuModel {
     }
 
     void Upload(ModelHandle asset,const RenderSettings& settings) {
-        Asset=std::move(asset);Meshes.resize(Asset->Meshes.size());MeshBounds.resize(Asset->Meshes.size());
+        Asset=std::move(asset);Meshes.resize(Asset->Meshes.size());MeshBounds.resize(Asset->Meshes.size());MorphBounds.resize(Asset->Meshes.size());
         Images.resize(Asset->Images.size()*2);Samplers.resize(Asset->Textures.size());
         for (const auto& part:Asset->Parts) {
             auto& primitives=Meshes.at(part.MeshIndex);if (!primitives.empty()) {continue;}bool first=true;
             for (const auto& primitive:Asset->Meshes.at(part.MeshIndex).Primitives) {
                 for (const auto& v:primitive.Geometry.Vertices) {const Vec3 p{v.Position[0],v.Position[1],v.Position[2]};auto& b=MeshBounds[part.MeshIndex];if (first) {b={p,p};first=false;}b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};}
                 const auto& material=Asset->Materials.at(primitive.MaterialIndex);auto renderer=std::make_unique<MeshRenderer>();
-                renderer->Initialize(primitive.Geometry,material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow!=ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{});
+                renderer->Initialize(primitive.Geometry,material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow!=ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{},primitive.MorphTargets);
                 BufferBytes+=primitive.Geometry.Vertices.size()*sizeof(Vertex)+primitive.Geometry.Indices.size()*sizeof(std::uint32_t);
                 if (settings.Lod) {for (const auto& level:primitive.Lods) {BufferBytes+=level.Indices.size()*sizeof(std::uint32_t);}}
+                if (!primitive.MorphTargets.empty()) {BufferBytes+=primitive.Geometry.Vertices.size()*primitive.MorphTargets.size()*48;auto& bounds=MorphBounds[part.MeshIndex];bounds.resize(primitive.MorphTargets.size());for (std::size_t t=0;t<bounds.size();++t) {for (const auto& delta:primitive.MorphTargets[t].PositionDeltas) {auto& b=bounds[t];b.Min={std::min(b.Min.X,delta.X),std::min(b.Min.Y,delta.Y),std::min(b.Min.Z,delta.Z)};b.Max={std::max(b.Max.X,delta.X),std::max(b.Max.Y,delta.Y),std::max(b.Max.Z,delta.Z)};}}}
                 primitives.push_back(std::move(renderer));
             }
         }
+    }
+    Bounds BoundsFor(std::size_t mesh,std::span<const float> weights) const {
+        auto bounds=MeshBounds.at(mesh);for (std::size_t t=0;t<weights.size();++t) {const auto& delta=MorphBounds.at(mesh).at(t);const auto w=weights[t];const auto low=w>=0 ? delta.Min:delta.Max,high=w>=0 ? delta.Max:delta.Min;bounds.Min={bounds.Min.X+w*low.X,bounds.Min.Y+w*low.Y,bounds.Min.Z+w*low.Z};bounds.Max={bounds.Max.X+w*high.X,bounds.Max.Y+w*high.Y,bounds.Max.Z+w*high.Z};}return bounds;
     }
     void BeginMaterials() {NeededImages.assign(Images.size(),false);NeededSamplers.assign(Samplers.size(),false);}
     void UseTexture(std::optional<std::size_t> index,bool linear,const RenderSettings& settings) {
@@ -163,6 +168,8 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
         std::optional<EvaluatedPose> pose;
         if (item.Animation && item.Animation->NeedsEvaluation()) { pose = item.Animation->Evaluate(); }
         for (const auto& part : item.Model->Parts) {
+            const auto weights=item.Model->Meshes.at(part.MeshIndex).MorphWeights.empty() ? std::vector<float>{}:item.Animation->EvaluateMorphWeights(part.Node);
+            const auto meshBounds=model.BoundsFor(part.MeshIndex,weights);
             auto transform = item.WorldTransform * (pose && part.Node != NoJoint ? pose->Global.at(part.Node) : part.Transform);
             std::vector<Mat4> palette;
             if (part.SkinIndex) {
@@ -177,9 +184,9 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                 transform = item.WorldTransform;
             }
             if (!shadowPass && settings_.FrustumCulling) {
-                bool visible=IntersectsFrustum(model.MeshBounds.at(part.MeshIndex),transform,viewProjection);
+                bool visible=IntersectsFrustum(meshBounds,transform,viewProjection);
                 if (part.SkinIndex) {
-                    Bounds combined;bool first=true;const auto& b=model.MeshBounds.at(part.MeshIndex);
+                    Bounds combined;bool first=true;const auto& b=meshBounds;
                     // Union first, then test: two off-screen joints can blend a
                     // vertex into the visible region between them.
                     for (const auto& joint:palette) {for (unsigned mask=0;mask<8;++mask) {
@@ -200,15 +207,15 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                     texture = model.Images.at(item.Model->Textures.at(index).ImageIndex).View;
                     sampler = model.Samplers.at(index);
                 }
-                if (shadowPass) {auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();MeshLighting instances;auto drawTransform=transform;std::size_t count=1;const auto group=batches_.find({renderer,0,transform.LinearDeterminant()<0,true});const bool eligible=(!item.MaterialOverrides || item.MaterialOverrides->empty()) && !mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();instances.Instances=batch.Buffer;instances.InstanceCount=static_cast<int>(count);instances.Mirrored=transform.LinearDeterminant()<0;drawTransform=Mat4::Identity();++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}renderer->DrawShadow(drawTransform,viewProjection,material,texture,sampler,palette,instances);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;}
+                if (shadowPass) {auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();MeshLighting instances;instances.MorphWeights=weights;auto drawTransform=transform;std::size_t count=1;const auto group=batches_.find({renderer,0,transform.LinearDeterminant()<0,true});const bool eligible=(!item.MaterialOverrides || item.MaterialOverrides->empty()) && !mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();instances.Instances=batch.Buffer;instances.InstanceCount=static_cast<int>(count);instances.Mirrored=transform.LinearDeterminant()<0;drawTransform=Mat4::Identity();++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}renderer->DrawShadow(drawTransform,viewProjection,material,texture,sampler,palette,instances);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;}
                 else {
-                    MeshLighting lighting;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
+                    MeshLighting lighting;lighting.MorphWeights=weights;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
                     lighting.Debug=debug_;lighting.NearPlane=scene.MainCamera.NearPlane;lighting.FarPlane=scene.MainCamera.FarPlane;
                     lighting.Orthographic=scene.MainCamera.Projection == CameraProjection::Orthographic;lighting.Pbr=settings_.Pbr && lighting.Advanced;lighting.Eye=scene.MainCamera.Position;
                     lighting.ViewDirection={scene.MainCamera.Position.X-scene.MainCamera.Target.X,scene.MainCamera.Position.Y-scene.MainCamera.Target.Y,scene.MainCamera.Position.Z-scene.MainCamera.Target.Z};
                     if (lighting.Pbr && material.Shading==ShadingModel::Pbr && !material.Unlit && material.MetallicRoughnessTexture) {const auto index=*material.MetallicRoughnessTexture;lighting.MetallicRoughnessTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.MetallicRoughnessSampler=model.Samplers.at(index);}
                     if (lighting.Advanced && material.NormalTexture) {const auto index=*material.NormalTexture;lighting.NormalTexture=model.Images.at(item.Model->Textures.at(index).ImageIndex+item.Model->Images.size()).View;lighting.NormalSampler=model.Samplers.at(index);}
-                    auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();const auto level=part.SkinIndex ? 0:Lod(scene,model.MeshBounds[part.MeshIndex],transform,mesh.Primitives[i].Lods.size());lighting.Lod=level;
+                    auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();const auto level=part.SkinIndex || !weights.empty() ? 0:Lod(scene,model.MeshBounds[part.MeshIndex],transform,mesh.Primitives[i].Lods.size());lighting.Lod=level;
                     const BatchKey key{renderer,level,transform.LinearDeterminant()<0,false};const auto group=batches_.find(key);const bool eligible=(!item.MaterialOverrides || item.MaterialOverrides->empty()) && !mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());std::size_t count=1;Mat4 drawTransform=transform;
                     if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();lighting.Instances=batch.Buffer;lighting.InstanceCount=static_cast<int>(count);lighting.Mirrored=key.Mirrored;drawTransform=Mat4::Identity();stats_.Optimization.InstancedObjects+=count;++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}
                     renderer->Draw(drawTransform,viewProjection,scene.Sun,material,texture,sampler,palette,settings_.Lighting == LightingMode::Unlit,lighting);
@@ -228,7 +235,8 @@ Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene) const {
         const auto found=models_.find(item.Model.get());if (found == models_.end()) {continue;}
         std::optional<EvaluatedPose> pose;if (item.Animation && item.Animation->NeedsEvaluation()) {pose=item.Animation->Evaluate();}
         for (const auto& part:item.Model->Parts) {
-            const auto& bounds=found->second->MeshBounds.at(part.MeshIndex);
+            const auto weights=item.Model->Meshes.at(part.MeshIndex).MorphWeights.empty() ? std::vector<float>{}:item.Animation->EvaluateMorphWeights(part.Node);
+            const auto bounds=found->second->BoundsFor(part.MeshIndex,weights);
             const auto corners=[&](const Mat4& m) {for (unsigned mask=0;mask<8;++mask) {add(m.TransformPoint({mask&1?bounds.Max.X:bounds.Min.X,mask&2?bounds.Max.Y:bounds.Min.Y,mask&4?bounds.Max.Z:bounds.Min.Z}));}};
             if (part.SkinIndex && pose) {const auto& skin=item.Model->Skins.at(*part.SkinIndex);for (std::size_t i=0;i<skin.Joints.size();++i) {corners(item.WorldTransform*pose->Global.at(skin.Joints[i])*skin.InverseBindMatrices.at(i));}}
             else {corners(item.WorldTransform*(pose && part.Node != NoJoint ? pose->Global.at(part.Node):part.Transform));}

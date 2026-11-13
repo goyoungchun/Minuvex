@@ -28,6 +28,7 @@ bool animationTests = false;
 bool qualityTests = false;
 bool compatibilityTests = false;
 bool pbrTests = false;
+bool morphTests = false;
 
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message,
          std::uint32_t line, const char* file, void* user) {
@@ -414,6 +415,26 @@ void RunPbr() {
     scene.MainCamera.Position.Z=4;scene.Sun.Direction={-.6f,0,-.8f};scene.ResetMaterial(id,0);lv::Transform offset;offset.Position.X=.2f;const auto other=scene.AddModel(changed,offset);(void)render();Check(surface.Stats().LastDrawCalls == 1 && surface.Stats().Optimization.InstancedObjects == 2,"PBR materials support static GPU instancing");shared=changed->Materials[0];shared.MetallicFactor=1;scene.SetMaterial(other,0,shared);(void)render();Check(surface.Stats().LastDrawCalls == 2,"different instance materials cannot merge into one GPU batch");scene.RemoveObject(other);
     lv::AssetRegistry assets;scene.SetModel(id,assets.LoadModel(Fixture("AnimatedRibbon.gltf")));scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};scene.MainCamera.Projection=lv::CameraProjection::Perspective;const auto skin=render();scene.GetAnimation(id).Play(0);scene.GetAnimation(id).Seek(1);Check(render()!=skin && surface.Stats().LastDrawCalls == 1,"PBR and GPU skinning produce animated pixels");
 }
+void RunMorph() {
+    lv::AssetRegistry assets;auto model=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("MorphRibbon.gltf")));model->Parts.resize(1);
+    model->Images={{1,1,{200,230,255,255}}};model->Textures.resize(1);model->Materials[0].Unlit=false;model->Materials[0].Shading=lv::ShadingModel::Basic;model->Materials[0].NormalTexture=0;
+    lv::Scene scene;const auto id=scene.AddModel(model);scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};scene.MainCamera.Projection=lv::CameraProjection::Orthographic;scene.MainCamera.OrthographicHeight=3.5f;scene.Sun.Intensity=1;scene.Sun.Ambient=.1f;auto& player=scene.GetAnimation(id);const std::array<float,2> weights{.8f,.2f};player.SetMorphWeights(3,weights);player.Play(0);player.Seek(.5);
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Medium);profile.Overrides.Shadow=lv::ShadowMode::Off;profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;profile.Overrides.Compression=lv::TextureCompression::None;
+    lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare morph rendering.");double clock=1;
+    const auto render=[&](const lv::Scene& world) {Require(surface.Render(world,clock++,false,{0,0,0,1}),"Morph state failed to wake rendering.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    auto reference=std::make_shared<lv::ModelAsset>(*model);reference->Meshes[0].Primitives[0].Geometry=lv::EvaluateMorph(model->Meshes[0].Primitives[0],weights);reference->Meshes[0].Primitives[0].MorphTargets.clear();reference->Meshes[0].MorphWeights.clear();for (auto& node:reference->Nodes) {node.MorphWeights.clear();}for (auto& clip:reference->Animations) {clip.MorphTracks.clear();}
+    lv::Scene cpu;const auto ref=cpu.AddModel(reference);cpu.MainCamera=scene.MainCamera;cpu.Sun=scene.Sun;cpu.GetAnimation(ref).Play(0);cpu.GetAnimation(ref).Seek(.5);
+    const auto compare=[](const auto& a,const auto& b) {std::size_t differences=0;for (std::size_t i=0;i<a.size();++i) {for (int c=0;c<3;++c) {if (std::abs(int(a[i][c])-int(b[i][c]))>3) {++differences;break;}}}return differences;};
+    const auto gpu=render(scene),expected=render(cpu);Check(compare(gpu,expected)<12,"GPU Morph-before-Skinning matches CPU-deformed geometry including tangent-space normal mapping");
+    Require(bool(surface.SetDebugOptions({lv::DebugView::Normal})),"Cannot select normal view.");Check(compare(render(scene),render(cpu))<12,"GPU NORMAL morph deltas match normalized CPU normals");Require(bool(surface.SetDebugOptions({})),"Cannot restore lit view.");(void)render(scene);
+    const auto estimate=lv::EstimateQualityResources(profile,surface.Quality().Capabilities,scene,Size,Size);Check(estimate && estimate.Value().Cost.BufferBytes == surface.Stats().LogicalBufferBytes,"packed GPU morph storage is included in public memory costs");
+    player.Pause();Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"paused unchanged morph weights retain cached rendering");player.SetMorphWeights(3,std::array<float,2>{0,0});const auto reset=render(scene);Check(reset!=gpu,"manual morph edits invalidate cached pixels");
+    player.ClearMorphWeights(3);player.Play(4);player.Seek(.5);const auto halfway=render(scene);player.Seek(1);Check(render(scene)!=halfway,"weight animation updates real GPU geometry");
+    player.ResetPose();player.SetMorphWeights(3,std::array<float,2>{50,0});scene.MainCamera.Position.X=scene.MainCamera.Target.X=25;const auto outsideBase=render(scene);Check(std::count_if(outsideBase.begin(),outsideBase.end(),[](const auto& p){return p[0]+p[1]+p[2]>20;})>30 && surface.Stats().LastDrawCalls == 1,"morphed bounds prevent base-AABB false culling");
+    profile.Overrides.Shadow=lv::ShadowMode::Pcf;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot enable morph shadows.");(void)render(scene);Check(surface.Stats().LastShadowDrawCalls == 1,"Morph+Skinning participates in the actual shadow pass");
+    scene.MainCamera.Position.X=scene.MainCamera.Target.X=0;player.SetMorphWeights(3,weights);(void)render(scene);const auto bytes=surface.Stats().LogicalBufferBytes;lv::Transform offset;offset.Position.X=-1.3f;const auto second=scene.AddModel(model,offset);scene.GetAnimation(second).SetMorphWeights(3,std::array<float,2>{0,0});const auto both=render(scene);scene.GetAnimation(second).SetMorphWeights(3,std::array<float,2>{1,0});const auto changed=render(scene);bool independent=true;for (int y=0;y<Size;++y) {for (int x=Size/2;x<Size;++x) {independent &= both[y*Size+x] == changed[y*Size+x];}}
+    Check(independent && both!=changed && surface.Stats().ResidentModels == 1 && surface.Stats().LogicalBufferBytes == bytes && surface.Stats().LastDrawCalls == 2,"instances share morph GPU data while retaining independent weights");
+}
 void Initialize() {
     sg_desc desc{}; desc.environment = sglue_environment(); desc.logger.func = Log;
     desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -437,7 +458,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunPbr();} else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunPbr();RunMorph();} else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -449,6 +470,7 @@ int main(int argc, char** argv) {
     qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
     compatibilityTests=argc > 1 && std::strcmp(argv[1],"--compatibility") == 0;
     pbrTests=argc > 1 && std::strcmp(argv[1],"--pbr") == 0;
+    morphTests=argc > 1 && std::strcmp(argv[1],"--morph") == 0;
     sapp_desc app{};
     app.width = app.height = 64; app.window_title = "Minuvex D3D11 pixel tests";
     app.init_cb = Initialize; app.frame_cb = Frame; app.cleanup_cb = Cleanup; app.logger.func = Log;

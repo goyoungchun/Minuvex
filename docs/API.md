@@ -1,13 +1,13 @@
 # Minuvex API
 
-**C++20 Graphics SDK · Version 1.11.0 · Namespace `lv`**
+**C++20 Graphics SDK · Version 1.12.0 · Namespace `lv`**
 
 모듈별 주요 타입과 API를 정리한 사용 안내임. 전체 선언은 연결된 공개 헤더에서 확인할 수 있음.
 
 ## SDK 연결
 
 ```cmake
-find_package(Minuvex 1.11 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minuvex 1.12 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minuvex::viewer)
 ```
@@ -19,13 +19,13 @@ target_link_libraries(my_viewer PRIVATE minuvex::viewer)
 | 모듈 / 헤더 | 주요 타입·함수 |
 |---|---|
 | **core** · [Math.h](../include/minuvex/Math.h), [Mesh.h](../include/minuvex/Mesh.h) | `Vec3`, `Quaternion`, `Mat4`, `Transform`, `Bounds`, `MeshData`, `MakeCube()`, `DecomposeTRS()`. 생성 헤더 `Version.h`의 `Version`, `BuildInfo`, `GetBuildInfo()` |
-| **assets** · [Asset.h](../include/minuvex/Asset.h), [AssetLoading.h](../include/minuvex/AssetLoading.h) | `ModelHandle`, `MaterialAsset`, `ShadingModel`, `ImportSettings`, `ImporterRegistry`, `AssetRegistry::LoadModel/PrepareModel/ReimportModel`, `InspectModel()`, `ValidateModel()`, `CopyModelToProject()`, `AssetLoader`, `AssetHotReload` |
+| **assets** · [Asset.h](../include/minuvex/Asset.h), [AssetLoading.h](../include/minuvex/AssetLoading.h) | `ModelHandle`, `MorphTarget`, `MaterialAsset`, `ShadingModel`, `ImportSettings`, `ImporterRegistry`, `AssetRegistry::LoadModel/PrepareModel/ReimportModel`, `InspectModel()`, `ValidateModel()`, `CopyModelToProject()`, `AssetLoader`, `AssetHotReload` |
 | **scene** · [Scene.h](../include/minuvex/Scene.h) | `Scene`, `ObjectId`, `Camera`, `DirectionalLight`, `PointLight`, `SpotLight`. `AddModel()`, `CreateObject()`, `SetParent()`, `SetTransform()`, `SetModel()`, `GetMaterial/SetMaterial/ResetMaterial`, `GetAnimation()`, `UpdateAnimations()` |
-| **animation** · [Animation.h](../include/minuvex/Animation.h) | `SkeletonAsset`, `SkinAsset`, `PoseAsset`, `AnimationClip`, `AnimationBlendState`, `AnimationPlayer`. `Bind()`, `Play()`, `CrossFade()`, `Pause()`, `Resume()`, `Stop()`, `Seek()`, `SetSpeed()`, `SetLoop()`, `Evaluate()`, `CapturePose()` |
+| **animation** · [Animation.h](../include/minuvex/Animation.h) | `SkeletonAsset`, `SkinAsset`, `PoseAsset`, `AnimationClip`, `AnimationBlendState`, `MorphTrack`, `MorphPose`, `AnimationPlayer`. `Bind()`, `Play()`, `CrossFade()`, `Pause()`, `Resume()`, `Stop()`, `Seek()`, `SetSpeed()`, `SetLoop()`, `Evaluate()`, `CapturePose()` |
 | **scene_io** · [SceneIO.h](../include/minuvex/SceneIO.h), [PoseIO.h](../include/minuvex/PoseIO.h) | `SceneArchive`, `SaveScene(scene, path, library={})`, `LoadScene(path, registry)`, `SavePose(pose, skeleton, path)`, `LoadPose(path, skeleton)` |
 | **viewer** · [Viewer.h](../include/minuvex/Viewer.h) | `ViewerOptions`, `ModelOptions`, `ViewerRunOptions`, `Viewer`. `AddModel()`, `AddModelAsync()`, `GetAssetLoad()`, `CommitModelLoad()`, `SetHotReload()`, `SetCamera()`, `SetMaterial/ResetMaterial`, `SetQuality()`, `CrossFadeAnimation()`, `GetScene()`, `Run()` |
 | **embedded** · [EmbeddedRenderer.h](../include/minuvex/EmbeddedRenderer.h) | `HostGraphicsContext`, `HostRenderTarget`, `EmbeddedFrameOptions`, `EmbeddedRenderer`. `Initialize()`, `Update()`, `Render()`, `WaitIdle()`, `DetachTarget()`, `Shutdown()` |
-| **editor_document** · [EditorDocument.h](../include/minuvex/EditorDocument.h) | `EditorDocument`는 Editor의 Scene·선택·미저장 상태 관리 모델. `OpenModel()`, `Open()`, `Save()`, `ImportModel()`, `PlaceModel()`, `SetWorldTransform()`, `SetMaterial/ResetMaterial`, `CrossFadeAnimation()`, `BeginEdit/CommitEdit/CancelEdit`, `Undo/Redo`, `ClearUndoHistory()` |
+| **editor_document** · [EditorDocument.h](../include/minuvex/EditorDocument.h) | `EditorDocument`는 Editor의 Scene·선택·미저장 상태 관리 모델. `OpenModel()`, `Open()`, `Save()`, `ImportModel()`, `PlaceModel()`, `SetWorldTransform()`, `SetMaterial/ResetMaterial`, `CrossFadeAnimation()`, `BeginEdit/CommitEdit/CancelEdit`, `Undo/Redo`, `ClearUndoHistory()`, `SetMorphWeights/ClearMorphWeights` |
 | **quality** · [Quality.h](../include/minuvex/Quality.h) | `QualityPreset`, `QualityProfile`, `QualityOverrides`, `QualityCapabilities`, `QualityState`. `MakeQualityProfile()`, `ExpandQuality()`, `ResolveQuality()`, `SaveQuality()`, `LoadQuality()` |
 | **telemetry** · [SystemInfo.h](../include/minuvex/SystemInfo.h), [Telemetry.h](../include/minuvex/Telemetry.h) | `HardwareInfo`, `MetricStatus`, `TelemetrySnapshot`. `SystemInfo::QueryHardware()`, `SystemMonitor::Sample()`, `FrameMonitor`, `EstimateQualityResources()`, `RecommendQuality()`, `SaveTelemetry()` |
 | **debug** · [Debug.h](../include/minuvex/Debug.h) | `DebugView`, `DebugOptions`, `DebugDraw`, `RenderDebugInfo`. `InspectJoint()`, `InspectBoneInfluences()`. Viewer/Embedded의 `SetDebugOptions()`, `SetDebugDraw()`, `GetRenderDebugInfo()` |
@@ -51,6 +51,8 @@ int main() {
 ```
 
 기본값은 1280×720, VSync·기본 입력·자동 Focus 활성화, Medium 품질임. `ViewerRunOptions::OnFrame`에서 Scene을 갱신할 수 있으며 Animation은 기본적으로 callback 전에 자동 진행함. 직접 진행하려면 `AdvanceAnimations=false`를 사용함.
+
+Standalone·Editor의 기본 창 아이콘은 `Minvex_logo_transparent.png`에서 만든 투명 아이콘임. 이미지 데이터는 런타임에 내장되어 별도 이미지 파일이나 실행 디렉터리에 의존하지 않음. Windows는 크기별 창·실행 파일 아이콘, macOS는 애플리케이션/Dock 아이콘 경로를 제공하며 macOS 표시는 실기기 미검증임.
 
 ### Animation / Cross-fade
 
@@ -94,7 +96,27 @@ auto changed = viewer.SetMaterial(id, 0, material); // Result<void> 확인 필�
 
 렌더링에는 Advanced lighting과 `QualityOverrides::Pbr=true`가 필요함. Low/Medium은 기본 OFF, High는 ON임. `QualityCapabilities::PbrLighting`을 확인하며 미지원은 거부하고 AllowFallback일 때만 Basic 재질 경로로 대체함. 직접광 Directional/Point/Spot, Normal Map·Skinning·Instancing·Sun Shadow를 사용하며 IBL은 제공하지 않음.
 
-`Scene::SetMaterial/ResetMaterial`과 `EditorDocument::SetMaterial/ResetMaterial`도 제공함. SetMaterial은 재질 전체 값을 override하며 ResetMaterial로 원본을 복원함. override가 있는 객체는 개별 draw로 처리함. Document 편집은 Undo/Redo 대상이며 Scene v7에 저장함. Texture는 같은 모델 내부 index만 참조함. Reimport 시 override material index/name·texture index 호환성을 검사함. Quality v1의 새 pbr 키는 이전 SDK reader에서 거부될 수 있음. 기본값·저장 형식 변경 및 추가 필드로 정적 SDK 소비자는 함께 재빌드해야 함.
+`Scene::SetMaterial/ResetMaterial`과 `EditorDocument::SetMaterial/ResetMaterial`도 제공함. SetMaterial은 재질 전체 값을 override하며 ResetMaterial로 원본을 복원함. override가 있는 객체는 개별 draw로 처리함. Document 편집은 Undo/Redo 대상이며 Scene v8에 저장함. Texture는 같은 모델 내부 index만 참조함. Reimport 시 override material index/name·texture index 호환성을 검사함. Quality v1의 새 pbr 키는 이전 SDK reader에서 거부될 수 있음. 기본값·저장 형식 변경 및 추가 필드로 정적 SDK 소비자는 함께 재빌드해야 함.
+
+### Morph Target
+
+`MeshPrimitive::MorphTargets`가 POSITION/NORMAL/TANGENT delta를 소유하고, `MeshAsset::MorphWeights`·`ModelNode::MorphWeights`가 기본값을 제공함. Node 값이 없으면 Mesh 기본값을 사용함. 공유 Asset을 바꾸지 않고 Player별·Node별 override를 적용함.
+
+```cpp
+auto& player = viewer.GetScene().GetAnimation(id);
+auto weights = player.EvaluateMorphWeights(node); // 유효한 Morph mesh node ID
+weights[0] = .7f;
+auto changed = viewer.SetMorphWeights(id, node, weights); // Result<void> 확인 필요
+// viewer.ClearMorphWeights(id, node)로 animation/default 값 복원
+```
+
+`AnimationPlayer::SetMorphWeights/ClearMorphWeights`, `Viewer`·`EditorDocument`의 같은 이름 Facade를 제공함. `ClearMorphOverrides()`는 전체 수동 weight를 지움. `MorphOverrides()`는 수동 상태, `EvaluateMorph(primitive, weights)`는 CPU 기준 MeshData를 반환함. weight는 각 target의 독립 가중치이며 합을 정규화하지 않음. 유한한 [-100,100]과 정확한 target 수를 요구함. ResetPose는 Morph override도 지우고, ClearOverrides/독립 Pose 파일은 Bone TRS만 다룸.
+
+Mesh당 최대 8개 target이며 `ImportSettings::MaxMorphTargets`로 더 낮출 수 있음. 초과 입력은 ResourceLimit으로 거부하며 자르지 않음. Morph scalar sample도 MaxAnimationSamples에 포함하고 delta는 MaxResourceBytes 예산에 포함함. glTF sparse delta·Mesh/Node 기본값·STEP/LINEAR weight animation, FBX progressive shape의 target별 변환과 지정 bake rate를 지원함. CUBICSPLINE·geometry cache는 미지원임.
+
+평가 순서는 Clip/cross-fade → 수동 weight override → GPU Morph → GPU Skinning임. Morph cross-fade도 live/frozen source·Pause·역재생을 따름. NORMAL/TANGENT를 정규화하고 누락 채널은 base 값을 유지함. GPU는 정점 remap과 일치하는 공유 storage buffer를 사용하며 Morph Mesh의 reduced LOD/instancing은 사용하지 않음. Bounds·Picking/Focus·Culling·Shadow·On-Demand·자원 비용에 변형을 반영함. GPU packed delta 비용은 정점×target×48 bytes임.
+
+Scene v8은 node별 override와 frozen source Morph, layout signature를 저장함. 사용 중인 node/mesh·target 이름/순서·vertex 수·기본값 변경은 Reimport에서 거부함. Pose v1은 Morph를 저장하지 않음. 반환된 override 참조는 Player/Scene 편집 후 다시 조회하며 기존 owner-thread·오류 계약을 따름. `--morph` 렌더링 예제와 `examples/assets/MorphRibbon.gltf`를 제공함.
 
 ### Embedded Runtime
 
@@ -133,17 +155,19 @@ Facade·IO는 Result를 사용하고, low-level Asset/Scene/Animation API는 `Im
 
 | 항목 | 현재 규칙 |
 |---|---|
-| **Scene** | writer v7 / reader v1~v7. 외부 모델 참조·계층·카메라·조명·Pose·Clip/Cross-fade·인스턴스별 재질 override 저장. 로드 시 runtime ID 재매핑 |
-| **Pose / Quality / Import** | Pose v1, Quality v1, ImportVersion 5. Pose는 skeleton signature 호환 필요 |
+| **Scene** | writer v8 / reader v1~v8. 외부 모델 참조·계층·카메라·조명·Pose·Clip/Cross-fade·재질/Morph override 저장. 로드 시 runtime ID 재매핑 |
+| **Pose / Quality / Import** | Pose v1, Quality v1, ImportVersion 6. Pose는 skeleton signature 호환 필요 |
 | **Quality** | Low·Medium·High, Overrides가 있으면 Custom. 기본 `AllowFallback=false`; 미지원 설정 대체는 명시적으로 허용 |
 | **SDK** | 정적 라이브러리. 같은 architecture·compiler/toolset·configuration·C++ runtime으로 소비자 재빌드 필요. 바이너리 ABI 비고정 |
 
-Scene v7은 이전 SDK reader로 읽을 수 없음. Scene/Pose/Quality 저장은 임시 파일 작성 후 교체하며 모델 파일 자체를 Scene에 내장하지 않음. Undo 이력·UI 상태·Telemetry는 Scene에 저장하지 않음.
+Scene v8은 이전 SDK reader로 읽을 수 없음. Scene/Pose/Quality 저장은 임시 파일 작성 후 교체하며 모델 파일 자체를 Scene에 내장하지 않음. Undo 이력·UI 상태·Telemetry는 Scene에 저장하지 않음.
 
-Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND·Blend Tree/Additive·Morph/Event·PCSS·Python/WebAssembly는 후속 범위임.
+Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND·Blend Tree/Additive·Event·PCSS·Python/WebAssembly는 후속 범위임.
 
 ## 검증 범위
 
-SDK 1.11.0은 Windows Release 핵심 6종(Asset 137·Quality 75·Document 140·Telemetry 70개 검사, Editor 및 픽셀 통합)을 통과함. 최종 자원 생성 실패 롤백 보완 후 영향 있는 픽셀 통합 89개만 재확인하고, Point/Spot 조명 보강은 PBR 단독 15개 검사로 확인함. 기본 CTest 등록 13개 유지함. CPU-only Document 140개, SDK ZIP/SHA-256·공백 prefix relocation·공개 헤더 18개·독립 CPU/Pose/PBR API 소비자와 PBR 구체 예제 3프레임을 확인함. HLSL5/Metal 셰이더 생성은 통과했으며 macOS 실기기·원격 CI·장기 성능 측정은 미검증임.
+SDK 1.12.0의 Windows Release 핵심 5종(Animation·Asset·Document·Editor·픽셀 통합)에서 관련 동작을 확인함. sparse/flat-normal expansion·FBX progressive bake·독립 weight·cross-fade·Undo/Scene·Morph-before-Skinning·Normal/Tangent·bounds/culling·Shadow·자원 비용을 검증함. 실패했던 cache 검사를 Pause 상태로 수정한 뒤 Morph GPU 전용 10개 검사만 재실행해 모두 통과함.
+
+CPU-only Animation/Document 2종, 공개 헤더 18개·독립 Morph SDK 소비자·설치 경로 이동·ZIP/SHA-256 및 Morph 예제 3프레임 실행을 확인함. 기본 CTest 등록은 13종으로 유지함. HLSL5/Metal 셰이더 생성은 확인했으며 macOS 실기기·원격 CI·장기 성능 측정은 미검증임.
 
 [기능·빌드 안내](../README.md) · [공식 SDK 예제](../examples/SdkConsumer) · [공개 헤더](../include/minuvex)
