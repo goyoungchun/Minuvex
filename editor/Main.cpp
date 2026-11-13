@@ -180,7 +180,15 @@ void SmokeAfterDraw(Application& app) {
             Require(window && window->Active && window->DockId,"Editor panel is missing from the docking layout.");
         }
         Require(ui.Viewport.Width() > 0 && sg_query_view_state(ui.Viewport.Texture()) == SG_RESOURCESTATE_VALID,"Editor viewport texture is unavailable.");
-        Require(ui.Viewport.Stats().ResidentModels == 1 && ui.Viewport.Stats().LastDrawCalls == (app.AnimationSmoke ? 2u : 4u),"Editor instances did not share the GPU model.");
+        const auto& stats = ui.Viewport.Stats();
+        const auto& quality = ui.Viewport.Quality();
+        Require(stats.ResidentModels == 1,"Editor instances did not share the GPU model.");
+        Require(quality.Applied && quality.Effective.has_value(),"Editor viewport quality was not applied.");
+        // SharedBox has two parts with opposite winding, forming two static batches.
+        const bool staticInstancing = !app.AnimationSmoke && quality.Effective->Instancing;
+        const auto expectedDraws = app.AnimationSmoke || staticInstancing ? 2u : 4u;
+        Require(stats.LastDrawCalls == expectedDraws,"Editor draw calls did not match the active instancing configuration.");
+        Require(stats.Optimization.InstancedObjects == (staticInstancing ? 4u : 0u),"Editor static instances were not batched as configured.");
         if (app.AnimationSmoke) {
             for (const auto* name : {"Bone Inspector","Animation Controls"}) { const auto* window = ImGui::FindWindowByName(name); Require(window && window->DockId,"Animation panel was not docked."); }
             const auto id = doc.Selection(); const auto& player = doc.GetScene().GetObject(id).Animation;

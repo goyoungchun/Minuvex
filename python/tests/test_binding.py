@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--fixtures", type=Path, required=True)
 parser.add_argument("--module-dir", type=Path)
 parser.add_argument("--native", choices=("all", "normal", "callback", "event_callback", "thread"))
+parser.add_argument("--expect-graphics", choices=("on", "off"), help="Check the installed wheel's compiled renderer configuration.")
 args, remaining = parser.parse_known_args()
 if args.module_dir:
     sys.path.insert(0, str(args.module_dir))
@@ -220,6 +221,9 @@ class BindingTests(unittest.TestCase):
         self.error(mvx.ErrorCode.InvalidState, lambda: scene.size)
 
     def test_quality_and_cpu_runtime(self):
+        if args.expect_graphics is not None:
+            self.assertEqual(bool(mvx.graphics_available), args.expect_graphics == "on",
+                             "Installed wheel renderer configuration differs from the requested build")
         with mvx.Viewer() as viewer, tempfile.TemporaryDirectory() as folder:
             quality = mvx.make_quality_profile(mvx.QualityPreset.Medium)
             quality.overrides.shadow = mvx.ShadowMode.Pcss

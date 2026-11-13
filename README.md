@@ -49,7 +49,7 @@ cmake --install out/build/windows-release --config Release --prefix out/sdk-nati
 ```
 
 ```cmake
-find_package(Minvex 1.12 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minvex 1.20 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minvex::viewer)
 ```

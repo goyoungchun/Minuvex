@@ -17,6 +17,9 @@ install.components = ["python"]
 sdist.exclude = ["out/**", ".vs/**", ".minvex-editor.*", "docs/**", "AGENTS.md"]
 
 [tool.scikit-build.cmake.define]
+# Always reset the wheel default, including after a cached CPU-only build.
+# Explicit -C cmake.define.MINVEX_BUILD_RENDERER=OFF still overrides this.
+MINVEX_BUILD_RENDERER = "ON"
 MINVEX_BUILD_PYTHON = "ON"
 MINVEX_BUILD_EDITOR = "OFF"
 MINVEX_BUILD_EXAMPLES = "OFF"

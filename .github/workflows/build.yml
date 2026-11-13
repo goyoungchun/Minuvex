@@ -55,15 +55,25 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Build native CPython wheel
+      - name: Build CPU-only CPython wheel to seed the shared CMake cache
+        run: python -m pip wheel . --no-deps --wheel-dir out/wheels-cpu -C cmake.define.MINVEX_BUILD_RENDERER=OFF
+      - name: Install CPU-only wheel and check its renderer configuration
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem out/wheels-cpu/minvex-*.whl).FullName
+          python -m pip install --no-deps --force-reinstall $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python python/tests/test_binding.py --fixtures examples/assets --expect-graphics off
+          exit $LASTEXITCODE
+      - name: Build default native CPython wheel using the CPU-only cache
         run: python -m pip wheel . --no-deps --wheel-dir out/wheels
       - name: Install wheel and check binding contracts without opening a window
         shell: pwsh
         run: |
           $wheel = (Get-ChildItem out/wheels/minvex-*.whl).FullName
-          python -m pip install --no-deps $wheel
+          python -m pip install --no-deps --force-reinstall $wheel
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python python/tests/test_binding.py --fixtures examples/assets
+          python python/tests/test_binding.py --fixtures examples/assets --expect-graphics on
           exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         with:
