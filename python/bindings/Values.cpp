@@ -8,7 +8,7 @@ void BindValues(py::module_& m) {
     py::enum_<lv::LightingMode>(m,"LightingMode").value("Unlit",lv::LightingMode::Unlit).value("Basic",lv::LightingMode::Basic).value("Advanced",lv::LightingMode::Advanced);
     py::enum_<lv::ShadowMode>(m,"ShadowMode").value("Off",lv::ShadowMode::Off).value("Basic",lv::ShadowMode::Basic).value("Pcf",lv::ShadowMode::Pcf).value("Pcss",lv::ShadowMode::Pcss);
     py::enum_<lv::OnDemandMode>(m,"OnDemandMode").value("Off",lv::OnDemandMode::Off).value("On",lv::OnDemandMode::On).value("Auto",lv::OnDemandMode::Auto);
-    py::enum_<lv::GraphicsBackend>(m,"GraphicsBackend").value("None",lv::GraphicsBackend::None).value("D3D11",lv::GraphicsBackend::D3D11).value("Metal",lv::GraphicsBackend::Metal);
+    py::enum_<lv::GraphicsBackend>(m,"GraphicsBackend").value("None",lv::GraphicsBackend::None).value("D3D11",lv::GraphicsBackend::D3D11).value("Metal",lv::GraphicsBackend::Metal).value("WebGL2",lv::GraphicsBackend::WebGL2);
     py::enum_<lv::TextureCompression>(m,"TextureCompression").value("None",lv::TextureCompression::None).value("Auto",lv::TextureCompression::Auto).value("Bc3",lv::TextureCompression::Bc3);
     py::enum_<lv::ShadingModel>(m,"ShadingModel").value("Basic",lv::ShadingModel::Basic).value("Unlit",lv::ShadingModel::Unlit).value("Pbr",lv::ShadingModel::Pbr);
     py::enum_<lv::CameraProjection>(m,"CameraProjection").value("Perspective",lv::CameraProjection::Perspective).value("Orthographic",lv::CameraProjection::Orthographic);

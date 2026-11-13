@@ -13,7 +13,7 @@ enum class TextureQuality { Low, Medium, High };
 enum class LightingMode { Unlit, Basic, Advanced };
 enum class ShadowMode { Off, Basic, Pcf, Pcss };
 enum class OnDemandMode { Off, On, Auto };
-enum class GraphicsBackend { None, D3D11, Metal };
+enum class GraphicsBackend { None, D3D11, Metal, WebGL2 };
 enum class TextureCompression { None, Auto, Bc3 };
 
 struct RenderSettings {

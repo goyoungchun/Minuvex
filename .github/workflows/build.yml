@@ -8,6 +8,40 @@ permissions:
   contents: read
 
 jobs:
+  webassembly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git out/emsdk
+          ./out/emsdk/emsdk install 4.0.10
+          ./out/emsdk/emsdk activate 4.0.10
+      - name: Build WebGL2 module
+        run: |
+          source ./out/emsdk/emsdk_env.sh
+          emcmake cmake -S . -B out/web-ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build out/web-ci --target minvex_web --parallel 4
+          cmake --install out/web-ci --prefix out/web-package --component web
+      - name: Browser rendering and lifecycle checks
+        env:
+          MINVEX_WEB_DIR: out/web-ci/web
+          MINVEX_BROWSERS: chromium
+        run: |
+          npm --prefix web install --ignore-scripts --no-audit --no-fund
+          cd web
+          npx playwright install --with-deps chromium
+          cd ..
+          node web/tests/browser.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Minvex-WebAssembly
+          path: out/web-package/web
+          if-no-files-found: error
   python-wheel:
     strategy:
       fail-fast: false

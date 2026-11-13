@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <chrono>
 #include <bit>
+#include <cmath>
+#include <limits>
 
 namespace lv::detail {
 namespace {void Require(bool value,const char* message) {if (!value) {throw std::runtime_error(message);}}}
@@ -73,7 +75,16 @@ struct RenderSurface::DebugPreview {
     }
     ~DebugPreview() {if (Pipeline.id) {sg_destroy_pipeline(Pipeline);}if (Shader.id) {sg_destroy_shader(Shader);}}
 };
-double RenderClockSeconds() noexcept {return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();}
+double RenderClockSeconds() noexcept {
+    const auto now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+#if defined(__EMSCRIPTEN__)
+    // Privacy-reduced browser timers may repeat within a render batch. Keep
+    // timestamp ordering without inventing measurable frame duration.
+    static double previous=0;previous=std::max(now,std::nextafter(previous,std::numeric_limits<double>::infinity()));return previous;
+#else
+    return now;
+#endif
+}
 RenderSurface::RenderSurface()=default;
 RenderSurface::~RenderSurface()=default;
 sg_view RenderSurface::Texture() const noexcept {return targets_ ? (targets_->PostTexture.id ? targets_->PostTexture:targets_->Texture):sg_view{};}

@@ -52,10 +52,14 @@ struct SceneRenderer::GpuModel {
             for (const auto& primitive:Asset->Meshes.at(part.MeshIndex).Primitives) {
                 for (const auto& v:primitive.Geometry.Vertices) {const Vec3 p{v.Position[0],v.Position[1],v.Position[2]};auto& b=MeshBounds[part.MeshIndex];if (first) {b={p,p};first=false;}b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};}
                 const auto& material=Asset->Materials.at(primitive.MaterialIndex);auto renderer=std::make_unique<MeshRenderer>();
-                renderer->Initialize(primitive.Geometry,material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow!=ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{},primitive.MorphTargets);
+                renderer->Initialize(primitive.Geometry,material.DoubleSided,primitive.HasSkinning,settings.MsaaSamples,settings.PostProcessing ? SG_PIXELFORMAT_RGBA16F:SG_PIXELFORMAT_NONE,settings.Shadow!=ShadowMode::Off,settings.Lod ? std::span<const MeshLod>(primitive.Lods):std::span<const MeshLod>{},primitive.MorphTargets,&primitive);
                 BufferBytes+=primitive.Geometry.Vertices.size()*sizeof(Vertex)+primitive.Geometry.Indices.size()*sizeof(std::uint32_t);
                 if (settings.Lod) {for (const auto& level:primitive.Lods) {BufferBytes+=level.Indices.size()*sizeof(std::uint32_t);}}
-                if (!primitive.MorphTargets.empty()) {BufferBytes+=primitive.Geometry.Vertices.size()*primitive.MorphTargets.size()*48;auto& bounds=MorphBounds[part.MeshIndex];bounds.resize(primitive.MorphTargets.size());for (std::size_t t=0;t<bounds.size();++t) {for (const auto& delta:primitive.MorphTargets[t].PositionDeltas) {auto& b=bounds[t];b.Min={std::min(b.Min.X,delta.X),std::min(b.Min.Y,delta.Y),std::min(b.Min.Z,delta.Z)};b.Max={std::max(b.Max.X,delta.X),std::max(b.Max.Y,delta.Y),std::max(b.Max.Z,delta.Z)};}}}
+                if (!primitive.MorphTargets.empty()) {
+#if !defined(__EMSCRIPTEN__)
+                    BufferBytes+=primitive.Geometry.Vertices.size()*primitive.MorphTargets.size()*48;
+#endif
+auto& bounds=MorphBounds[part.MeshIndex];bounds.resize(primitive.MorphTargets.size());for (std::size_t t=0;t<bounds.size();++t) {for (const auto& delta:primitive.MorphTargets[t].PositionDeltas) {auto& b=bounds[t];b.Min={std::min(b.Min.X,delta.X),std::min(b.Min.Y,delta.Y),std::min(b.Min.Z,delta.Z)};b.Max={std::max(b.Max.X,delta.X),std::max(b.Max.Y,delta.Y),std::max(b.Max.Z,delta.Z)};}}}
                 primitives.push_back(std::move(renderer));
             }
         }
@@ -153,6 +157,10 @@ void SceneRenderer::Prepare(const Scene& scene) {
         for (const auto& mesh : model->Meshes) { stats_.ResidentPrimitives += mesh.size(); }
         for (const auto& image : model->Images) { if (image.Image.id) { ++stats_.ResidentImages;stats_.MaxResidentTextureSize=std::max(stats_.MaxResidentTextureSize,image.Size); } }
     }
+#if defined(__EMSCRIPTEN__)
+    std::vector<ObjectId> live;for (const auto& item:scene.CollectRenderItems()) {live.push_back(item.Object);}
+    for (auto& [key,model]:models_) {(void)key;for (auto& mesh:model->Meshes) {for (auto& renderer:mesh) {renderer->PruneWebMorph(live);stats_.LogicalBufferBytes+=renderer->WebMorphBytes();}}}
+#endif
     PrepareBatches(scene);
 }
 
@@ -209,7 +217,7 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
                 }
                 if (shadowPass) {auto* renderer=model.Meshes.at(part.MeshIndex).at(i).get();MeshLighting instances;instances.MorphWeights=weights;auto drawTransform=transform;std::size_t count=1;const auto group=batches_.find({renderer,0,transform.LinearDeterminant()<0,true});const bool eligible=(!item.MaterialOverrides || item.MaterialOverrides->empty()) && !mesh.Primitives[i].HasSkinning && (!item.Animation || !item.Animation->NeedsEvaluation());if (eligible && group != batches_.end()) {auto& batch=*group->second;if (batch.Drawn) {continue;}batch.Drawn=true;count=batch.Transforms.size();instances.Instances=batch.Buffer;instances.InstanceCount=static_cast<int>(count);instances.Mirrored=transform.LinearDeterminant()<0;drawTransform=Mat4::Identity();++stats_.Optimization.InstanceDraws;stats_.Optimization.SavedDrawCalls+=count-1;}renderer->DrawShadow(drawTransform,viewProjection,material,texture,sampler,palette,instances);++stats_.LastShadowDrawCalls;stats_.LastShadowTriangles+=mesh.Primitives[i].Geometry.Indices.size()/3*count;}
                 else {
-                    MeshLighting lighting;lighting.MorphWeights=weights;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
+                    MeshLighting lighting;lighting.MorphWeights=weights;lighting.Object=item.Object;lighting.Node=part.Node;lighting.Advanced=settings_.Lighting == LightingMode::Advanced;lighting.Points=scene.PointLights;lighting.Spots=scene.SpotLights;lighting.Shadow=&shadow;
                     lighting.Debug=debug_;lighting.NearPlane=scene.MainCamera.NearPlane;lighting.FarPlane=scene.MainCamera.FarPlane;
                     lighting.Orthographic=scene.MainCamera.Projection == CameraProjection::Orthographic;lighting.Pbr=settings_.Pbr && lighting.Advanced;lighting.Eye=scene.MainCamera.Position;
                     lighting.ViewDirection={scene.MainCamera.Position.X-scene.MainCamera.Target.X,scene.MainCamera.Position.Y-scene.MainCamera.Target.Y,scene.MainCamera.Position.Z-scene.MainCamera.Target.Z};

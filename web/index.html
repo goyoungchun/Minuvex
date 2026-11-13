@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minvex Web Viewer</title>
+<style>body{margin:0;background:#10151f;color:#eef2fa;font:16px system-ui}main{max-width:1100px;margin:2rem auto;padding:0 1rem}canvas{width:100%;height:65vh;display:block;border-radius:12px;background:#080d16}header{display:flex;align-items:center;justify-content:space-between;gap:1rem}input{max-width:65%}output{display:block;margin-top:1rem;white-space:pre-wrap}</style>
+<main><header><h1>Minvex Web Viewer</h1><input id="files" type="file" multiple aria-label="GLB 또는 glTF와 의존 파일 선택"></header>
+<canvas id="viewport" width="960" height="640" aria-label="3D 모델 뷰포트"></canvas><output id="status">GLB 또는 glTF와 의존 파일을 선택함. 드래그로 회전, 우클릭 드래그로 이동, 휠로 확대함.</output></main>
+<script type="module">
+import {createViewer} from './minvex.js';
+const status = document.querySelector('#status');
+try {
+  const viewer = await createViewer({canvas:document.querySelector('#viewport'),onError:error=>status.textContent=`${error.code}: ${error.message}`});
+  let model;
+  document.querySelector('#files').addEventListener('change', async event => {
+    try {const next=await viewer.loadFiles(event.target.files);if(model)model.remove();model=next;viewer.frameScene();if(model.info.clips.length)model.playAnimation(0);status.textContent='모델을 불러옴. 드래그로 회전, 우클릭으로 이동, 휠로 확대함.';}
+    catch(error){status.textContent=`${error.code}: ${error.message}`;}
+  });
+  window.addEventListener('pagehide',()=>viewer.dispose(),{once:true});
+} catch(error) {status.textContent=`${error.code}: ${error.message}`;}
+</script></html>

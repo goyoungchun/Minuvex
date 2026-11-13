@@ -9,8 +9,17 @@
 
 #include <sokol_gfx.h>
 #include <span>
+#if defined(__EMSCRIPTEN__)
+#include <map>
+#endif
 
 namespace lv::detail {
+
+#if defined(__EMSCRIPTEN__)
+inline constexpr std::size_t ShaderSkinJoints=48; // Fits WebGL2's minimum vertex-uniform limit.
+#else
+inline constexpr std::size_t ShaderSkinJoints=MaxSkinJoints;
+#endif
 
 struct alignas(16) ShaderVec4 { float X, Y, Z, W; };
 struct ShadowSampling {
@@ -32,6 +41,7 @@ struct MeshLighting {
     Vec3 Eye{},ViewDirection{0,0,1};
     sg_view MetallicRoughnessTexture{};sg_sampler MetallicRoughnessSampler{};
     std::span<const float> MorphWeights;
+    ObjectId Object=NoObject;JointId Node=NoJoint;
     sg_buffer Instances{};int InstanceCount=0;unsigned Lod=0;bool Mirrored=false;
 };
 
@@ -44,7 +54,11 @@ public:
     MeshRenderer(const MeshRenderer&) = delete;
     MeshRenderer& operator=(const MeshRenderer&) = delete;
 
-    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false, int samples = 1, sg_pixel_format colorFormat=SG_PIXELFORMAT_NONE, bool shadow=false,std::span<const MeshLod> lods={},std::span<const MorphTarget> morphs={});
+    void Initialize(const MeshData& mesh, bool doubleSided = false, bool skinned = false, int samples = 1, sg_pixel_format colorFormat=SG_PIXELFORMAT_NONE, bool shadow=false,std::span<const MeshLod> lods={},std::span<const MorphTarget> morphs={},const MeshPrimitive* source=nullptr);
+#if defined(__EMSCRIPTEN__)
+    void PruneWebMorph(std::span<const ObjectId> live);
+    std::uint64_t WebMorphBytes() const noexcept;
+#endif
     void Draw(const Mat4& model, const Mat4& viewProjection, const DirectionalLight& light = {},
               const MaterialAsset& material = {}, sg_view texture = {}, sg_sampler sampler = {}, std::span<const Mat4> palette = {}, bool forceUnlit = false, const MeshLighting& lighting={}) const;
     void DrawShadow(const Mat4& model,const Mat4& lightViewProjection,const MaterialAsset& material,sg_view texture,sg_sampler sampler,std::span<const Mat4> palette,const MeshLighting& instances={}) const;
@@ -65,6 +79,12 @@ private:
     sg_buffer morphBuffer_{};sg_view morphView_{};
     std::size_t morphCount_=0,morphVertices_=0;
     void ApplyMorph(std::span<const float> weights) const;
+#if defined(__EMSCRIPTEN__)
+    const MeshPrimitive* webSource_=nullptr;std::vector<std::uint32_t> webRemap_;
+    struct WebStream {sg_buffer Buffer{};std::vector<float> Weights;std::vector<Vertex> Vertices;std::uint32_t Frame=UINT32_MAX;};
+    mutable std::map<std::pair<ObjectId,JointId>,WebStream> webStreams_;
+    sg_buffer WebMorph(const MeshLighting& lighting) const;
+#endif
     sg_shader shadowShader_{};sg_pipeline shadowPipelines_[2]{};
     sg_sampler nearestSampler_{};
     sg_image whiteImage_{};

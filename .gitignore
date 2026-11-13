@@ -10,6 +10,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 /dist/
+node_modules/
+playwright-report/
 
 # Publish README and API; keep local planning documents and agent notes ignored.
 *.[mM][dD]

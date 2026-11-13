@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "minvex"
-version = "1.18.0"
+version = "1.19.0"
 description = "Lightweight C++20 3D graphics and animation SDK for Python"
 requires-python = ">=3.12,<3.13"
 

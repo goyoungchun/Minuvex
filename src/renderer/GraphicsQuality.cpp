@@ -2,6 +2,9 @@
 #include <sokol_gfx.h>
 #include <bit>
 #include <algorithm>
+#if defined(__EMSCRIPTEN__)
+#include <GLES3/gl3.h>
+#endif
 #if defined(_WIN32)
 #include <d3d11.h>
 #undef GetObject
@@ -21,6 +24,11 @@ QualityCapabilities QueryQualityCapabilities() {
     caps.ShadowMapping=shadow.render && shadow.sample && shadowDepth.render;
     caps.HdrPostProcessing=hdr.render && hdr.sample && hdr.filter;
     const auto bc3=sg_query_pixelformat(SG_PIXELFORMAT_BC3_RGBA),sbc3=sg_query_pixelformat(SG_PIXELFORMAT_BC3_SRGBA);caps.Bc3Textures=bc3.sample && bc3.filter && sbc3.sample && sbc3.filter;
+#if defined(__EMSCRIPTEN__)
+    caps.Backend=GraphicsBackend::WebGL2;caps.ShadowMapping=false;caps.HdrPostProcessing=false;
+    caps.Bc3Textures=false;caps.MaxAnisotropy=1;
+    GLint renderbufferSize=0;glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE,&renderbufferSize);caps.MaxRenderSize=std::min(caps.MaxRenderSize,renderbufferSize);
+#endif
 #if defined(_WIN32)
     caps.Backend=GraphicsBackend::D3D11;
     auto* device=static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));

@@ -4,6 +4,7 @@
 #include "DebugResources.h"
 
 #include <cstddef>
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <type_traits>
@@ -11,7 +12,7 @@
 namespace lv::detail {
 
 static_assert(sizeof(Mat4) == 64 && std::is_trivially_copyable_v<Mat4>);
-static_assert(std::extent_v<decltype(skin_params_t::joint_matrices)> == MaxSkinJoints);
+static_assert(std::extent_v<decltype(skin_params_t::joint_matrices)> == ShaderSkinJoints);
 static_assert(alignof(mesh_params_t) >= 16 && offsetof(mesh_params_t, normal_matrix) == 64);
 static_assert(std::is_standard_layout_v<Vertex>);
 
@@ -19,7 +20,7 @@ MeshRenderer::~MeshRenderer() {
     Shutdown();
 }
 
-void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinned, int samples,sg_pixel_format colorFormat,bool shadow,std::span<const MeshLod> lods,std::span<const MorphTarget> morphs) {
+void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinned, int samples,sg_pixel_format colorFormat,bool shadow,std::span<const MeshLod> lods,std::span<const MorphTarget> morphs,[[maybe_unused]] const MeshPrimitive* source) {
     if (vertices_.id || indices_.id || shader_.id || pipelines_[0].id) {
         throw std::logic_error("MeshRenderer is already initialized.");
     }
@@ -42,6 +43,10 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
     for (const auto& level:optimized.Lods) {indexDesc.data={level.Indices.data(),level.Indices.size()*sizeof(std::uint32_t)};indexDesc.label="mesh-lod-indices";const auto buffer=sg_make_buffer(indexDesc);lodBuffers_.push_back(buffer);lodCounts_.push_back(static_cast<int>(level.Indices.size()));if (sg_query_buffer_state(buffer) != SG_RESOURCESTATE_VALID) {Shutdown();throw std::runtime_error("Cannot create LOD index buffer.");}}
     morphCount_=morphs.size();morphVertices_=mesh.Vertices.size();
     if (morphCount_>MaxMorphTargets || (morphCount_ && (morphVertices_>16777216 || !lods.empty()))) {Shutdown();throw std::length_error("Morph GPU limit exceeded or incompatible reduced LOD.");}
+#if defined(__EMSCRIPTEN__)
+    webSource_=source;webRemap_=optimized.VertexRemap;
+    if (morphCount_ && !source) {Shutdown();throw std::invalid_argument("CPU Morph requires its immutable source primitive.");}
+#else
     if (morphCount_) {
         static_assert(sizeof(morph_delta_t)==48);std::vector<morph_delta_t> deltas(morphCount_*morphVertices_);
         for (std::size_t t=0;t<morphCount_;++t) {const auto& target=morphs[t];for (const auto* channel:{&target.PositionDeltas,&target.NormalDeltas,&target.TangentDeltas}) {if (!channel->empty() && channel->size()!=morphVertices_) {throw std::invalid_argument("Morph GPU delta count mismatch.");}}
@@ -49,9 +54,14 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
         sg_buffer_desc b{};b.usage.storage_buffer=true;b.data={deltas.data(),deltas.size()*sizeof(morph_delta_t)};b.label="morph-deltas";morphBuffer_=sg_make_buffer(b);
         if (sg_query_buffer_state(morphBuffer_)!=SG_RESOURCESTATE_VALID) {Shutdown();throw std::runtime_error("Cannot create morph storage buffer.");}sg_view_desc view{};view.storage_buffer.buffer=morphBuffer_;morphView_=sg_make_view(view);if (sg_query_view_state(morphView_)!=SG_RESOURCESTATE_VALID) {Shutdown();throw std::runtime_error("Cannot create morph storage view.");}
     }
+#endif
     skinned_ = skinned;
     doubleSided_=doubleSided;
+#if defined(__EMSCRIPTEN__)
+    shader_=sg_make_shader(skinned ? skin_shader_desc(sg_query_backend()):mesh_shader_desc(sg_query_backend()));
+#else
     shader_ = sg_make_shader(morphCount_ ? (skinned ? morph_skin_shader_desc(sg_query_backend()):morph_mesh_shader_desc(sg_query_backend())):(skinned ? skin_shader_desc(sg_query_backend()):mesh_shader_desc(sg_query_backend())));
+#endif
 
     if (sg_query_buffer_state(vertices_) != SG_RESOURCESTATE_VALID ||
         sg_query_buffer_state(indices_) != SG_RESOURCESTATE_VALID ||
@@ -96,7 +106,11 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
         }
     }
     if (shadow) {
+#if defined(__EMSCRIPTEN__)
+        shadowShader_=sg_make_shader(skinned ? shadow_skin_shader_desc(sg_query_backend()):shadow_mesh_shader_desc(sg_query_backend()));
+#else
         shadowShader_=sg_make_shader(morphCount_ ? (skinned ? morph_shadow_skin_shader_desc(sg_query_backend()):morph_shadow_mesh_shader_desc(sg_query_backend())):(skinned ? shadow_skin_shader_desc(sg_query_backend()):shadow_mesh_shader_desc(sg_query_backend())));
+#endif
         sg_pipeline_desc d{};d.shader=shadowShader_;d.sample_count=1;d.colors[0].pixel_format=SG_PIXELFORMAT_R32F;d.depth.pixel_format=SG_PIXELFORMAT_DEPTH;d.depth.compare=SG_COMPAREFUNC_LESS_EQUAL;d.depth.write_enabled=true;d.index_type=SG_INDEXTYPE_UINT32;d.cull_mode=doubleSided || skinned ? SG_CULLMODE_NONE:SG_CULLMODE_BACK;d.layout.buffers[0].stride=sizeof(Vertex);
         const auto attr=[&](int index,sg_vertex_format format,int offset) {d.layout.attrs[index].format=format;d.layout.attrs[index].offset=offset;};
         if (skinned) {attr(ATTR_shadow_skin_position,SG_VERTEXFORMAT_FLOAT3,offsetof(Vertex,Position));attr(ATTR_shadow_skin_color0,SG_VERTEXFORMAT_FLOAT4,offsetof(Vertex,Color));attr(ATTR_shadow_skin_texcoord0,SG_VERTEXFORMAT_FLOAT2,offsetof(Vertex,TexCoord));attr(ATTR_shadow_skin_joint_indices,SG_VERTEXFORMAT_USHORT4,offsetof(Vertex,Joints));attr(ATTR_shadow_skin_joint_weights,SG_VERTEXFORMAT_FLOAT4,offsetof(Vertex,Weights));}
@@ -169,7 +183,11 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     bindings.views[VIEW_normal_texture]=lighting.NormalTexture.id ? lighting.NormalTexture:whiteView_;bindings.samplers[SMP_normal_sampler]=lighting.NormalSampler.id ? lighting.NormalSampler:whiteSampler_;
     bindings.views[VIEW_shadow_texture]=lighting.Shadow && lighting.Shadow->Texture.id ? lighting.Shadow->Texture:whiteView_;bindings.samplers[SMP_shadow_sampler]=lighting.Shadow && lighting.Shadow->Sampler.id ? lighting.Shadow->Sampler:nearestSampler_;
     bindings.views[VIEW_metallic_roughness_texture]=lighting.MetallicRoughnessTexture.id ? lighting.MetallicRoughnessTexture:whiteView_;bindings.samplers[SMP_metallic_roughness_sampler]=lighting.MetallicRoughnessSampler.id ? lighting.MetallicRoughnessSampler:whiteSampler_;
+#if defined(__EMSCRIPTEN__)
+    if (morphCount_) {bindings.vertex_buffers[0]=WebMorph(lighting);}
+#else
     if (morphCount_) {bindings.views[VIEW_morph_data]=morphView_;}
+#endif
     const bool wire=lighting.Debug.View == DebugView::Wireframe;
     if (wire) {bindings.index_buffer=edges_;}
     const bool instanced=lighting.InstanceCount>0;if (instanced) {bindings.vertex_buffers[1]=lighting.Instances;}
@@ -177,9 +195,11 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     sg_apply_bindings(bindings);
     sg_apply_uniforms(UB_mesh_params, SG_RANGE(uniforms));
     sg_apply_uniforms(UB_material_params, SG_RANGE(fragment));
+#if !defined(__EMSCRIPTEN__)
     if (morphCount_) {ApplyMorph(lighting.MorphWeights);}
+#endif
     if (skinned_) {
-        if (palette.size() > MaxSkinJoints) { throw std::invalid_argument("Skin palette exceeds 128 joints."); }
+        if (palette.size() > ShaderSkinJoints) { throw std::invalid_argument("Skin palette exceeds this backend's uniform limit."); }
         skin_params_t skin{};
         for (std::size_t i=0;i<palette.size();++i) { skin.joint_matrices[i] = palette[i]; }
         skin.skin_options = {palette.empty() ? 0.0f : 1.0f,static_cast<float>(lighting.Debug.WeightJoint),0,0};
@@ -188,9 +208,11 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     const int count=wire ? edgeIndexCount_:lighting.Lod && lighting.Lod<=lodCounts_.size() ? lodCounts_[lighting.Lod-1]:indexCount_;
     sg_draw(0,count,instanced ? lighting.InstanceCount:1);
 }
+#if !defined(__EMSCRIPTEN__)
 void MeshRenderer::ApplyMorph(std::span<const float> weights) const {
     if (weights.size()!=morphCount_) {throw std::invalid_argument("GPU morph weights/count mismatch.");}morph_params_t params{};params.morph_meta={static_cast<float>(morphVertices_),static_cast<float>(morphCount_),0,0};float packed[8]{};for (std::size_t i=0;i<weights.size();++i) {if (!std::isfinite(weights[i]) || std::abs(weights[i])>100) {throw std::invalid_argument("Invalid GPU morph weight.");}packed[i]=weights[i];}params.morph_weights0={packed[0],packed[1],packed[2],packed[3]};params.morph_weights1={packed[4],packed[5],packed[6],packed[7]};sg_apply_uniforms(UB_morph_params,SG_RANGE(params));
 }
+#endif
 void MeshRenderer::PrepareDoubleSided() {
     for (int i=0;i<2;++i) {
         if (!doubleSidedPipelines_[i].id) {auto desc=sg_query_pipeline_desc(pipelines_[i]);desc.cull_mode=SG_CULLMODE_NONE;doubleSidedPipelines_[i]=sg_make_pipeline(desc);}
@@ -232,13 +254,21 @@ void MeshRenderer::DrawShadow(const Mat4& model,const Mat4& lightViewProjection,
     if (!shadowShader_.id) {throw std::logic_error("Shadow pipeline was not prepared.");}
     sg_bindings b{};b.vertex_buffers[0]=vertices_;b.index_buffer=indices_;b.views[VIEW_mask_texture]=texture.id ? texture:whiteView_;b.samplers[SMP_mask_sampler]=sampler.id ? sampler:whiteSampler_;
     shadow_params_t params{};params.light_mvp=lightViewProjection*model;shadow_material_t mask{};mask.shadow_mask={material.AlphaCutoff,material.BaseColor[3],0,0};
+#if !defined(__EMSCRIPTEN__)
     if (morphCount_) {b.views[VIEW_morph_data]=morphView_;}
-    const bool instanced=instances.InstanceCount>0;if (instanced) {b.vertex_buffers[1]=instances.Instances;}sg_apply_pipeline(instanced ? shadowInstancePipelines_[instances.Mirrored ? 1:0]:(material.DoubleSided ? doubleSidedShadowPipelines_:shadowPipelines_)[model.LinearDeterminant() < 0 ? 1:0]);sg_apply_bindings(b);sg_apply_uniforms(UB_shadow_params,SG_RANGE(params));sg_apply_uniforms(UB_shadow_material,SG_RANGE(mask));if (morphCount_) {ApplyMorph(instances.MorphWeights);}
-    if (skinned_) {if (palette.size() > MaxSkinJoints) {throw std::invalid_argument("Skin palette exceeds shadow limit.");}skin_params_t skin{};for (std::size_t i=0;i<palette.size();++i) {skin.joint_matrices[i]=palette[i];}skin.skin_options={palette.empty() ? 0.0f:1.0f,0,0,0};sg_apply_uniforms(UB_skin_params,SG_RANGE(skin));}
+#endif
+    const bool instanced=instances.InstanceCount>0;if (instanced) {b.vertex_buffers[1]=instances.Instances;}sg_apply_pipeline(instanced ? shadowInstancePipelines_[instances.Mirrored ? 1:0]:(material.DoubleSided ? doubleSidedShadowPipelines_:shadowPipelines_)[model.LinearDeterminant() < 0 ? 1:0]);sg_apply_bindings(b);sg_apply_uniforms(UB_shadow_params,SG_RANGE(params));sg_apply_uniforms(UB_shadow_material,SG_RANGE(mask));
+#if !defined(__EMSCRIPTEN__)
+    if (morphCount_) {ApplyMorph(instances.MorphWeights);}
+#endif
+    if (skinned_) {if (palette.size() > ShaderSkinJoints) {throw std::invalid_argument("Skin palette exceeds shadow limit.");}skin_params_t skin{};for (std::size_t i=0;i<palette.size();++i) {skin.joint_matrices[i]=palette[i];}skin.skin_options={palette.empty() ? 0.0f:1.0f,0,0,0};sg_apply_uniforms(UB_skin_params,SG_RANGE(skin));}
     sg_draw(0,indexCount_,instanced ? instances.InstanceCount:1);
 }
 void MeshRenderer::Shutdown() noexcept {
     if (sg_isvalid()) {
+#if defined(__EMSCRIPTEN__)
+        for (const auto& [key,stream]:webStreams_) {(void)key;if (stream.Buffer.id) {sg_destroy_buffer(stream.Buffer);}}
+#endif
         if (morphView_.id) {sg_destroy_view(morphView_);}if (morphBuffer_.id) {sg_destroy_buffer(morphBuffer_);}
         for (auto b:lodBuffers_) {if (b.id) {sg_destroy_buffer(b);}}for (auto p:instancePipelines_) {if (p.id) {sg_destroy_pipeline(p);}}if (instanceShader_.id) {sg_destroy_shader(instanceShader_);}
         for (auto p:shadowInstancePipelines_) {if (p.id) {sg_destroy_pipeline(p);}}if (shadowInstanceShader_.id) {sg_destroy_shader(shadowInstanceShader_);}
@@ -260,6 +290,9 @@ void MeshRenderer::Shutdown() noexcept {
     whiteImage_ = {};
     whiteView_ = {};
     morphView_={};morphBuffer_={};morphCount_=morphVertices_=0;
+#if defined(__EMSCRIPTEN__)
+    webStreams_.clear();webRemap_.clear();webSource_=nullptr;
+#endif
     whiteSampler_ = {};
     shader_ = {};
     indices_ = {};
@@ -270,5 +303,30 @@ void MeshRenderer::Shutdown() noexcept {
     lodBuffers_.clear();lodCounts_.clear();instanceShader_={};instancePipelines_[0]=instancePipelines_[1]={};
     shadowInstanceShader_={};shadowInstancePipelines_[0]=shadowInstancePipelines_[1]={};
 }
+
+#if defined(__EMSCRIPTEN__)
+sg_buffer MeshRenderer::WebMorph(const MeshLighting& lighting) const {
+    auto& stream=webStreams_[{lighting.Object,lighting.Node}];
+    if (!stream.Buffer.id) {
+        if (WebMorphBytes()>64ull*1024*1024) {throw std::length_error("Web Morph stream budget exceeded.");}
+        sg_buffer_desc d{};d.size=morphVertices_*sizeof(Vertex);d.usage.write_transient=true;d.label="web-morph-instance";stream.Buffer=sg_make_buffer(d);
+        if (sg_query_buffer_state(stream.Buffer)!=SG_RESOURCESTATE_VALID) {throw std::runtime_error("Cannot create Web Morph stream.");}
+    }
+    if (stream.Weights.size()!=lighting.MorphWeights.size() || !std::equal(stream.Weights.begin(),stream.Weights.end(),lighting.MorphWeights.begin())) {
+        const auto deformed=EvaluateMorph(*webSource_,lighting.MorphWeights);stream.Vertices.resize(morphVertices_);
+        for (std::size_t i=0;i<morphVertices_;++i) {stream.Vertices[webRemap_[i]]=deformed.Vertices[i];}
+        stream.Weights.assign(lighting.MorphWeights.begin(),lighting.MorphWeights.end());
+    }
+    // cur_frame's index is populated only during commit; the completed frame
+    // index is the stable marker for all draws until the next commit.
+    const auto frame=sg_query_stats().prev_frame.frame_index;
+    if (stream.Frame!=frame) {sg_write_buffer_desc write{};write.src.data={stream.Vertices.data(),stream.Vertices.size()*sizeof(Vertex)};write.dst.buffer=stream.Buffer;sg_write_buffer_transient(write);stream.Frame=frame;}
+    return stream.Buffer;
+}
+void MeshRenderer::PruneWebMorph(std::span<const ObjectId> live) {
+    std::erase_if(webStreams_,[&](const auto& entry){if (std::find(live.begin(),live.end(),entry.first.first)!=live.end()) {return false;}if (entry.second.Buffer.id) {sg_destroy_buffer(entry.second.Buffer);}return true;});
+}
+std::uint64_t MeshRenderer::WebMorphBytes() const noexcept {return webStreams_.size()*morphVertices_*sizeof(Vertex);}
+#endif
 
 } // namespace lv::detail
