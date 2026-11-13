@@ -1,4 +1,4 @@
-#include <minuvex/SystemInfo.h>
+#include <minvex/SystemInfo.h>
 #include <algorithm>
 #include <cmath>
 #include <thread>

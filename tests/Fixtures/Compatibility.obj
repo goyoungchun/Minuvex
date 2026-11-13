@@ -1,4 +1,4 @@
-# Minuvex authored OBJ/MTL compatibility fixture: quad, negative indices, UV seam/materials.
+# Minvex authored OBJ/MTL compatibility fixture: quad, negative indices, UV seam/materials.
 mtllib Compatibility.mtl
 v -0.5 -0.5 0
 v 0.5 -0.5 0

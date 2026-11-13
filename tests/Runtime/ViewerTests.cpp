@@ -1,6 +1,6 @@
 #include "TestHarness.h"
-#include <minuvex/Viewer.h>
-#include <minuvex/EmbeddedRenderer.h>
+#include <minvex/Viewer.h>
+#include <minvex/EmbeddedRenderer.h>
 
 #include <atomic>
 #include <limits>
@@ -131,7 +131,7 @@ void TestFailures() {
         lv::Viewer invalidTitle(options);
         ErrorIs(invalidTitle.Run(),lv::ErrorCode::InvalidArgument,"invalid/truncated UTF-8 title is rejected before native initialization");
     }
-    options = {}; options.Title = "Minuvex 모델 🤖";
+    options = {}; options.Title = "Minvex 모델 🤖";
     lv::Viewer unicodeTitle(options);
     Check(unicodeTitle.FrameScene().Error().Code == lv::ErrorCode::InvalidState,"valid Unicode title passes configuration validation");
     options = {}; options.AutoFrame = false;
@@ -155,7 +155,7 @@ void TestFailures() {
     });
     worker.join();
     Check(rejected,"wrong-thread operations return WrongThread");
-#if MINUVEX_TEST_NO_GRAPHICS
+#if MINVEX_TEST_NO_GRAPHICS
     ErrorIs(viewer.Run(),lv::ErrorCode::UnsupportedFeature,"CPU-only Viewer explicitly reports missing graphics support");
 #endif
 }
@@ -250,7 +250,7 @@ int main() {
         Check(!embedded.IsInitialized() && embedded.Shutdown().HasValue(),"Embedded inactive shutdown is idempotent");
         ErrorIs(embedded.Render(scene,{}),lv::ErrorCode::InvalidState,"Embedded render requires initialization");
         ErrorIs(embedded.GetMetalCommandQueue(),lv::ErrorCode::InvalidState,"Embedded queue requires initialization");
-#if MINUVEX_TEST_NO_GRAPHICS
+#if MINVEX_TEST_NO_GRAPHICS
         ErrorIs(embedded.Initialize({}),lv::ErrorCode::UnsupportedFeature,"CPU-only Embedded facade reports unavailable backend");
 #else
         ErrorIs(embedded.Initialize({}),lv::ErrorCode::InvalidArgument,"Embedded rejects missing native device/context without starting graphics");

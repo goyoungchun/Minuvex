@@ -1,5 +1,5 @@
-#include <minuvex/Asset.h>
-#include <minuvex/Scene.h>
+#include <minvex/Asset.h>
+#include <minvex/Scene.h>
 
 #include "renderer/SceneRenderer.h"
 #include "RuntimePlatform.h"
@@ -38,7 +38,7 @@ void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* m
     slog_func(tag, level, item, message, line, file, user);
 }
 void Fail(const char* message) {
-    std::fprintf(stderr, "Minuvex AssetScene: %s\n", message);
+    std::fprintf(stderr, "Minvex AssetScene: %s\n", message);
     app.Failed = true;
     sapp_request_quit();
 }
@@ -73,7 +73,7 @@ void Initialize() {
         app.Renderer->Prepare(app.Scene);
         const auto stats = app.Renderer->GetStats();
         Require(stats.ResidentModels == 1 && stats.ResidentPrimitives == app.Primitives, "GPU resources were duplicated between instances.");
-        std::printf("Minuvex AssetScene | 1 shared asset, 2 instances, %zu GPU primitives\n", stats.ResidentPrimitives);
+        std::printf("Minvex AssetScene | 1 shared asset, 2 instances, %zu GPU primitives\n", stats.ResidentPrimitives);
         for (const auto& warning : app.Model->Warnings) { std::printf("Import note: %s\n", warning.c_str()); }
     } catch (const std::exception& error) { Fail(error.what()); }
 }
@@ -132,7 +132,7 @@ void Cleanup() {
     app.Renderer.reset();
     if (sg_isvalid()) { sg_shutdown(); }
     if (app.Failed || (app.Smoke && app.Frames < 8)) { std::exit(EXIT_FAILURE); }
-    if (app.Smoke) { std::puts("Minuvex Phase 2 smoke test passed: shared asset/GPU buffers, hierarchy, visibility, mirrored scale, removal and re-upload (8 frames)."); }
+    if (app.Smoke) { std::puts("Minvex Phase 2 smoke test passed: shared asset/GPU buffers, hierarchy, visibility, mirrored scale, removal and re-upload (8 frames)."); }
 }
 void Event(const sapp_event* event) {
     if (event->type == SAPP_EVENTTYPE_KEY_DOWN && !event->key_repeat) {
@@ -149,14 +149,14 @@ int main(int argc, char* argv[]) {
         if (argument == "--smoke-test") { app.Smoke = true; }
         else if (argument == "--model" && i + 1 < argc) { app.ModelPath = argv[++i]; }
         else if (argument == "--help") {
-            std::puts("Usage: minuvex_asset_scene [--model model.gltf|model.glb] [--smoke-test]\nTwo instances share one asset. Space pauses rotation; Esc exits.");
+            std::puts("Usage: minvex_asset_scene [--model model.gltf|model.glb] [--smoke-test]\nTwo instances share one asset. Space pauses rotation; Esc exits.");
             return 0;
         } else { std::fprintf(stderr, "Unknown or incomplete argument: %s\n", argv[i]); return 2; }
     }
     sapp_desc window{};
     window.init_cb = Initialize; window.frame_cb = Frame; window.cleanup_cb = Cleanup; window.event_cb = Event;
     window.width = 1280; window.height = 720; window.sample_count = 1; window.high_dpi = true; window.srgb = true;
-    window.window_title = "Minuvex | Phase 2 - Shared Asset & Scene"; window.logger.func = Log;
+    window.window_title = "Minvex | Phase 2 - Shared Asset & Scene"; window.logger.func = Log;
     lv::detail::RunStandaloneApplication(window);
     return app.Failed || (app.Smoke && app.Frames < 8) ? 1 : 0;
 }

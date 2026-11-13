@@ -1,8 +1,8 @@
-#include <minuvex/Viewer.h>
+#include <minvex/Viewer.h>
 #include <cstdio>
 
 int main(int argc,char** argv) {
-    if (argc < 2 || argc > 3) {std::puts("Usage: minuvex_sdk_viewer model.glb [--interactive]");return 2;}
+    if (argc < 2 || argc > 3) {std::puts("Usage: minvex_sdk_viewer model.glb [--interactive]");return 2;}
     lv::ViewerOptions options;options.Quality.AllowFallback=true;
     lv::Viewer viewer(options);const auto model=viewer.AddModel(argv[1]);
     if (!model) {std::fprintf(stderr,"%s\n",model.Error().Message.c_str());return 1;}

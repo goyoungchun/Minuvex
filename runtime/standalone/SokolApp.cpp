@@ -14,10 +14,10 @@
 // standalone SDK must return to its caller so Run() can report errors and the
 // application's stack can unwind. Keep this adapter next to the pinned Sokol
 // implementation; the cleanup calls below depend on that exact version.
-@interface MinuvexStandaloneApplication : NSApplication
+@interface MinvexStandaloneApplication : NSApplication
 @end
 
-@implementation MinuvexStandaloneApplication
+@implementation MinvexStandaloneApplication
 - (void)terminate:(id)sender {
     sapp_quit();
     [self stop:sender];
@@ -41,7 +41,7 @@ bool StandaloneMainThread() noexcept {
 
 bool StandaloneApplicationAvailable() noexcept {
 #if defined(__APPLE__)
-    return NSApp == nil || [NSApp isKindOfClass:[MinuvexStandaloneApplication class]];
+    return NSApp == nil || [NSApp isKindOfClass:[MinvexStandaloneApplication class]];
 #else
     return true;
 #endif
@@ -53,7 +53,7 @@ void RunStandaloneApplication(const sapp_desc& description) {
         branded.icon = WindowIcon();
     }
 #if defined(__APPLE__)
-    [MinuvexStandaloneApplication sharedApplication];
+    [MinvexStandaloneApplication sharedApplication];
 #endif
     SetApplicationIcon();
     sapp_run(branded);

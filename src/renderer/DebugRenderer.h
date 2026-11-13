@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Debug.h>
+#include <minvex/Debug.h>
 #include <sokol_gfx.h>
 namespace lv::detail {
 class DebugRenderer final {

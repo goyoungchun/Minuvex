@@ -1,4 +1,4 @@
-#include <minuvex/Math.h>
+#include <minvex/Math.h>
 
 #include <cmath>
 #include <algorithm>

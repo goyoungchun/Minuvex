@@ -1,6 +1,6 @@
 #pragma once
 
-#include <minuvex/Asset.h>
+#include <minvex/Asset.h>
 
 #include <chrono>
 #include <cmath>
@@ -25,7 +25,7 @@ void ImportRejects(Function function, lv::ImportErrorCode code, const char* mess
     try { function(); Check(false, message); }
     catch (const lv::ImportError& error) { Check(error.Code == code && *error.what(), message); }
 }
-inline std::filesystem::path Fixture(const char* name) { return std::filesystem::path(MINUVEX_FIXTURE_DIR) / name; }
+inline std::filesystem::path Fixture(const char* name) { return std::filesystem::path(MINVEX_FIXTURE_DIR) / name; }
 inline std::string Read(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) { throw std::runtime_error("Cannot read test fixture."); }
@@ -44,12 +44,12 @@ inline std::string Replace(std::string text, const std::string& from, const std:
 struct TemporaryDirectory {
     std::filesystem::path Path;
     TemporaryDirectory() {
-        Path = std::filesystem::absolute(std::filesystem::path(MINUVEX_TEST_OUTPUT_DIR) /
+        Path = std::filesystem::absolute(std::filesystem::path(MINVEX_TEST_OUTPUT_DIR) /
             ("phase2-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))).lexically_normal();
         std::filesystem::create_directories(Path);
     }
     ~TemporaryDirectory() {
-        const auto parent = std::filesystem::absolute(MINUVEX_TEST_OUTPUT_DIR).lexically_normal();
+        const auto parent = std::filesystem::absolute(MINVEX_TEST_OUTPUT_DIR).lexically_normal();
         if (Path.parent_path() == parent && Path.filename().string().starts_with("phase2-")) {
             std::error_code error;
             std::filesystem::remove_all(Path, error);

@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/EmbeddedRenderer.h>
+#include <minvex/EmbeddedRenderer.h>
 #include <sokol_gfx.h>
 
 namespace lv::detail {

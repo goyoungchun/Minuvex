@@ -1,7 +1,7 @@
 #pragma once
-#include <minuvex/SystemInfo.h>
-#include <minuvex/Scene.h>
-#include <minuvex/Optimization.h>
+#include <minvex/SystemInfo.h>
+#include <minvex/Scene.h>
+#include <minvex/Optimization.h>
 
 namespace lv {
 struct FrameStatistics {

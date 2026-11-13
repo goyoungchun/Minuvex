@@ -1,5 +1,5 @@
-#include <minuvex/Version.h>
-#include <minuvex/Viewer.h>
+#include <minvex/Version.h>
+#include <minvex/Viewer.h>
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -28,12 +28,12 @@ int main(int argc,char** argv) {
     try {
         int objects=1000,frames=240,warmup=60;std::filesystem::path output="benchmark.json";
         for (int i=1;i<argc;++i) {
-            const std::string_view arg=argv[i];if (arg == "--help") {std::puts("minuvex_benchmark [--objects N] [--frames N] [--warmup N] [--output file.json]");return 0;}
+            const std::string_view arg=argv[i];if (arg == "--help") {std::puts("minvex_benchmark [--objects N] [--frames N] [--warmup N] [--output file.json]");return 0;}
             if (i+1 == argc) {throw std::invalid_argument("Missing argument value.");}
             const std::string_view value=argv[++i];
             if (arg == "--objects") {objects=Number(value);}else if (arg == "--frames") {frames=Number(value);}else if (arg == "--warmup") {warmup=Number(value);}else if (arg == "--output") {output=value;}else {throw std::invalid_argument("Unknown argument.");}
         }
-        const auto start=Clock::now();lv::ViewerOptions options;options.Width=1280;options.Height=720;options.Title="Minuvex SDK benchmark";
+        const auto start=Clock::now();lv::ViewerOptions options;options.Width=1280;options.Height=720;options.Title="Minvex SDK benchmark";
         options.VSync=false;options.HighDpi=false;options.AutoFrame=false;options.EnableDefaultInput=false;options.ClearColor={.035f,.045f,.065f,1};
         options.Quality=lv::MakeQualityProfile(lv::QualityPreset::Low);options.Quality.Overrides.TargetFps=0;options.Quality.Overrides.OnDemand=lv::OnDemandMode::Off;options.Quality.Overrides.FrustumCulling=true;
         options.Quality.Overrides.Lod=false;options.Quality.Overrides.Instancing=false;options.Quality.Overrides.Compression=lv::TextureCompression::None;
@@ -49,7 +49,7 @@ int main(int argc,char** argv) {
         const auto telemetry=viewer.GetTelemetry();if (!telemetry || intervals.size() != std::size_t(frames)) {throw std::runtime_error("Incomplete benchmark samples.");}
         const auto& snapshot=telemetry.Value();const auto saved=lv::SaveTelemetry(snapshot,output.string()+".telemetry.json");if (!saved) {throw std::runtime_error(saved.Error().Message);}
         std::ofstream file(output,std::ios::binary);file << std::setprecision(12);
-        file << "{\n  \"format\":\"MinuvexBenchmark\",\"version\":2,\"engine\":\"Minuvex\",\"engineVersion\":" << Quote(lv::Version)
+        file << "{\n  \"format\":\"MinvexBenchmark\",\"version\":2,\"engine\":\"Minvex\",\"engineVersion\":" << Quote(lv::Version)
              << ",\n  \"scenario\":\"shared-cubes-v2-unbatched\",\"objects\":" << objects << ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" << warmup << ",\"measuredFrames\":" << frames
              << ",\n  \"lod\":false,\"instancing\":false,\"frustumCulling\":true,\"postProcessing\":false,\"compression\":\"none\""
              << ",\n  \"backend\":" << Quote(snapshot.Hardware.Backend == lv::GraphicsBackend::D3D11 ? "d3d11":"metal") << ",\"gpu\":" << Quote(snapshot.Hardware.GpuName)

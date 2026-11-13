@@ -1,4 +1,4 @@
-#include <minuvex/Telemetry.h>
+#include <minvex/Telemetry.h>
 #include "core/JsonFile.h"
 #include <cmath>
 
@@ -43,7 +43,7 @@ Result<void> SaveTelemetry(const TelemetrySnapshot& s,const std::filesystem::pat
         if (!std::isfinite(m.TimestampSeconds) || m.TimestampSeconds < 0) {throw std::invalid_argument("Invalid sample timestamp.");}
         if (!std::isfinite(s.CapturedAtSeconds) || s.CapturedAtSeconds < 0) {throw std::invalid_argument("Invalid snapshot timestamp.");}
         const Json hardware{{"cpu",h.CpuName},{"gpu",h.GpuName},{"os",h.OperatingSystem},{"osVersion",h.OsVersion},{"architecture",h.Architecture},{"logicalProcessors",h.LogicalProcessors},{"physicalCores",h.PhysicalCores},{"activeGraphicsDevice",h.ActiveGraphicsDevice},{"backend",static_cast<int>(h.Backend)},{"memoryKind",static_cast<int>(h.MemoryKind)}};
-        Json root{{"format","MinuvexTelemetry"},{"version",1},{"timestampSeconds",m.TimestampSeconds},{"hardware",hardware},{"cpuScope",s.CpuScope},{"quality",{{"name",s.Quality.Requested.Name},{"basePreset",static_cast<int>(s.Quality.Requested.Base)},{"applied",s.Quality.Applied},{"width",s.Quality.RenderWidth},{"height",s.Quality.RenderHeight}}},{"sampleCount",f.SampleCount},{"totalRenderedFrames",f.TotalRenderedFrames},{"metrics",metrics}};
+        Json root{{"format","MinvexTelemetry"},{"version",1},{"timestampSeconds",m.TimestampSeconds},{"hardware",hardware},{"cpuScope",s.CpuScope},{"quality",{{"name",s.Quality.Requested.Name},{"basePreset",static_cast<int>(s.Quality.Requested.Base)},{"applied",s.Quality.Applied},{"width",s.Quality.RenderWidth},{"height",s.Quality.RenderHeight}}},{"sampleCount",f.SampleCount},{"totalRenderedFrames",f.TotalRenderedFrames},{"metrics",metrics}};
         root["capturedAtSeconds"]=s.CapturedAtSeconds;root["live"]=s.Live;
         root["frameWindow"]={{"capturedAtSeconds",f.CapturedAtSeconds},{"gpuSampleCount",f.GpuSampleCount},{"lastCpuSampleAtSeconds",f.LastCpuSampleAtSeconds ? Json(*f.LastCpuSampleAtSeconds):Json(nullptr)},{"lastGpuSampleAtSeconds",f.LastGpuSampleAtSeconds ? Json(*f.LastGpuSampleAtSeconds):Json(nullptr)}};
         root["frameWindow"]["debugRendering"]=f.DebugRendering;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <minuvex/SceneIO.h>
-#include <minuvex/PoseIO.h>
+#include <minvex/SceneIO.h>
+#include <minvex/PoseIO.h>
 
 namespace lv {
 
@@ -55,6 +55,12 @@ public:
     Result<void> PlayBlendTree(ObjectId object, BlendTreeHandle tree, bool restart = true);
     Result<void> SetBlendParameter(ObjectId object, std::string_view name, float value);
     Result<void> SeekBlendTree(ObjectId object, double phase);
+    Result<void> SetAdditiveAnimation(ObjectId object, std::size_t clip, float weight = 1, const PoseAsset& reference = {}, std::span<const float> jointMask = {});
+    Result<void> RestoreAdditiveAnimation(ObjectId object, const AdditiveAnimationState& state);
+    Result<void> SetAdditiveWeight(ObjectId object, float weight);
+    Result<void> SetAdditiveMask(ObjectId object, std::span<const float> jointMask);
+    Result<void> SeekAdditive(ObjectId object, double seconds);
+    Result<void> ClearAdditiveAnimation(ObjectId object);
     Result<void> PauseAnimation(ObjectId object);
     Result<void> ResumeAnimation(ObjectId object);
     Result<void> StopAnimation(ObjectId object);

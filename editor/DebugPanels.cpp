@@ -47,7 +47,7 @@ void EditorUI::RenderDebugger() {
         if (ImGui::CollapsingHeader("GPU resources")) {
             for (std::size_t i=0;i<info.Resources.size();++i) {const auto& r=info.Resources[i];ImGui::PushID(static_cast<int>(i));if (ImGui::TreeNode("resource","%s: %s #%u [%s]",Kind(r.Kind),r.Name.c_str(),r.Id,State(r.State))) {ImGui::Text("%s | %d x %d | %dx samples",r.Format.c_str(),r.Width,r.Height,r.Samples);ImGui::Text("Logical bytes: %llu",static_cast<unsigned long long>(r.Bytes));ImGui::TreePop();}ImGui::PopID();}
         }
-        ImGui::TextWrapped("Inspection describes Minuvex-owned resources and latest submissions. Scene timing excludes GUI/Present. Debug execution is excluded from preset performance evidence.");
+        ImGui::TextWrapped("Inspection describes Minvex-owned resources and latest submissions. Scene timing excludes GUI/Present. Debug execution is excluded from preset performance evidence.");
     }ImGui::End();
 }
 void EditorUI::AnimationDebugger() {

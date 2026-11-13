@@ -1,5 +1,5 @@
 #include "TestHarness.h"
-#include <minuvex/Viewer.h>
+#include <minvex/Viewer.h>
 #include <thread>
 #include <limits>
 using namespace test;

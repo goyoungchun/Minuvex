@@ -1,4 +1,4 @@
-#include <minuvex/EditorDocument.h>
+#include <minvex/EditorDocument.h>
 #include "CameraController.h"
 
 #include <algorithm>
@@ -188,6 +188,12 @@ Result<void> EditorDocument::CrossFadeAnimation(ObjectId object,std::size_t clip
 Result<void> EditorDocument::PlayBlendTree(ObjectId object,BlendTreeHandle tree,bool restart) {return ChangeAnimation(object,[&](auto& p){p.PlayBlendTree(std::move(tree),restart);});}
 Result<void> EditorDocument::SetBlendParameter(ObjectId object,std::string_view name,float value) {return ChangeAnimation(object,[&](auto& p){p.SetBlendParameter(name,value);});}
 Result<void> EditorDocument::SeekBlendTree(ObjectId object,double phase) {return ChangeAnimation(object,[&](auto& p){p.SeekBlendTree(phase);});}
+Result<void> EditorDocument::SetAdditiveAnimation(ObjectId object,std::size_t clip,float weight,const PoseAsset& reference,std::span<const float> mask) {return ChangeAnimation(object,[&](auto& p){p.SetAdditiveAnimation(clip,weight,reference,mask);});}
+Result<void> EditorDocument::RestoreAdditiveAnimation(ObjectId object,const AdditiveAnimationState& state) {return ChangeAnimation(object,[&](auto& p){p.RestoreAdditiveAnimation(state);});}
+Result<void> EditorDocument::SetAdditiveWeight(ObjectId object,float weight) {return ChangeAnimation(object,[&](auto& p){p.SetAdditiveWeight(weight);});}
+Result<void> EditorDocument::SetAdditiveMask(ObjectId object,std::span<const float> mask) {return ChangeAnimation(object,[&](auto& p){p.SetAdditiveMask(mask);});}
+Result<void> EditorDocument::SeekAdditive(ObjectId object,double seconds) {return ChangeAnimation(object,[&](auto& p){p.SeekAdditive(seconds);});}
+Result<void> EditorDocument::ClearAdditiveAnimation(ObjectId object) {return ChangeAnimation(object,[](auto& p){p.ClearAdditiveAnimation();});}
 Result<void> EditorDocument::SetMaterial(ObjectId object,std::size_t index,const MaterialAsset& material) {return Change([&] {world_.SetMaterial(object,index,material);MarkChanged();});}
 Result<void> EditorDocument::ResetMaterial(ObjectId object,std::size_t index) {return Change([&] {world_.ResetMaterial(object,index);MarkChanged();});}
 Result<void> EditorDocument::SetMorphWeights(ObjectId object,JointId node,std::span<const float> weights) {return ChangeAnimation(object,[&](auto& player){player.SetMorphWeights(node,weights);});}

@@ -7,7 +7,7 @@ foreach ($run in $runs) {
     foreach ($field in @('engine','runId','taskHash','model','modelSettings','contextPolicy','usageSource')) {
         if ($run.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($run.$field)) { throw "Missing $field" }
     }
-    if (($run.engine -cne 'Minuvex' -and $run.engine -cne 'Unity') -or $run.completed -isnot [bool] -or $run.estimated -isnot [bool] -or $run.estimated) { throw 'Use actual provider token counts and explicit completion status.' }
+    if (($run.engine -cne 'Minvex' -and $run.engine -cne 'Unity') -or $run.completed -isnot [bool] -or $run.estimated -isnot [bool] -or $run.estimated) { throw 'Use actual provider token counts and explicit completion status.' }
     foreach ($field in @('taskHash','model','modelSettings','contextPolicy')) {
         if ($run.$field -cne $first.$field) { throw "Experiments must use the same $field" }
     }
@@ -22,9 +22,9 @@ foreach ($run in $runs) {
 }
 $groups = @($runs | Group-Object engine)
 if ($groups.Count -ne 2) { throw 'Both engines are required; missing runs are not zero.' }
-$minuvexIds=@($runs | Where-Object engine -ceq 'Minuvex' | ForEach-Object runId)
+$minvexIds=@($runs | Where-Object engine -ceq 'Minvex' | ForEach-Object runId)
 $unityIds=@($runs | Where-Object engine -ceq 'Unity' | ForEach-Object runId)
-if (Compare-Object $minuvexIds $unityIds -CaseSensitive) { throw 'Pair each runId across both engines; unmatched experiments cannot be compared.' }
+if (Compare-Object $minvexIds $unityIds -CaseSensitive) { throw 'Pair each runId across both engines; unmatched experiments cannot be compared.' }
 $summary = foreach ($group in $groups) {
     $items=@($group.Group)
     [ordered]@{engine=$group.Name;runs=$items.Count
@@ -40,7 +40,7 @@ $summary = foreach ($group in $groups) {
         firstBuildSuccess=@($items | Where-Object { $_.completed -and $_.buildAttempts -eq 1 -and $_.compileErrors -eq 0 }).Count
         firstBuildSuccessRate=(@($items | Where-Object { $_.completed -and $_.buildAttempts -eq 1 -and $_.compileErrors -eq 0 }).Count / [double]$items.Count)}
 }
-[ordered]@{format='MinuvexAiEvaluation';version=1;taskHash=$first.taskHash;model=$first.model
+[ordered]@{format='MinvexAiEvaluation';version=1;taskHash=$first.taskHash;model=$first.model
     modelSettings=$first.modelSettings;contextPolicy=$first.contextPolicy;engines=@($summary)
     note='Aggregates actual supplied experiments; document bytes are not token estimates.'
 } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Output -Encoding UTF8

@@ -1,4 +1,4 @@
-#include <minuvex/Scene.h>
+#include <minvex/Scene.h>
 
 #include <algorithm>
 #include <atomic>

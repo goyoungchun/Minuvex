@@ -1,12 +1,12 @@
 // Headless public SDK example: independent pose evaluation/composition, playback, Pose IO and reset.
-#include <minuvex/Scene.h>
-#include <minuvex/PoseIO.h>
+#include <minvex/Scene.h>
+#include <minvex/PoseIO.h>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
 
 int main(int argc,char** argv) {
-    if (argc != 3) {std::puts("Usage: minuvex_sdk_animation animated-model.gltf output.mvxpose.json");return 2;}
+    if (argc != 3) {std::puts("Usage: minvex_sdk_animation animated-model.gltf output.mvxpose.json");return 2;}
     try {
         lv::AssetRegistry assets;
         const auto model=assets.LoadModel(argv[1]);
@@ -52,7 +52,14 @@ int main(int argc,char** argv) {
         if (player.Tree()->Tree!=independent.Tree()->Tree || player.Tree()->X!=.5f || independent.Tree()->X!=1) {throw std::runtime_error("Blend Tree instance state must be independent.");}
         const auto treePose=lv::ComposePose(model->Skeleton,lv::EvaluateBlendTree(*model,*tree,.5f,0,.5));const auto played=player.Evaluate();
         for (std::size_t node=0;node<played.Global.size();++node) {for (std::size_t element=0;element<16;++element) {if (std::abs(treePose.Global[node].Elements[element]-played.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("Blend Tree facade and evaluator disagree.");}}}
-        std::printf("Animation/Pose: %zu nodes; PoseBuffer, Blend Tree, independent instances, Pose IO and cross-fade passed.\n",model->Skeleton.Joints.size());
+        const auto additiveClip=std::find_if(model->Animations.begin(),model->Animations.end(),[](const auto& clip){return !clip.Tracks.empty();});
+        if (additiveClip!=model->Animations.end()) {
+            player.SetAdditiveAnimation(static_cast<std::size_t>(additiveClip-model->Animations.begin()),.25f);player.SeekAdditive(additiveClip->Duration*.5);
+            const auto deltaPose=player.EvaluateAdditive();const auto finalPose=lv::ComposePose(model->Skeleton,lv::ApplyAdditivePose(model->Skeleton,player.EvaluateBasePose(),deltaPose,.25f));const auto evaluated=player.Evaluate();
+            for (std::size_t node=0;node<evaluated.Global.size();++node) {for (std::size_t element=0;element<16;++element) {if (std::abs(finalPose.Global[node].Elements[element]-evaluated.Global[node].Elements[element])>1e-5f) {throw std::runtime_error("Additive player and standalone composition disagree.");}}}
+            auto layerCopy=player;layerCopy.SetAdditiveWeight(0);if (player.Additive()->Weight!=.25f) {throw std::runtime_error("Additive state must be independent per instance.");}player.ClearAdditiveAnimation();
+        }
+        std::printf("Animation/Pose: %zu nodes; PoseBuffer, Blend Tree, Additive, independent instances and Pose IO passed.\n",model->Skeleton.Joints.size());
         return 0;
     }catch (const std::exception& error) {std::fprintf(stderr,"%s\n",error.what());return 1;}
 }

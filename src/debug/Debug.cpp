@@ -1,4 +1,4 @@
-#include <minuvex/Debug.h>
+#include <minvex/Debug.h>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>

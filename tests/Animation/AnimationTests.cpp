@@ -1,5 +1,5 @@
-#include <minuvex/EditorDocument.h>
-#include <minuvex/Viewer.h>
+#include <minvex/EditorDocument.h>
+#include <minvex/Viewer.h>
 #include "TestHarness.h"
 #include <json.hpp>
 #include <limits>
@@ -7,6 +7,7 @@
 
 using namespace test;
 using Json = nlohmann::json;
+void TestAdditive();
 namespace {
 void MatrixNear(const lv::Mat4& a, const lv::Mat4& b, const char* label) {
     bool near = true; for (std::size_t i=0;i<16;++i) { near &= Near(a.Elements[i],b.Elements[i]); } Check(near,label);
@@ -187,7 +188,7 @@ void TreePersistence() {
     TemporaryDirectory temp;lv::EditorDocument doc;const auto asset=doc.ImportModel(Fixture("MorphRibbon.gltf")).Value(),a=doc.PlaceModel(asset).Value(),b=doc.PlaceModel(asset).Value();lv::BlendTreeDesc desc;desc.Kind=lv::BlendTreeKind::Blend2D;desc.Samples={{4,0,0},{5,1,0},{0,0,1}};const auto tree=lv::CreateBlendTree(*doc.GetScene().GetObject(a).Model,desc);
     Check(bool(doc.PlayBlendTree(a,tree)) && bool(doc.PlayBlendTree(b,tree)) && bool(doc.SetBlendParameter(a,"Speed",.25f)) && bool(doc.SetBlendParameter(b,"Speed",.75f)) && bool(doc.SeekBlendTree(a,.5)) && bool(doc.SeekBlendTree(b,.25)) && bool(doc.PauseAnimation(a)) && bool(doc.PauseAnimation(b)),"Editor facades edit independent tree playback");
     Check(bool(doc.SetBlendParameter(a,"Speed",.4f)) && bool(doc.Undo()) && Near(doc.GetScene().GetObject(a).Animation.Tree()->X,.25f) && bool(doc.Redo()),"tree parameter edits participate in Undo/Redo");
-    Check(bool(doc.SetBlendParameter(b,"Direction",.2f)),"Editor records the second 2D parameter independently");const auto path=temp.File("Tree.mvxscene.json");Check(bool(doc.Save(path)),"Scene writes shared tree definition and instance state");const auto saved=Json::parse(Read(path));lv::EditorDocument loaded;Check(saved["version"]==9 && saved["blendTrees"].size()==1 && bool(loaded.Open(path)),"Scene v9 deduplicates and restores shared tree assets");
+    Check(bool(doc.SetBlendParameter(b,"Direction",.2f)),"Editor records the second 2D parameter independently");const auto path=temp.File("Tree.mvxscene.json");Check(bool(doc.Save(path)),"Scene writes shared tree definition and instance state");const auto saved=Json::parse(Read(path));lv::EditorDocument loaded;Check(saved["version"]==10 && saved["blendTrees"].size()==1 && bool(loaded.Open(path)),"Scene v9 deduplicates and restores shared tree assets");
     const auto ids=loaded.GetScene().ObjectIds();const auto& first=loaded.GetScene().GetObject(ids[0]).Animation;const auto& second=loaded.GetScene().GetObject(ids[1]).Animation;Check(first.Tree()->Tree==second.Tree()->Tree && Near(first.Tree()->X,.4f) && Near(second.Tree()->X,.75f) && Near(second.Tree()->Y,.2f) && first.Tree()->Phase==.5 && second.Tree()->Phase==.25 && first.State()==lv::PlaybackState::Paused,"loaded instances share tree ownership while preserving independent parameters and clocks");
     Check(Near(first.EvaluateMorphWeights(3)[0],doc.GetScene().GetObject(a).Animation.EvaluateMorphWeights(3)[0]),"tree-driven Morph state survives Scene roundtrip");
     const auto rejects=[&](Json bad,const char* message){Write(path,bad.dump());Check(!loaded.Open(path) && loaded.GetScene().Contains(ids[0]),message);};auto bad=saved;bad["objects"][0]["animation"]["tree"]["phase"]=2;rejects(bad,"invalid saved tree phase rejected without replacing document");bad=saved;bad["blendTrees"][0]["definition"]["signature"]="0000000000000000";rejects(bad,"changed saved tree layout rejected");bad=saved;bad["objects"][0]["animation"]["tree"]["id"]=999;rejects(bad,"unknown saved tree reference rejected");bad=saved;bad["blendTrees"].push_back(bad["blendTrees"][0]);rejects(bad,"duplicate tree IDs rejected");
@@ -229,7 +230,7 @@ void BlendPersistence() {
     Check(bool(doc.PlayAnimation(id,0)) && bool(doc.SeekAnimation(id,.5)),"prepare blend source");Check(bool(doc.CrossFadeAnimation(id,1,1)) && doc.IsDirty(),"Editor cross-fade records an undoable edit");
     Check(bool(doc.Undo()) && !doc.GetScene().GetObject(id).Animation.Blend() && bool(doc.Redo()) && doc.GetScene().GetObject(id).Animation.Blend(),"Undo/Redo restores transition state");
     Check(bool(doc.UpdateAnimations(.25)) && bool(doc.PauseAnimation(id)),"pause blend preview");const auto file=temp.File("Blend.mvxscene.json");Check(bool(doc.Save(file)),"active transition saves");
-    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 9 && bool(loaded.Open(file)),"Scene v8 restores active live-source blend");
+    const auto original=Json::parse(Read(file));lv::EditorDocument loaded;Check(original["version"] == 10 && bool(loaded.Open(file)),"Scene v8 restores active live-source blend");
     const auto other=loaded.GetScene().ObjectIds()[0];const auto& restored=loaded.GetScene().GetObject(other).Animation;
     Check(restored.State() == lv::PlaybackState::Paused && restored.Blend()->SourceClip == 0 && restored.Blend()->SourceTime == .75 && restored.Time() == .25 && restored.Blend()->Elapsed == .25,"paused transition clocks and clip identities survive serialization");
     MatrixNear(restored.Evaluate().Global[2],doc.GetScene().GetObject(id).Animation.Evaluate().Global[2],"live blend roundtrip preserves evaluated pose");
@@ -256,6 +257,10 @@ void Persistence() {
     auto json = Json::parse(Read(partial)); Check(json["joints"].size() == 1,"partial file contains only manual overrides");
     const auto& skeleton = doc.GetScene().GetObject(id).Model->Skeleton;
     auto loaded = lv::LoadPose(full,skeleton); Check(loaded && loaded.Value().Joints.size() == 4,"standalone full pose loads without Scene");
+    const auto newPoseBytes=Read(full);auto legacyBrand=Json::parse(newPoseBytes);
+    Check(legacyBrand.at("format") == "MinvexPose", "new poses write the renamed format");
+    legacyBrand["format"]="MinuvexPose";Write(full,legacyBrand.dump());
+    Check(bool(lv::LoadPose(full,skeleton)),"pre-rename poses remain readable");Write(full,newPoseBytes);
     Check(bool(doc.SetLocalLights({{{1,2,3},{1,.5f,.25f},2,5}},{{{0,3,0},{0,-1,0},{.2f,.4f,1},3,10,.2f,.5f}})),"Editor validates local light edits");
     Check(bool(doc.Save(scene)) && !doc.IsDirty(),"animated Scene version 3 saves");
     Check(!doc.SetLocalLights({{{0,0,0},{1,1,1},1,-1}}, {}) && doc.GetScene().PointLights.size() == 1 && doc.GetScene().SpotLights.size() == 1 && !doc.IsDirty(),"invalid light edit preserves both lists and clean document state");
@@ -354,7 +359,7 @@ void MorphPlayback() {
     Check(fbx->Meshes[0].MorphWeights.size() == 2 && Near(fbxPlayer.EvaluateMorphWeights(node)[0],.5f),"FBX progressive shapes become independent targets with normalized default weights");fbxPlayer.Play(0);fbxPlayer.Seek(.75);const auto weights=fbxPlayer.EvaluateMorphWeights(node);Check(Near(weights[0],.5f) && Near(weights[1],.5f),"FBX progressive animation bake interpolates between shape thresholds");
 }
 int main() {
-    try { BlendTrees();TreePersistence();PoseBlendingCore();DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport();MorphPlayback(); }
+    try { TestAdditive();BlendTrees();TreePersistence();PoseBlendingCore();DataAndPlayer(); Blending(); BlendPersistence(); Persistence(); ImportValidation(); Reimport();MorphPlayback(); }
     catch (const std::exception& e) { Check(false,e.what()); }
     return Finish();
 }

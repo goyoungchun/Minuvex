@@ -34,7 +34,7 @@ struct Staging {
     std::filesystem::path Parent,Path;
     ~Staging() {
         // Only remove the fresh immediate staging child created by this call.
-        if (!Path.empty() && Path.parent_path() == Parent && Path.filename().string().starts_with(".minuvex-import-")) {std::error_code ec;std::filesystem::remove_all(Path,ec);}
+        if (!Path.empty() && Path.parent_path() == Parent && Path.filename().string().starts_with(".minvex-import-")) {std::error_code ec;std::filesystem::remove_all(Path,ec);}
     }
 };
 }
@@ -52,7 +52,7 @@ ModelHandle CopyModelToProject(ModelHandle model,const std::filesystem::path& as
         }
         if (!model->Settings.TextureDirectory.empty()) {while (!Within(common,model->Settings.TextureDirectory) && common!=model->Settings.TextureDirectory) {const auto parent=common.parent_path();if (parent == common) {throw ImportError(ImportErrorCode::UnsupportedFeature,"Texture directory uses a different filesystem root.");}common=parent;}}
         std::ostringstream suffix;suffix<<std::hex<<model->ContentHash<<'-'<<std::chrono::steady_clock::now().time_since_epoch().count()<<'-'<<packageId.fetch_add(1);
-        Staging stage{root,root/(".minuvex-import-"+suffix.str())};const auto published=root/("Import-"+suffix.str());
+        Staging stage{root,root/(".minvex-import-"+suffix.str())};const auto published=root/("Import-"+suffix.str());
         if (!std::filesystem::create_directory(stage.Path)) {stage.Path.clear();throw ImportError(ImportErrorCode::Io,"A package staging directory already exists; retry the import.");}
         for (const auto& source:files) {const auto destination=stage.Path/source.lexically_relative(common);std::filesystem::create_directories(destination.parent_path());std::filesystem::copy_file(source,destination,std::filesystem::copy_options::none);}
         auto settings=model->Settings;if (!settings.TextureDirectory.empty()) {settings.TextureDirectory=stage.Path/settings.TextureDirectory.lexically_relative(common);}

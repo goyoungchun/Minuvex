@@ -30,9 +30,9 @@ FilePickerResult NativeFiles::Choose(const FilePickerRequest& request) const {
         nfdu8filteritem_t filters[2]{};nfdfiltersize_t count=1;
         switch (request.Filter) {
         case FilePickerFilter::Model:filters[0]={"3D models (glTF / GLB / OBJ / FBX)","gltf,glb,obj,fbx"};break;
-        case FilePickerFilter::Scene:filters[0]={"Minuvex Scene (*.mvxscene.json)","json"};break;
-        case FilePickerFilter::Pose:filters[0]={"Minuvex Pose (*.mvxpose.json)","json"};break;
-        case FilePickerFilter::Quality:filters[0]={"Minuvex Quality (*.mvxquality.json)","json"};break;
+        case FilePickerFilter::Scene:filters[0]={"Minvex Scene (*.mvxscene.json)","json"};break;
+        case FilePickerFilter::Pose:filters[0]={"Minvex Pose (*.mvxpose.json)","json"};break;
+        case FilePickerFilter::Quality:filters[0]={"Minvex Quality (*.mvxquality.json)","json"};break;
         case FilePickerFilter::Json:filters[0]={"JSON","json"};break;
         case FilePickerFilter::Csv:filters[0]={"CSV","csv"};break;
         }

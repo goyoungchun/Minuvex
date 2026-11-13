@@ -1,11 +1,11 @@
 #pragma once
 
-#include <minuvex/Math.h>
-#include <minuvex/Mesh.h>
-#include <minuvex/Scene.h>
-#include <minuvex/Quality.h>
-#include <minuvex/Debug.h>
-#include <minuvex/Optimization.h>
+#include <minvex/Math.h>
+#include <minvex/Mesh.h>
+#include <minvex/Scene.h>
+#include <minvex/Quality.h>
+#include <minvex/Debug.h>
+#include <minvex/Optimization.h>
 
 #include <sokol_gfx.h>
 #include <span>

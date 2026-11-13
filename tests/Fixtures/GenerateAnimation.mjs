@@ -33,7 +33,7 @@ const track=(node,path,output,interpolation='LINEAR')=>({samplers:[{input:times,
 const bend=track(2,'rotation',rotation);bend.name='Bend';bend.samplers.push({input:times,output:movement,interpolation:'LINEAR'});bend.channels.push({sampler:1,target:{node:1,path:'translation'}});
 const clips=[bend,{name:'Step Move',...track(1,'translation',step,'STEP')},{name:'Scale',...track(2,'scale',scale)},{name:'Ancestor',...track(0,'translation',ancestor)}];
 const data=Buffer.concat(chunks);
-const model={asset:{version:'2.0',generator:'Minuvex original animation fixture'},buffers:[{byteLength:data.length,uri:`data:application/octet-stream;base64,${data.toString('base64')}`}],bufferViews:views,accessors,
+const model={asset:{version:'2.0',generator:'Minvex original animation fixture'},buffers:[{byteLength:data.length,uri:`data:application/octet-stream;base64,${data.toString('base64')}`}],bufferViews:views,accessors,
   materials:[{name:'Orange',doubleSided:true,pbrMetallicRoughness:{baseColorFactor:[1,.4,.05,1]},extensions:{KHR_materials_unlit:{}}}],extensionsUsed:['KHR_materials_unlit'],
   meshes:[{name:'Ribbon',primitives:[{attributes:{POSITION:positions,NORMAL:normals,JOINTS_0:joints,WEIGHTS_0:weights},indices,material:0}]}],
   nodes:[{name:'RigRoot',translation:[.2,0,0],children:[1,3]},{name:'Hip',children:[2]},{name:'Tip',translation:[0,1,0]},{name:'SkinnedRibbon',mesh:0,skin:0,translation:[4,0,0]}],

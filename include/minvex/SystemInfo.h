@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Quality.h>
+#include <minvex/Quality.h>
 
 namespace lv {
 enum class MetricStatus { Measured, Estimated, Unsupported, Unavailable };

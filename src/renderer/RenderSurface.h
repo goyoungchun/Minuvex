@@ -1,7 +1,7 @@
 #pragma once
 #include "SceneRenderer.h"
 #include "GraphicsQuality.h"
-#include <minuvex/Telemetry.h>
+#include <minvex/Telemetry.h>
 #include <sokol_gfx.h>
 
 namespace lv::detail {

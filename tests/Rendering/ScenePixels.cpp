@@ -26,6 +26,7 @@ bool failed = false;
 bool ran = false;
 bool animationTests = false;
 bool treeTests = false;
+bool additiveTests = false;
 bool qualityTests = false;
 bool compatibilityTests = false;
 bool pbrTests = false;
@@ -409,6 +410,23 @@ void RunTree() {
     player.SetBlendParameter("Speed",2);player.SetBlendParameter("Direction",2);const auto outside=render(scene);Check(outside!=halfway,"outside-hull parameters clamp to the boundary pose on GPU");
     lv::Transform offset;offset.Position.X=-1.3f;const auto second=scene.AddModel(model,offset);scene.GetAnimation(second).PlayBlendTree(tree);scene.GetAnimation(second).Pause();(void)render(scene);Check(surface.Stats().ResidentModels==1 && surface.Stats().LastDrawCalls==2,"tree instances share GPU geometry while using separate playback state");
 }
+void RunAdditive() {
+    lv::AssetRegistry assets;auto model=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("AnimatedRibbon.gltf")));
+    auto clip=model->Animations[0];clip.Name="Constant additive bend";clip.Duration=2;for (auto& track:clip.Tracks) {track.Times={0};track.Values={track.Values[1]};}const auto layerClip=model->Animations.size();model->Animations.push_back(clip);
+    lv::AnimationClip neutral;neutral.Name="Tree reference";neutral.Duration=1;const auto referenceClip=model->Animations.size();model->Animations.push_back(neutral);
+    lv::AnimationClip translated;translated.Name="Far additive pose";translated.Tracks={{1,lv::AnimationPath::Translation,lv::AnimationInterpolation::Linear,{0},{{25,0,0,0}}}};const auto farClip=model->Animations.size();model->Animations.push_back(translated);
+    lv::Scene scene;scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};scene.Sun.Intensity=0;scene.Sun.Ambient=1;const auto id=scene.AddModel(model);auto& player=scene.GetAnimation(id);
+    auto profile=lv::MakeQualityProfile(lv::QualityPreset::Low);profile.Overrides.TargetFps=0;profile.Overrides.OnDemand=lv::OnDemandMode::On;lv::detail::RenderSurface surface;Require(bool(surface.ApplyQuality(profile,scene,Size,Size)),"Cannot prepare additive rendering.");double clock=1;
+    const auto render=[&](const lv::Scene& world){Require(surface.Render(world,clock++,false,{0,0,0,1}),"Additive edit failed to invalidate cached rendering.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    const auto original=render(scene);player.SetAdditiveAnimation(layerClip,.5f);player.Pause();const auto halfway=render(scene);Check(halfway!=original,"additive-only layer deforms actual GPU skinning pixels");
+    lv::Scene expected;expected.MainCamera=scene.MainCamera;expected.Sun=scene.Sun;const auto reference=expected.AddModel(model);auto pose=lv::ReferencePose(model->Skeleton);pose.Joints[1].Local.Position.X=.25f;pose.Joints[2].Local.Rotation={0,0,std::sin(std::numbers::pi_v<float>/8),std::cos(std::numbers::pi_v<float>/8)};expected.GetAnimation(reference).ApplyPose(pose);
+    const auto compare=[](const auto& a,const auto& b){std::size_t differences=0;for (std::size_t i=0;i<a.size();++i) {differences+=a[i]!=b[i];}return differences;};Check(compare(halfway,render(expected))<10,"GPU additive midpoint matches independently authored translation and rotation");(void)render(scene);Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"paused additive layer retains the on-demand image");
+    player.SetAdditiveWeight(0);Check(render(scene)==original,"zero additive weight restores exact base pixels");auto playback=*player.Additive();playback.State=lv::PlaybackState::Playing;player.RestoreAdditiveAnimation(playback);scene.UpdateAnimations(.25);Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"invisible weight-zero layer advances without invalidating cached pixels");
+    player.SetAdditiveWeight(.5f);player.Pause();player.SetAdditiveMask(std::array<float,4>{0,0,1,0});const auto masked=render(scene);pose.Joints[1].Local.Position.X=0;expected.GetAnimation(reference).ApplyPose(pose);Check(compare(masked,render(expected))<10,"GPU joint mask excludes the parent translation while retaining the child rotation");
+    lv::BlendTreeDesc desc;desc.Samples={{referenceClip,0,0},{layerClip,1,0}};player.PlayBlendTree(lv::CreateBlendTree(*model,desc));player.SetBlendParameter("Speed",.5f);player.Pause();pose.Joints[1].Local.Position.X=.25f;pose.Joints[2].Local.Rotation={0,0,std::sin(std::numbers::pi_v<float>/4),std::cos(std::numbers::pi_v<float>/4)};expected.GetAnimation(reference).ApplyPose(pose);Check(compare(render(scene),render(expected))<10,"GPU Blend Tree plus additive layer matches independently authored final pose");
+    player.ClearAdditiveAnimation();Check(render(scene)==halfway,"clearing additive layer restores the selected Blend Tree base");
+    player.ResetPose();player.SetAdditiveAnimation(farClip);scene.MainCamera.Position.X=scene.MainCamera.Target.X=25;const auto translatedPixels=render(scene);Check(std::count_if(translatedPixels.begin(),translatedPixels.end(),[](const auto& p){return p[0]+p[1]+p[2]>20;})>30 && surface.Stats().LastDrawCalls==1,"additive bounds prevent original-pose false culling");
+}
 void RunPbr() {
     auto model=std::make_shared<lv::ModelAsset>();lv::MeshPrimitive primitive;primitive.Geometry.Vertices={{{-2,-2,0},{0,0,1},{1,1,1,1},{0,0}},{{2,-2,0},{0,0,1},{1,1,1,1},{1,0}},{{0,2,0},{0,0,1},{1,1,1,1},{.5f,1}}};primitive.Geometry.Indices={0,1,2};model->Meshes.push_back({"PBR triangle",{primitive}});model->Parts.push_back({0});model->ModelBounds={{-2,-2,0},{2,2,0}};model->Materials.push_back({});auto& material=model->Materials[0];material.Shading=lv::ShadingModel::Pbr;material.BaseColor={.8f,.4f,.2f,1};material.MetallicFactor=0;material.RoughnessFactor=.6f;
     lv::Scene scene;const auto id=scene.AddModel(model);scene.MainCamera.Position={0,0,4};scene.MainCamera.Target={};scene.MainCamera.Projection=lv::CameraProjection::Orthographic;scene.MainCamera.OrthographicHeight=4;scene.Sun.Direction={-.6f,0,-.8f};scene.Sun.Intensity=2;scene.Sun.Ambient=0;
@@ -475,7 +493,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunTree();RunPbr();RunMorph();} else if (treeTests) {RunTree();}else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunTree();RunAdditive();RunPbr();RunMorph();} else if (additiveTests) {RunAdditive();}else if (treeTests) {RunTree();}else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -485,12 +503,13 @@ void Cleanup() { if (sg_isvalid()) { sg_shutdown(); } }
 int main(int argc, char** argv) {
     animationTests = argc > 1 && std::strcmp(argv[1],"--animation") == 0;
     treeTests = argc > 1 && std::strcmp(argv[1],"--tree") == 0;
+    additiveTests = argc > 1 && std::strcmp(argv[1],"--additive") == 0;
     qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
     compatibilityTests=argc > 1 && std::strcmp(argv[1],"--compatibility") == 0;
     pbrTests=argc > 1 && std::strcmp(argv[1],"--pbr") == 0;
     morphTests=argc > 1 && std::strcmp(argv[1],"--morph") == 0;
     sapp_desc app{};
-    app.width = app.height = 64; app.window_title = "Minuvex D3D11 pixel tests";
+    app.width = app.height = 64; app.window_title = "Minvex D3D11 pixel tests";
     app.init_cb = Initialize; app.frame_cb = Frame; app.cleanup_cb = Cleanup; app.logger.func = Log;
     sapp_run(app);
     Check(!failed, "Sokol reported no rendering errors");

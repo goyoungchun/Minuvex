@@ -7,38 +7,38 @@ endforeach()
 
 set(_sdk_public core animation assets scene scene_io quality telemetry debug optimization editor_document viewer embedded)
 set(_sdk_internal json_io asset_codecs camera meshoptimizer)
-if(MINUVEX_BUILD_RENDERER)
+if(MINVEX_BUILD_RENDERER)
     list(APPEND _sdk_internal renderer sokol_gfx sokol_app sokol_headers)
 endif()
 foreach(_module IN LISTS _sdk_public _sdk_internal)
     if(_module IN_LIST _sdk_public)
-        set_target_properties(minuvex_${_module} PROPERTIES EXPORT_NAME ${_module})
+        set_target_properties(minvex_${_module} PROPERTIES EXPORT_NAME ${_module})
     else()
-        set_target_properties(minuvex_${_module} PROPERTIES EXPORT_NAME _${_module})
+        set_target_properties(minvex_${_module} PROPERTIES EXPORT_NAME _${_module})
     endif()
-    install(TARGETS minuvex_${_module} EXPORT MinuvexTargets
+    install(TARGETS minvex_${_module} EXPORT MinvexTargets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>")
 endforeach()
-install(DIRECTORY include/minuvex DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/include/minuvex/Version.h"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/minuvex")
-set(_sdk_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/Minuvex")
-set(MINUVEX_SDK_RUNTIME "${CMAKE_MSVC_RUNTIME_LIBRARY}")
-if(MSVC AND NOT MINUVEX_SDK_RUNTIME)
-    set(MINUVEX_SDK_RUNTIME "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+install(DIRECTORY include/minvex DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/include/minvex/Version.h"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/minvex")
+set(_sdk_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/Minvex")
+set(MINVEX_SDK_RUNTIME "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+if(MSVC AND NOT MINVEX_SDK_RUNTIME)
+    set(MINVEX_SDK_RUNTIME "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 elseif(NOT MSVC)
-    set(MINUVEX_SDK_RUNTIME "platform-default")
+    set(MINVEX_SDK_RUNTIME "platform-default")
 endif()
-configure_package_config_file("${CMAKE_CURRENT_LIST_DIR}/MinuvexConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/MinuvexConfig.cmake" INSTALL_DESTINATION "${_sdk_config_dir}"
+configure_package_config_file("${CMAKE_CURRENT_LIST_DIR}/MinvexConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/MinvexConfig.cmake" INSTALL_DESTINATION "${_sdk_config_dir}"
     PATH_VARS CMAKE_INSTALL_DATADIR)
-write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/MinuvexConfigVersion.cmake"
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/MinvexConfigVersion.cmake"
     VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
-install(EXPORT MinuvexTargets NAMESPACE minuvex:: DESTINATION "${_sdk_config_dir}")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/MinuvexConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/MinuvexConfigVersion.cmake" DESTINATION "${_sdk_config_dir}")
+install(EXPORT MinvexTargets NAMESPACE minvex:: DESTINATION "${_sdk_config_dir}")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/MinvexConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/MinvexConfigVersion.cmake" DESTINATION "${_sdk_config_dir}")
 
-set(_sdk_share "${CMAKE_INSTALL_DATADIR}/minuvex")
+set(_sdk_share "${CMAKE_INSTALL_DATADIR}/minvex")
 install(DIRECTORY examples/SdkConsumer DESTINATION "${_sdk_share}/examples")
 install(FILES examples/EmbeddedViewer/MainD3D11.cpp examples/EmbeddedViewer/MainMetal.mm
     DESTINATION "${_sdk_share}/examples/EmbeddedViewer")
@@ -46,8 +46,8 @@ install(FILES examples/RenderingEnhancement/Main.cpp DESTINATION "${_sdk_share}/
 install(DIRECTORY examples/assets/ DESTINATION "${_sdk_share}/examples/assets")
 install(DIRECTORY benchmarks/ DESTINATION "${_sdk_share}/benchmarks")
 # Documentation is an explicit opt-in until the local drafts are published.
-option(MINUVEX_INSTALL_DRAFT_DOCS "Include local README/API drafts in a local SDK package" OFF)
-if(MINUVEX_INSTALL_DRAFT_DOCS)
+option(MINVEX_INSTALL_DRAFT_DOCS "Include local README/API drafts in a local SDK package" OFF)
+if(MINVEX_INSTALL_DRAFT_DOCS)
     install(FILES README.md DESTINATION "${_sdk_share}/docs")
     install(FILES assets/branding/Minvex_banner_transparent.png DESTINATION "${_sdk_share}/docs/assets/branding")
     install(FILES docs/API.md DESTINATION "${_sdk_share}/docs")
@@ -60,27 +60,27 @@ install(FILES third_party/ufbx/LICENSE DESTINATION "${_sdk_share}/licenses" RENA
 install(FILES third_party/meshoptimizer/LICENSE DESTINATION "${_sdk_share}/licenses" RENAME meshoptimizer-LICENSE)
 # stb permits redistributing this header with its embedded license notice.
 install(FILES third_party/stb/stb_image.h DESTINATION "${_sdk_share}/licenses")
-if(MINUVEX_BUILD_RENDERER)
+if(MINVEX_BUILD_RENDERER)
     install(FILES "${sokol_SOURCE_DIR}/LICENSE" DESTINATION "${_sdk_share}/licenses" RENAME sokol-LICENSE)
 endif()
 
-set(MINUVEX_PACKAGE_FLAVOR cpu)
-if(MINUVEX_BUILD_RENDERER)
-    set(MINUVEX_PACKAGE_FLAVOR native)
+set(MINVEX_PACKAGE_FLAVOR cpu)
+if(MINVEX_BUILD_RENDERER)
+    set(MINVEX_PACKAGE_FLAVOR native)
 endif()
 configure_file("${CMAKE_CURRENT_LIST_DIR}/sdk-manifest.json.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/sdk-manifest.json.in" @ONLY)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sdk/$<CONFIG>/sdk-manifest.json"
     INPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/sdk-manifest.json.in")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sdk/$<CONFIG>/sdk-manifest.json" DESTINATION "${_sdk_share}")
-set(CPACK_PACKAGE_NAME Minuvex)
+set(CPACK_PACKAGE_NAME Minvex)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Minuvex static C++20 SDK")
-set(CPACK_PACKAGE_VENDOR Minuvex)
-set(_sdk_package_base "Minuvex-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${MINUVEX_PACKAGE_FLAVOR}-${CMAKE_CXX_COMPILER_ID}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Minvex static C++20 SDK")
+set(CPACK_PACKAGE_VENDOR Minvex)
+set(_sdk_package_base "Minvex-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${MINVEX_PACKAGE_FLAVOR}-${CMAKE_CXX_COMPILER_ID}")
 set(CPACK_PACKAGE_FILE_NAME "${_sdk_package_base}-${CMAKE_BUILD_TYPE}")
-configure_file("${CMAKE_CURRENT_LIST_DIR}/CPackOptions.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/MinuvexCPackOptions.cmake" @ONLY)
-set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_CURRENT_BINARY_DIR}/MinuvexCPackOptions.cmake")
+configure_file("${CMAKE_CURRENT_LIST_DIR}/CPackOptions.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/MinvexCPackOptions.cmake" @ONLY)
+set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_CURRENT_BINARY_DIR}/MinvexCPackOptions.cmake")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/packages")
 set(CPACK_PACKAGE_CHECKSUM SHA256)

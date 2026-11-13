@@ -1,4 +1,4 @@
-#include <minuvex/Asset.h>
+#include <minvex/Asset.h>
 #include "AnimationEvaluation.h"
 
 #include <algorithm>

@@ -1,4 +1,4 @@
-#include <minuvex/Asset.h>
+#include <minvex/Asset.h>
 #include "AnimationEvaluation.h"
 
 #include <algorithm>
@@ -153,14 +153,14 @@ void AnimationPlayer::Bind(ModelHandle model) {
     if (model) {ValidateMorphModel(*model);}
     morphOverrides_.clear();
     model_ = std::move(model); clip_.reset(); time_ = 0; speed_ = 1; loop_ = true; state_ = PlaybackState::Stopped;
-    blend_.reset();tree_.reset();overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
+    blend_.reset();tree_.reset();additive_.reset();overrides_ = {}; if (model_) { overrides_.SkeletonSignature = SkeletonSignature(model_->Skeleton); }
 }
-bool AnimationPlayer::NeedsEvaluation() const noexcept { return model_ && (clip_.has_value() || tree_.has_value() || !overrides_.Joints.empty() || !model_->Skins.empty() || std::any_of(model_->Meshes.begin(),model_->Meshes.end(),[](const auto& mesh){return !mesh.MorphWeights.empty();})); }
+bool AnimationPlayer::NeedsEvaluation() const noexcept { return model_ && (clip_.has_value() || tree_.has_value() || additive_.has_value() || !overrides_.Joints.empty() || !model_->Skins.empty() || std::any_of(model_->Meshes.begin(),model_->Meshes.end(),[](const auto& mesh){return !mesh.MorphWeights.empty();})); }
 void AnimationPlayer::Rebind(ModelHandle model) {
     Require(bool(model),"Rebind requires a nonempty replacement model.");
     AnimationPlayer next; next.Bind(std::move(model));
     next.speed_ = speed_; next.loop_ = loop_;
-    if (clip_ || tree_ || !overrides_.Joints.empty()) {
+    if (clip_ || tree_ || additive_ || !overrides_.Joints.empty()) {
         Require(model_ && SkeletonSignature(model_->Skeleton) == SkeletonSignature(next.model_->Skeleton),
             "Reimport changed a skeleton/reference hierarchy used by animation or pose overrides.");
     }
@@ -180,6 +180,7 @@ void AnimationPlayer::Rebind(ModelHandle model) {
         if (blend_->SourceClip) {const auto source=*blend_->SourceClip;Require(source<next.model_->Animations.size() && next.model_->Animations[source].Name == model_->Animations[source].Name,"Reimport changed the blend source clip identity.");}
         next.RestoreBlend(*blend_);
     }
+    if (additive_) {const auto clip=additive_->Clip;Require(clip<next.model_->Animations.size() && next.model_->Animations[clip].Name==model_->Animations[clip].Name,"Reimport changed the additive clip identity.");next.RestoreAdditiveAnimation(*additive_);}
     (void)next.Evaluate();
     *this = std::move(next);
 }
@@ -222,9 +223,9 @@ void AnimationPlayer::ValidateBlend(const AnimationBlendState& state) const {
     check(*clip_);if (state.SourceClip) {check(*state.SourceClip);}
 }
 void AnimationPlayer::RestoreBlend(const AnimationBlendState& state) {ValidateBlend(state);auto candidate=state;blend_=std::move(candidate);}
-void AnimationPlayer::Pause() noexcept { if (state_ == PlaybackState::Playing) { state_ = PlaybackState::Paused; } }
-void AnimationPlayer::Resume() { Require(model_ && (clip_ || tree_),"Select an animation clip or tree before resuming."); state_ = PlaybackState::Playing; }
-void AnimationPlayer::Stop() noexcept { time_ = 0;if (tree_) {tree_->Phase=0;} state_ = PlaybackState::Stopped;blend_.reset(); }
+void AnimationPlayer::Pause() noexcept { if (state_ == PlaybackState::Playing) { state_ = PlaybackState::Paused; }if (additive_ && additive_->State==PlaybackState::Playing) {additive_->State=PlaybackState::Paused;} }
+void AnimationPlayer::Resume() { Require(model_ && (clip_ || tree_ || additive_),"Select an animation clip, tree or additive layer before resuming.");if (clip_ || tree_) {state_=PlaybackState::Playing;}if (additive_) {additive_->State=model_->Animations[additive_->Clip].Duration==0 ? PlaybackState::Stopped:PlaybackState::Playing;} }
+void AnimationPlayer::Stop() noexcept { time_ = 0;if (tree_) {tree_->Phase=0;}if (additive_) {additive_->Time=0;additive_->State=PlaybackState::Stopped;}state_ = PlaybackState::Stopped;blend_.reset(); }
 void AnimationPlayer::Seek(double seconds) {
     Require(model_ && clip_.has_value() && std::isfinite(seconds) && seconds >= 0,"Seek requires a clip and finite nonnegative time.");
     time_ = std::min(seconds,model_->Animations[*clip_].Duration);
@@ -233,12 +234,18 @@ void AnimationPlayer::Seek(double seconds) {
 void AnimationPlayer::SetSpeed(double speed) { Require(std::isfinite(speed) && std::abs(speed) <= 100,"Playback speed must be finite and in [-100,100]."); speed_ = speed; }
 void AnimationPlayer::Update(double deltaSeconds) {
     Require(std::isfinite(deltaSeconds) && deltaSeconds >= 0,"Animation delta time must be finite and nonnegative.");
-    if (tree_) {
-        if (state_!=PlaybackState::Playing || speed_==0 || deltaSeconds==0) {return;}const auto duration=BlendTreeDuration();if (duration==0) {tree_->Phase=0;state_=PlaybackState::Stopped;return;}
-        const auto next=tree_->Phase+deltaSeconds*speed_/duration;Require(std::isfinite(next),"Tree phase advance exceeds numeric range.");
-        if (loop_) {auto phase=std::fmod(next,1.0);tree_->Phase=phase<0 ? phase+1:phase;}else {tree_->Phase=std::clamp(next,0.0,1.0);if ((speed_>0 && next>=1) || (speed_<0 && next<=0)) {state_=PlaybackState::Stopped;}}return;
+    double additiveTime=additive_ ? additive_->Time:0;auto additiveState=additive_ ? additive_->State:PlaybackState::Stopped;
+    if (additive_ && additiveState==PlaybackState::Playing && speed_!=0 && additive_->Speed!=0 && deltaSeconds!=0) {
+        const auto duration=model_->Animations[additive_->Clip].Duration;const auto shift=deltaSeconds*speed_*additive_->Speed;Require(std::isfinite(shift),"Additive time advance exceeds numeric range.");const auto next=additiveTime+shift;Require(std::isfinite(next),"Additive time advance exceeds numeric range.");
+        if (duration==0) {additiveTime=0;additiveState=PlaybackState::Stopped;}else if (additive_->Loop) {additiveTime=std::fmod(next,duration);if (additiveTime<0) {additiveTime+=duration;}}else {additiveTime=std::clamp(next,0.0,duration);if ((shift>0 && next>=duration) || (shift<0 && next<=0)) {additiveState=PlaybackState::Stopped;}}
     }
-    if (state_ != PlaybackState::Playing || !model_ || !clip_ || speed_ == 0 || deltaSeconds == 0) { return; }
+    const auto commitAdditive=[&] {if (additive_) {additive_->Time=additiveTime;additive_->State=additiveState;}};
+    if (tree_) {
+        if (state_!=PlaybackState::Playing || speed_==0 || deltaSeconds==0) {commitAdditive();return;}const auto duration=BlendTreeDuration();if (duration==0) {tree_->Phase=0;state_=PlaybackState::Stopped;commitAdditive();return;}
+        const auto next=tree_->Phase+deltaSeconds*speed_/duration;Require(std::isfinite(next),"Tree phase advance exceeds numeric range.");
+        if (loop_) {auto phase=std::fmod(next,1.0);tree_->Phase=phase<0 ? phase+1:phase;}else {tree_->Phase=std::clamp(next,0.0,1.0);if ((speed_>0 && next>=1) || (speed_<0 && next<=0)) {state_=PlaybackState::Stopped;}}commitAdditive();return;
+    }
+    if (state_ != PlaybackState::Playing || !model_ || !clip_ || speed_ == 0 || deltaSeconds == 0) {commitAdditive();return;}
     const double shift=deltaSeconds*speed_;Require(std::isfinite(shift),"Animation time advance exceeds numeric range.");
     const auto advance=[&](std::size_t clip,double time) {const double duration=model_->Animations[clip].Duration;if (duration == 0) {return 0.0;}const double next=time+shift;Require(std::isfinite(next),"Animation time advance exceeds numeric range.");if (!loop_) {return std::clamp(next,0.0,duration);}auto wrapped=std::fmod(next,duration);return wrapped<0 ? wrapped+duration:wrapped;};
     const auto next=advance(*clip_,time_);double source=0,elapsed=0;
@@ -247,6 +254,7 @@ void AnimationPlayer::Update(double deltaSeconds) {
     if (blend_) {blend_->SourceTime=source;blend_->Elapsed=elapsed;if (elapsed>=blend_->Duration) {blend_.reset();}}
     const auto duration=model_->Animations[*clip_].Duration;
     if (!blend_ && (duration == 0 || (!loop_ && ((speed_>0 && time_>=duration) || (speed_<0 && time_<=0))))) {state_=PlaybackState::Stopped;}
+    commitAdditive();
 }
 void AnimationPlayer::ApplyPose(const PoseAsset& pose) {
     Require(bool(model_),"Bind a model before applying a pose."); ValidatePose(model_->Skeleton,pose); overrides_ = pose;
@@ -260,7 +268,7 @@ void AnimationPlayer::ClearJointOverride(JointId joint) {
     std::erase_if(overrides_.Joints,[&](const auto& p) { return p.Joint == joint; });
 }
 void AnimationPlayer::ClearOverrides() noexcept { overrides_.Joints.clear(); }
-void AnimationPlayer::ResetPose() noexcept { clip_.reset();tree_.reset(); time_ = 0; state_ = PlaybackState::Stopped;blend_.reset();ClearOverrides();ClearMorphOverrides(); }
+void AnimationPlayer::ResetPose() noexcept { clip_.reset();tree_.reset();additive_.reset(); time_ = 0; state_ = PlaybackState::Stopped;blend_.reset();ClearOverrides();ClearMorphOverrides(); }
 PoseBuffer AnimationPlayer::EvaluateClip(std::optional<std::size_t> clip,double time) const {
     Require(bool(model_),"Bind a model before evaluating its pose.");
     return detail::SampleAnimation(model_->Skeleton,clip ? &model_->Animations[*clip]:nullptr,time);
@@ -272,7 +280,7 @@ PoseBuffer AnimationPlayer::EvaluateBase() const {
     return BlendPoses(model_->Skeleton,source,local,BlendWeight());
 }
 PoseBuffer AnimationPlayer::EvaluatePose() const {
-    const auto base=EvaluateBase();return overrides_.Joints.empty() ? base:ApplyPoseOverrides(model_->Skeleton,base,overrides_);
+    auto base=EvaluateBase();if (additive_ && additive_->Weight>0) {base=ApplyAdditivePose(model_->Skeleton,base,EvaluateAdditive(),additive_->Weight,additive_->JointMask);}return overrides_.Joints.empty() ? base:ApplyPoseOverrides(model_->Skeleton,base,overrides_);
 }
 PoseAsset AnimationPlayer::CapturePose(std::string name) const {
     const auto local = EvaluatePose(); PoseAsset pose; pose.Name = std::move(name); pose.SkeletonSignature = local.SkeletonSignature;

@@ -172,6 +172,24 @@ Result<void> Viewer::SetBlendParameter(ObjectId id,std::string_view name,float v
 Result<void> Viewer::SeekBlendTree(ObjectId id,double phase) {
     auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SeekBlendTree(phase);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a normalized tree phase in [0,1]."));}
 }
+Result<void> Viewer::SetAdditiveAnimation(ObjectId id,std::size_t clip,float weight,const PoseAsset& reference,std::span<const float> mask) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetAdditiveAnimation(clip,weight,reference,mask);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a TRS clip, compatible reference pose and weights in [0,1]."));}
+}
+Result<void> Viewer::RestoreAdditiveAnimation(ObjectId id,const AdditiveAnimationState& state) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).RestoreAdditiveAnimation(state);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid additive playback state and reference pose."));}
+}
+Result<void> Viewer::SetAdditiveWeight(ObjectId id,float weight) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetAdditiveWeight(weight);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Select an additive layer and use weight in [0,1]."));}
+}
+Result<void> Viewer::SetAdditiveMask(ObjectId id,std::span<const float> mask) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SetAdditiveMask(mask);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use one [0,1] weight per skeleton node, or an empty mask."));}
+}
+Result<void> Viewer::SeekAdditive(ObjectId id,double seconds) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).SeekAdditive(seconds);return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Select an additive layer and a finite nonnegative time."));}
+}
+Result<void> Viewer::ClearAdditiveAnimation(ObjectId id) {
+    auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.GetAnimation(id).ClearAdditiveAnimation();return Result<void>::Success();}catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a model instance."));}
+}
 Result<void> Viewer::SetMaterial(ObjectId id,std::size_t index,const MaterialAsset& material) {
     auto ready=Ready(*state_);if (!ready) {return ready;}try {state_->World.SetMaterial(id,index,material);return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(detail::CurrentException(ErrorCode::InvalidArgument,"Use a valid instance material and model-local textures."));}

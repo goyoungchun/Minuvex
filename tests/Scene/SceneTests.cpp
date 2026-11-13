@@ -1,5 +1,5 @@
 #include "TestHarness.h"
-#include <minuvex/Scene.h>
+#include <minvex/Scene.h>
 
 #include <numbers>
 #include <limits>

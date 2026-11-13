@@ -1,6 +1,6 @@
 #pragma once
 
-#include <minuvex/Viewer.h>
+#include <minvex/Viewer.h>
 
 namespace lv::detail {
 

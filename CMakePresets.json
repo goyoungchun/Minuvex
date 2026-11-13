@@ -39,8 +39,8 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "MINUVEX_BUILD_RENDERER": "OFF",
-        "MINUVEX_BUILD_EXAMPLES": "OFF"
+        "MINVEX_BUILD_RENDERER": "OFF",
+        "MINVEX_BUILD_EXAMPLES": "OFF"
       }
     }
   ],

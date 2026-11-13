@@ -1,8 +1,8 @@
-#include <minuvex/EmbeddedRenderer.h>
+#include <minvex/EmbeddedRenderer.h>
 #include <atomic>
 #include <cmath>
 #include <thread>
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
 #include "HostBridge.h"
 #include "platform/GraphicsSession.h"
 #include "renderer/RenderSurface.h"
@@ -18,7 +18,7 @@ Error Exception(ErrorCode fallback) {
     catch (const std::invalid_argument& e) {return {ErrorCode::InvalidArgument,e.what(),"Check the Host contract and Scene parameters.",{}};}
     catch (const std::exception& e) {return {fallback,e.what(),"Check Host compatibility, resource limits and device status.",{}};}
 }
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
 struct FrameCommit {
     bool Pending=true;
     ~FrameCommit() {if (Pending && sg_isvalid() && sg_query_pass_state() == SG_PASSSTATE_NONE) {sg_commit();}}
@@ -60,7 +60,7 @@ struct TargetBinding {
 struct EmbeddedRenderer::Impl {
     std::thread::id Owner=std::this_thread::get_id();
     std::atomic_bool Initialized{false};
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     detail::GraphicsLease Lease{this};
     std::unique_ptr<detail::HostBridge> Bridge;
     std::unique_ptr<detail::RenderSurface> Surface;
@@ -90,8 +90,8 @@ Result<void> EmbeddedRenderer::Initialize(const HostGraphicsContext& context,con
     auto& p=*impl_;auto ready=p.Ready(false);if (!ready) {return ready;}
     if (p.Initialized) {return Failure(ErrorCode::InvalidState,"This EmbeddedRenderer is already initialized.");}
     const auto quality=ExpandQuality(options.Quality);if (!quality) {return Result<void>::Failure(quality.Error());}
-#if MINUVEX_EMBEDDED_GRAPHICS
-    if (!p.Lease.Acquire()) {return Failure(ErrorCode::InvalidState,"Another Minuvex graphics session owns this process.");}
+#if MINVEX_EMBEDDED_GRAPHICS
+    if (!p.Lease.Acquire()) {return Failure(ErrorCode::InvalidState,"Another Minvex graphics session owns this process.");}
     if (sg_isvalid()) {p.Lease.Release();return Failure(ErrorCode::InvalidState,"An external Sokol GFX context is already active.","Use a native Host device without a separate Sokol implementation/session.");}
     try {
         p.Bridge=std::make_unique<detail::HostBridge>(context);auto hostState=p.Bridge->Enter();
@@ -109,7 +109,7 @@ Result<void> EmbeddedRenderer::Initialize(const HostGraphicsContext& context,con
         p.Bridge.reset();p.Lease.Release();return Result<void>::Failure(error);
     }
 #else
-    (void)context;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics was disabled at build time.","Build with MINUVEX_BUILD_RENDERER=ON on Windows or macOS.");
+    (void)context;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics was disabled at build time.","Build with MINVEX_BUILD_RENDERER=ON on Windows or macOS.");
 #endif
 }
 Result<void> EmbeddedRenderer::Update(Scene& scene,double delta) {
@@ -125,7 +125,7 @@ Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const Ho
     if ((!full && (viewport.X < 0 || viewport.Y < 0 || viewport.Width <= 0 || viewport.Height <= 0)) || (options.TargetLoad != EmbeddedTargetLoad::Clear && options.TargetLoad != EmbeddedTargetLoad::Preserve)) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Use an all-zero or positive viewport and a supported target load action.");}
     if (full) {viewport.Width=target.Width;viewport.Height=target.Height;}
     if (target.Width && (viewport.X > target.Width || viewport.Y > target.Height || viewport.Width > target.Width-viewport.X || viewport.Height > target.Height-viewport.Y)) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Viewport must fit inside the Host target in framebuffer pixels.");}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {
         auto hostState=p.Bridge->Enter();FrameCommit frame;sg_reset_state_cache();p.Diagnostics[0]=0;
         if (!target.Width) {p.Target.reset();p.ViewWidth=p.ViewHeight=0;(void)p.Surface->Resize(scene,0,0);frame.Finish();return Result<EmbeddedFrameResult>::Success({});}
@@ -154,7 +154,7 @@ Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const Ho
 }
 Result<void> EmbeddedRenderer::SetQuality(const QualityProfile& profile,const Scene& scene) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {auto scope=p.Bridge->Enter();FrameCommit frame;sg_reset_state_cache();auto result=p.Surface->ApplyQuality(profile,scene,p.ViewWidth,p.ViewHeight);frame.Finish();return result;}
     catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
@@ -163,7 +163,7 @@ Result<void> EmbeddedRenderer::SetQuality(const QualityProfile& profile,const Sc
 }
 Result<QualityState> EmbeddedRenderer::GetQuality() const {
     const auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<QualityState>::Failure(ready.Error());}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     return Result<QualityState>::Success(p.Surface->Quality());
 #else
     return Failure<QualityState>(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -174,7 +174,7 @@ Result<QualityCapabilities> EmbeddedRenderer::GetQualityCapabilities() const {
 }
 Result<void> EmbeddedRenderer::SetDebugOptions(const DebugOptions& options) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {auto scope=p.Bridge->Enter();return p.Surface->SetDebugOptions(options);}catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
     (void)options;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -182,7 +182,7 @@ Result<void> EmbeddedRenderer::SetDebugOptions(const DebugOptions& options) {
 }
 Result<void> EmbeddedRenderer::SetDebugDraw(const DebugDraw& commands) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {auto scope=p.Bridge->Enter();return p.Surface->SetDebugDraw(commands);}catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
     (void)commands;return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -190,7 +190,7 @@ Result<void> EmbeddedRenderer::SetDebugDraw(const DebugDraw& commands) {
 }
 Result<RenderDebugInfo> EmbeddedRenderer::GetRenderDebugInfo() const {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<RenderDebugInfo>::Failure(ready.Error());}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {auto scope=p.Bridge->Enter();return Result<RenderDebugInfo>::Success(p.Surface->Inspect());}catch (...) {return Result<RenderDebugInfo>::Failure(Exception(ErrorCode::Rendering));}
 #else
     return Failure<RenderDebugInfo>(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -198,7 +198,7 @@ Result<RenderDebugInfo> EmbeddedRenderer::GetRenderDebugInfo() const {
 }
 Result<TelemetrySnapshot> EmbeddedRenderer::GetTelemetry() const {
     auto& p=*impl_;auto ready=p.Ready(false);if (!ready) {return Result<TelemetrySnapshot>::Failure(ready.Error());}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {if (p.Initialized) {auto scope=p.Bridge->Enter();return Result<TelemetrySnapshot>::Success(p.Surface->Telemetry(detail::RenderClockSeconds()));}
         if (p.LastTelemetry) {return Result<TelemetrySnapshot>::Success(*p.LastTelemetry);}
     }catch (...) {return Result<TelemetrySnapshot>::Failure(Exception(ErrorCode::Rendering));}
@@ -207,14 +207,14 @@ Result<TelemetrySnapshot> EmbeddedRenderer::GetTelemetry() const {
 }
 Result<void> EmbeddedRenderer::RequestRedraw() {
     auto ready=impl_->Ready();if (!ready) {return ready;}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     impl_->Surface->Invalidate();
 #endif
     return Result<void>::Success();
 }
 Result<void> EmbeddedRenderer::DetachTarget() {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {auto scope=p.Bridge->Enter();sg_reset_state_cache();p.Target.reset();p.ViewWidth=p.ViewHeight=0;Scene empty;(void)p.Surface->Resize(empty,0,0);sg_commit();return Result<void>::Success();}
     catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
@@ -224,7 +224,7 @@ Result<void> EmbeddedRenderer::DetachTarget() {
 Result<void> EmbeddedRenderer::WaitIdle(std::uint32_t timeout) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return ready;}
     if (!timeout || timeout > 60000) {return Failure(ErrorCode::InvalidArgument,"GPU wait timeout must be 1..60000 milliseconds.");}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {auto scope=p.Bridge->Enter();return p.Bridge->WaitIdle(timeout);}catch (...) {return Result<void>::Failure(Exception(ErrorCode::Rendering));}
 #else
     return Failure(ErrorCode::UnsupportedFeature,"Embedded graphics is unavailable.");
@@ -232,7 +232,7 @@ Result<void> EmbeddedRenderer::WaitIdle(std::uint32_t timeout) {
 }
 Result<void> EmbeddedRenderer::Shutdown() {
     auto& p=*impl_;auto ready=p.Ready(false);if (!ready) {return ready;}if (!p.Initialized) {return Result<void>::Success();}
-#if MINUVEX_EMBEDDED_GRAPHICS
+#if MINVEX_EMBEDDED_GRAPHICS
     try {
         auto scope=p.Bridge->Enter();try {p.LastTelemetry=p.Surface->Telemetry(detail::RenderClockSeconds());p.LastTelemetry->Live=false;}catch (...) {}
         p.Target.reset();p.ViewWidth=p.ViewHeight=0;p.Surface.reset();sg_shutdown();scope.reset();p.Bridge.reset();p.Initialized=false;p.Lease.Release();return Result<void>::Success();
@@ -243,7 +243,7 @@ Result<void> EmbeddedRenderer::Shutdown() {
 }
 Result<const void*> EmbeddedRenderer::GetMetalCommandQueue() const {
     const auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<const void*>::Failure(ready.Error());}
-#if MINUVEX_EMBEDDED_GRAPHICS && defined(__APPLE__)
+#if MINVEX_EMBEDDED_GRAPHICS && defined(__APPLE__)
     const void* queue=sg_mtl_command_queue();
     if (queue) {return Result<const void*>::Success(queue);}
     return Failure<const void*>(ErrorCode::Rendering,"The Metal command queue is unavailable.");

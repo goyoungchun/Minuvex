@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Telemetry.h>
+#include <minvex/Telemetry.h>
 #include <memory>
 
 namespace lv::detail {

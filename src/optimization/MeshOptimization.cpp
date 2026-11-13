@@ -1,4 +1,4 @@
-#include <minuvex/Optimization.h>
+#include <minvex/Optimization.h>
 #include <meshoptimizer.h>
 #include <algorithm>
 #include <cmath>

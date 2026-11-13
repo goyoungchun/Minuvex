@@ -1,6 +1,6 @@
 #pragma once
 
-#include <minuvex/Asset.h>
+#include <minvex/Asset.h>
 
 #include <unordered_map>
 

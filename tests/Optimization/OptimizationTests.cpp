@@ -1,7 +1,7 @@
 #include "TestHarness.h"
 #include "OptimizationFixture.h"
-#include <minuvex/Viewer.h>
-#include <minuvex/EditorDocument.h>
+#include <minvex/Viewer.h>
+#include <minvex/EditorDocument.h>
 #include <atomic>
 #include <thread>
 using namespace test;

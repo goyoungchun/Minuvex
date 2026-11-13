@@ -1,6 +1,6 @@
 #pragma once
-#include <minuvex/Quality.h>
-#include <minuvex/Scene.h>
+#include <minvex/Quality.h>
+#include <minvex/Scene.h>
 
 namespace lv::detail {
 QualityCapabilities QueryQualityCapabilities(); // Current D3D11/Metal context, rendering thread only.

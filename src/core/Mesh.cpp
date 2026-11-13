@@ -1,4 +1,4 @@
-#include <minuvex/Mesh.h>
+#include <minvex/Mesh.h>
 
 #include <algorithm>
 #include <cmath>

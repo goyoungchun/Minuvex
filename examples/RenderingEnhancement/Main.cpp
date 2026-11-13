@@ -1,4 +1,4 @@
-#include <minuvex/Viewer.h>
+#include <minvex/Viewer.h>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -32,8 +32,8 @@ int main(int argc,char** argv) {
             else if (arg == "--frames" && i+1<argc) {const std::string_view n=argv[++i];const auto [end,error]=std::from_chars(n.data(),n.data()+n.size(),run.FrameLimit);if (error != std::errc{} || end != n.data()+n.size()) {return 2;}}
             else if (arg == "--pbr") {pbr=true;}
             else if (arg == "--morph") {morph=true;}
-            else {std::puts("Usage: minuvex_rendering_enhancement [--pbr|--morph] [--preset low|medium|high] [--frames N]");return arg == "--help" ? 0:2;}}
-        lv::ViewerOptions options;options.AutoFrame=false;options.Title="Minuvex Rendering Enhancement";options.Quality=lv::MakeQualityProfile(preset);options.Quality.AllowFallback=true;lv::Viewer viewer(options);auto& scene=viewer.GetScene();scene.AddModel(Floor());
+            else {std::puts("Usage: minvex_rendering_enhancement [--pbr|--morph] [--preset low|medium|high] [--frames N]");return arg == "--help" ? 0:2;}}
+        lv::ViewerOptions options;options.AutoFrame=false;options.Title="Minvex Rendering Enhancement";options.Quality=lv::MakeQualityProfile(preset);options.Quality.AllowFallback=true;lv::Viewer viewer(options);auto& scene=viewer.GetScene();scene.AddModel(Floor());
         auto cube=std::make_shared<lv::ModelAsset>();cube->Meshes.push_back({"Cube",{{lv::MakeCube(),0,false}}});cube->Parts.push_back({0});cube->Materials.push_back({});cube->ModelBounds={{-.5f,-.5f,-.5f},{.5f,.5f,.5f}};lv::Transform t;t.Position.Y=.8f;const auto object=scene.AddModel(cube,t);
         scene.MainCamera.Position={4,3,5};scene.MainCamera.Target={0,.5f,0};scene.Sun.Direction={-.4f,-.8f,-.6f};scene.Sun.Intensity=2;scene.Sun.Ambient=.12f;
         scene.PointLights={{{-1,1,1},{1,.15f,.1f},5,5}};scene.SpotLights={{{1,3,1},{-.25f,-1,-.25f},{.1f,.3f,1},10,8,.3f,.7f}};

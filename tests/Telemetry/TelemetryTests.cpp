@@ -1,6 +1,6 @@
 #include "TestHarness.h"
-#include <minuvex/Telemetry.h>
-#include <minuvex/Viewer.h>
+#include <minvex/Telemetry.h>
+#include <minvex/Viewer.h>
 #include <json.hpp>
 #include <limits>
 #include <thread>
@@ -96,7 +96,7 @@ void SystemAndExport() {
     lv::FrameMonitor frames;frames.Record(1,2,1,1);frames.RecordGpu(1,3);s.Frames=frames.Snapshot(1);s.CapturedAtSeconds=1;
     s.Quality.RequestedSettings.MsaaSamples=4;s.Quality.Effective=lv::RenderSettings{};s.Quality.Adjustments.push_back({"MSAA","test explicit fallback"});
     const auto json=temp.File("telemetry.json"),csv=temp.File("telemetry.csv");Check(bool(lv::SaveTelemetry(s,json)),"telemetry JSON export succeeds without Editor");
-    const auto root=nlohmann::json::parse(Read(json));Check(root["format"] == "MinuvexTelemetry" && root["hardware"]["cpu"] == s.Hardware.CpuName,"export preserves UTF-8 metadata");
+    const auto root=nlohmann::json::parse(Read(json));Check(root["format"] == "MinvexTelemetry" && root["hardware"]["cpu"] == s.Hardware.CpuName,"export preserves UTF-8 metadata");
     Check(root["metrics"][0].contains("status") && root["metrics"][0].contains("source") && root["metrics"][0].contains("unit"),"export retains metric reliability, source and units");
     Check(root["frameWindow"]["gpuSampleCount"] == 1 && root["frameWindow"]["lastGpuSampleAtSeconds"] == 1 && root["quality"]["requested"]["msaaSamples"] == 4 && root["quality"]["effective"]["msaaSamples"] == 1 && root["quality"]["adjustments"].size() == 1,"export preserves GPU evidence and requested/effective fallback differences");
     Check(bool(lv::SaveTelemetry(s,csv,lv::TelemetryFormat::Csv)) && Read(csv).find("\"테스트,\"\"CPU\"\"\nsecond line\"") != std::string::npos,"CSV quotes commas, quotes and newlines");

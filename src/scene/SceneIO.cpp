@@ -1,5 +1,5 @@
-#include <minuvex/SceneIO.h>
-#include <minuvex/PoseIO.h>
+#include <minvex/SceneIO.h>
+#include <minvex/PoseIO.h>
 #include "core/Utf8Path.h"
 #include "core/JsonFile.h"
 
@@ -97,6 +97,13 @@ BlendTreeHandle TreeDefinition(const Json& json,const ModelAsset& model) {
 }
 using TreeIds=std::unordered_map<const BlendTreeAsset*,std::size_t>;
 using Trees=std::unordered_map<std::uint64_t,BlendTreeHandle>;
+Json Additive(const AdditiveAnimationState& a,const ModelAsset& model) {
+    return {{"clip",a.Clip},{"clipName",String(model.Animations.at(a.Clip).Name)},{"time",a.Time},{"speed",a.Speed},{"loop",a.Loop},{"weight",a.Weight},{"state",static_cast<unsigned>(a.State)},{"reference",Pose(a.Reference,model.Skeleton)},{"mask",a.JointMask}};
+}
+AdditiveAnimationState Additive(const Json& json,const ModelAsset& model) {
+    AdditiveAnimationState a;a.Clip=static_cast<std::size_t>(UInt(json.at("clip")));Require(a.Clip<model.Animations.size() && String(json.at("clipName"))==model.Animations[a.Clip].Name,"Saved additive clip identity changed.");a.Time=Number(json.at("time"));a.Speed=Number(json.at("speed"));a.Loop=json.at("loop").get<bool>();a.Weight=Float(json.at("weight"));a.State=static_cast<PlaybackState>(UInt(json.at("state"),2));a.Reference=Pose(json.at("reference"),model.Skeleton);
+    const auto& mask=json.at("mask");Require(mask.is_array() && mask.size()<=model.Skeleton.Joints.size(),"Invalid additive mask.");for (const auto& value:mask) {a.JointMask.push_back(Float(value));}return a;
+}
 Json Morphs(const std::vector<MorphPose>& poses) {Json result=Json::array();for (const auto& pose:poses) {result.push_back({{"node",pose.Node},{"weights",pose.Weights}});}return result;}
 std::vector<MorphPose> Morphs(const Json& json,const ModelAsset& model) {
     Require(json.is_array() && json.size()<=model.Nodes.size(),"Invalid morph pose list.");std::vector<MorphPose> result;std::unordered_set<JointId> seen;
@@ -108,7 +115,8 @@ Json Animation(const SceneObject& object,const TreeIds& trees) {
     Require(player.Model() == object.Model,"Scene player was rebound to a foreign model; use Scene::SetModel.");
     (void)player.Evaluate();
     Json json{{"clip",nullptr},{"clipName",""},{"time",player.Time()},{"speed",player.Speed()},{"loop",player.Loop()},
-        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"tree",nullptr},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
+        {"state",static_cast<int>(player.State())},{"overrides",Pose(player.Overrides(),object.Model->Skeleton)},{"blend",nullptr},{"tree",nullptr},{"additive",nullptr},{"morphSignature",MorphFingerprint(*object.Model)},{"morphOverrides",Morphs(player.MorphOverrides())}};
+    if (player.Additive()) {json["additive"]=Additive(*player.Additive(),*object.Model);}
     if (player.Tree()) {const auto& state=*player.Tree();ValidateBlendTree(*object.Model,*state.Tree);json["tree"]={{"id",trees.at(state.Tree.get())},{"phase",state.Phase},{"x",state.X},{"y",state.Y}};}
     if (player.Clip()) { json["clip"] = *player.Clip(); json["clipName"] = String(object.Model->Animations.at(*player.Clip()).Name); }
     if (player.Blend()) {
@@ -119,7 +127,7 @@ Json Animation(const SceneObject& object,const TreeIds& trees) {
     }
     return json;
 }
-void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph,const Trees* trees) {
+void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, bool restoreMorph,const Trees* trees,bool restoreAdditive) {
     const auto& object = scene.GetObject(id);
     if (!object.Model) { Require(json.is_null(),"Empty object cannot have animation state."); return; }
     auto& player = scene.GetAnimation(id);
@@ -151,6 +159,7 @@ void Animation(const Json& json, Scene& scene, ObjectId id, bool restoreBlend, b
         if (restoreMorph) {blend.SourceMorph=Morphs(saved.at("sourceMorph"),*object.Model);}else if (!blend.SourceClip) {for (std::size_t i=0;i<object.Model->Nodes.size();++i) {const auto& node=object.Model->Nodes[i];if (node.MeshIndex && !object.Model->Meshes[*node.MeshIndex].MorphWeights.empty()) {blend.SourceMorph.push_back({static_cast<JointId>(i),node.MorphWeights.empty() ? object.Model->Meshes[*node.MeshIndex].MorphWeights:node.MorphWeights});}}}
         player.RestoreBlend(blend);
     }
+    if (restoreAdditive && !json.at("additive").is_null()) {player.RestoreAdditiveAnimation(Additive(json.at("additive"),*object.Model));}
     (void)player.Evaluate();
 }
 Json ReadJson(const std::filesystem::path& path) { return detail::ReadJsonFile(path,MaxBytes); }
@@ -205,7 +214,7 @@ Error Failure(const std::filesystem::path& path) {
             e.Code == ImportErrorCode::InvalidData ? ErrorCode::InvalidData : ErrorCode::AssetLoad;
         return {code,e.what(),"Restore the referenced glTF/GLB and its resources, or check import settings.",path};
     }
-    catch (const std::invalid_argument& e) { return {ErrorCode::InvalidData,e.what(),"Check the Minuvex Scene/Pose schema, skeleton compatibility and supported limits.",path}; }
+    catch (const std::invalid_argument& e) { return {ErrorCode::InvalidData,e.what(),"Check the Minvex Scene/Pose schema, skeleton compatibility and supported limits.",path}; }
     catch (const Json::exception& e) { return {ErrorCode::InvalidData,e.what(),"Check the scene JSON field types, UTF-8 encoding and required fields.",path}; }
     catch (const std::exception& e) { return {ErrorCode::SceneIo,e.what(),"Check the scene path, permissions and available storage.",path}; }
 }
@@ -215,7 +224,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
     try {
         Require(!path.empty(),"Scene path is empty."); ValidateScene(scene);
         const auto destination = std::filesystem::absolute(path).lexically_normal();
-        Json root{{"format","MinuvexScene"},{"version",9},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
+        Json root{{"format","MinvexScene"},{"version",10},{"assets",Json::array()},{"objects",Json::array()},{"blendTrees",Json::array()}};
         TreeIds trees;
         std::unordered_map<const ModelAsset*,std::size_t> assetIds;
         const auto addAsset = [&](const ModelHandle& model) {
@@ -260,7 +269,7 @@ Result<void> SaveScene(const Scene& scene, const std::filesystem::path& path, st
 Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry& registry) {
     try {
         const auto root = ReadJson(path); const auto version = UInt(root.at("version"));
-        Require(root.at("format") == "MinuvexScene" && (version >= 1 && version <= 9),"Unsupported scene format/version.");
+        Require(detail::MatchesDocumentFormat(root.at("format"), "MinvexScene") && (version >= 1 && version <= 10),"Unsupported scene format/version.");
         const auto& assets = root.at("assets"); const auto& objects = root.at("objects");
         Require(assets.is_array() && assets.size() <= MaxAssets,"Invalid scene asset list.");
         Require(objects.is_array() && objects.size() <= MaxObjects,"Invalid scene object list.");
@@ -323,7 +332,7 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
         for (const auto& object : objects) {
             const auto asset = UInt(object.at("asset"));
             if (asset) { scene.SetModel(ids.at(UInt(object.at("id"))),models.at(asset)); }
-            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8,version>=9 ? &trees:nullptr); }
+            if (version >= 2) { Animation(object.at("animation"),scene,ids.at(UInt(object.at("id"))),version>=6,version>=8,version>=9 ? &trees:nullptr,version>=10); }
             if (version>=7) {Materials(object.at("materials"),scene,ids.at(UInt(object.at("id"))));}
         }
         ValidateScene(scene);
@@ -333,14 +342,14 @@ Result<SceneArchive> LoadScene(const std::filesystem::path& path, AssetRegistry&
 
 Result<void> SavePose(const PoseAsset& pose, const SkeletonAsset& skeleton, const std::filesystem::path& path) {
     try {
-        ValidateSkeleton(skeleton); auto root = Pose(pose,skeleton); root["format"] = "MinuvexPose"; root["version"] = 1;
+        ValidateSkeleton(skeleton); auto root = Pose(pose,skeleton); root["format"] = "MinvexPose"; root["version"] = 1;
         WriteJson(root,path); return Result<void>::Success();
     } catch (...) { return Result<void>::Failure(Failure(path)); }
 }
 Result<PoseAsset> LoadPose(const std::filesystem::path& path, const SkeletonAsset& skeleton) {
     try {
         ValidateSkeleton(skeleton); const auto root = ReadJson(path);
-        Require(root.at("format") == "MinuvexPose" && UInt(root.at("version")) == 1,"Unsupported pose format/version.");
+        Require(detail::MatchesDocumentFormat(root.at("format"), "MinvexPose") && UInt(root.at("version")) == 1,"Unsupported pose format/version.");
         return Result<PoseAsset>::Success(Pose(root,skeleton));
     } catch (...) { return Result<PoseAsset>::Failure(Failure(path)); }
 }

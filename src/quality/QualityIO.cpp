@@ -1,4 +1,4 @@
-#include <minuvex/Quality.h>
+#include <minvex/Quality.h>
 #include "core/JsonFile.h"
 
 #include <algorithm>
@@ -43,14 +43,14 @@ Result<void> SaveQuality(const QualityProfile& p,const std::filesystem::path& pa
         if (a.Lighting) {o["lighting"]=Choice(*a.Lighting,{"unlit","basic","advanced"});}
         if (a.Shadow) {o["shadow"]=Choice(*a.Shadow,{"off","basic","pcf","pcss"});}
         if (a.OnDemand) {o["onDemandRendering"]=Choice(*a.OnDemand,{"off","on","auto"});}
-        Json root{{"format","MinuvexQuality"},{"version",1},{"name",p.Name},{"baseProfile",Choice(p.Base,{"low","medium","high"})},{"allowFallback",p.AllowFallback},{"overrides",o}};
+        Json root{{"format","MinvexQuality"},{"version",1},{"name",p.Name},{"baseProfile",Choice(p.Base,{"low","medium","high"})},{"allowFallback",p.AllowFallback},{"overrides",o}};
         detail::WriteJsonFile(root,path,Limit);return Result<void>::Success();
     } catch (...) {return Result<void>::Failure(Failure(path));}
 }
 Result<QualityProfile> LoadQuality(const std::filesystem::path& path) {
     try {
         const auto root=detail::ReadJsonFile(path,Limit);
-        if ((root.contains("format") && root.at("format") != "MinuvexQuality") || Integer(root.at("version")) != 1) {throw std::invalid_argument("Unsupported quality format/version.");}
+        if ((root.contains("format") && !detail::MatchesDocumentFormat(root.at("format"), "MinvexQuality")) || Integer(root.at("version")) != 1) {throw std::invalid_argument("Unsupported quality format/version.");}
         QualityProfile p;p.Name=root.at("name").get<std::string>();p.Base=Choice<QualityPreset>(root.at("baseProfile"),{"low","medium","high"});
         if (root.contains("allowFallback")) {p.AllowFallback=root.at("allowFallback").get<bool>();}
         const auto& o=root.at("overrides");if (!o.is_object()) {throw std::invalid_argument("Quality overrides must be an object.");}

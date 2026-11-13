@@ -10,6 +10,12 @@
 
 namespace lv::detail {
 using Json=nlohmann::json;
+bool MatchesDocumentFormat(const Json& value, std::string_view expected) {
+    if (!value.is_string()) { return false; }
+    const auto& name = value.get_ref<const std::string&>();
+    if (name == expected) { return true; }
+    return expected.starts_with("Minvex") && name == "Minuvex" + std::string(expected.substr(6));
+}
 Json ReadJsonFile(const std::filesystem::path& path,std::size_t limit) {
     if (path.empty()) {throw std::invalid_argument("Archive path is empty.");}
     std::ifstream stream(path,std::ios::binary|std::ios::ate);

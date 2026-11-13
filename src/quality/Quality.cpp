@@ -1,4 +1,4 @@
-#include <minuvex/Quality.h>
+#include <minvex/Quality.h>
 
 #include <algorithm>
 #include <cmath>

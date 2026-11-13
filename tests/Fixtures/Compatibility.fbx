@@ -1,8 +1,8 @@
-; Minuvex-authored FBX 7.4 ASCII: transformed quad, two-bone skin, one animated layer.
+; Minvex-authored FBX 7.4 ASCII: transformed quad, two-bone skin, one animated layer.
 FBXHeaderExtension: {
     FBXHeaderVersion: 1003
     FBXVersion: 7400
-    Creator: "Minuvex compatibility fixture"
+    Creator: "Minvex compatibility fixture"
 }
 GlobalSettings: {
     Version: 1000

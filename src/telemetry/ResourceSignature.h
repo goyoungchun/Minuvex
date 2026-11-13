@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-#include <minuvex/Scene.h>
+#include <minvex/Scene.h>
 namespace lv::detail {
 inline void HashResourceIdentity(std::uint64_t& hash,const void* identity) noexcept {
     const auto value=reinterpret_cast<std::uintptr_t>(identity);

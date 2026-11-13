@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Animation.h>
+#include <minvex/Animation.h>
 
 namespace lv::detail {
 // Player samples immutable clips validated at Play/RestoreBlend; do not rescan every key each frame.

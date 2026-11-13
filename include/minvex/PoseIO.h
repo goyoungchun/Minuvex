@@ -1,6 +1,6 @@
 #pragma once
-#include <minuvex/Animation.h>
-#include <minuvex/Result.h>
+#include <minvex/Animation.h>
+#include <minvex/Result.h>
 
 namespace lv {
 // Independent .mvxpose.json files, validated against the reference skeleton.

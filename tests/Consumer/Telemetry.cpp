@@ -1,4 +1,4 @@
-#include <minuvex/Telemetry.h>
+#include <minvex/Telemetry.h>
 #include <cstdio>
 int main() {
     const auto hardware=lv::SystemInfo::QueryHardware();lv::SystemMonitor monitor;const auto sample=monitor.Sample(1);

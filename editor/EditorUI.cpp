@@ -142,7 +142,7 @@ void EditorUI::ApplyPending() {
 void EditorUI::FileDialog(Dialog type) {
     controls_.Reset();cameraDrag_=false;dialog_=type;
     FilePickerRequest request;request.Directory=directory_;
-    request.Title=type == Dialog::QuickOpen ? "Open Model":type == Dialog::Import ? "Import Assets":type == Dialog::Open ? "Open Scene":type == Dialog::Save ? "Save Scene As":type == Dialog::Project ? "Choose a project workspace folder":"Minuvex";
+    request.Title=type == Dialog::QuickOpen ? "Open Model":type == Dialog::Import ? "Import Assets":type == Dialog::Open ? "Open Scene":type == Dialog::Save ? "Save Scene As":type == Dialog::Project ? "Choose a project workspace folder":"Minvex";
     const bool save=type == Dialog::Save || type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::QualitySave || type == Dialog::TelemetryJson || type == Dialog::TelemetryCsv;
     request.Mode=save ? FilePickerMode::Save:type == Dialog::Import ? FilePickerMode::Multiple:type == Dialog::Project ? FilePickerMode::Folder:FilePickerMode::Open;
     request.Filter=(type == Dialog::QuickOpen || type == Dialog::Import) ? FilePickerFilter::Model:type == Dialog::Open || type == Dialog::Save ? FilePickerFilter::Scene:type == Dialog::PoseFull || type == Dialog::PosePartial || type == Dialog::PoseLoad ? FilePickerFilter::Pose:type == Dialog::QualitySave || type == Dialog::QualityLoad ? FilePickerFilter::Quality:type == Dialog::TelemetryCsv ? FilePickerFilter::Csv:FilePickerFilter::Json;
@@ -246,7 +246,7 @@ void EditorUI::Menu() {
     }
 }
 void EditorUI::Dockspace() {
-    const auto dock = ImHashStr("MinuvexMainDockspace");
+    const auto dock = ImHashStr("MinvexMainDockspace");
     const bool existed = ImGui::DockBuilderGetNode(dock) != nullptr;
     ImGui::DockSpaceOverViewport(dock,ImGui::GetMainViewport());
     if (resetLayout_ || !existed) {
@@ -447,7 +447,7 @@ void EditorUI::AnimationControls() {
             // Failed Document edits restore snapshots, invalidating Scene references.
             const auto model=Document.GetScene().GetObject(object).Model;const auto& clips=model->Animations;
             const auto& player=Document.GetScene().GetObject(object).Animation;
-            const auto clip=player.Clip();const auto playback=player.State();const auto overrides=player.Overrides().Joints.size();
+            const auto clip=player.Clip();const auto layer=player.Additive();const auto playback=layer && layer->State==PlaybackState::Playing ? PlaybackState::Playing:player.State()==PlaybackState::Stopped && layer ? layer->State:player.State();const auto overrides=player.Overrides().Joints.size();
             const auto tree=player.Tree();
             double time=player.Time();float speed=static_cast<float>(player.Speed());bool loop=player.Loop();
             const auto blending=player.Blend().has_value();const auto weight=player.BlendWeight();const auto elapsed=blending ? player.Blend()->Elapsed:0,durationBlend=blending ? player.Blend()->Duration:0;
@@ -462,7 +462,7 @@ void EditorUI::AnimationControls() {
                 if (ImGui::Button("Play / Restart")) {if (tree) {Report(Document.PlayBlendTree(object,tree->Tree));}else { Report(Document.PlayAnimation(object,clip.value_or(0))); }}
                 ImGui::SameLine(); if (ImGui::Button(playback == PlaybackState::Playing ? "Pause" : "Resume")) {
                     if (playback == PlaybackState::Playing) { Report(Document.PauseAnimation(object)); }
-                    else if (clip || tree) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
+                    else if (clip || tree || layer) { Report(Document.ResumeAnimation(object)); } else { Report(Document.PlayAnimation(object,0)); }
                 }
                 ImGui::SameLine(); if (ImGui::Button("Stop")) { Report(Document.StopAnimation(object)); }
                 if (clip) {
@@ -475,6 +475,7 @@ void EditorUI::AnimationControls() {
                 ImGui::Text("%s | %zu joint overrides",playback == PlaybackState::Playing ? "Playing" : playback == PlaybackState::Paused ? "Paused" : "Stopped",overrides);
                 if (blending) {ImGui::ProgressBar(weight);ImGui::Text("Cross-fade: %.2f / %.2f s",elapsed,durationBlend);}
                 BlendTreeControls(object,model);
+                AdditiveControls(object,model);
             }
         }
     } ImGui::End();
@@ -694,8 +695,8 @@ void EditorUI::Welcome() {
     if (!welcome_ || Document.GetScene().Size() || !Document.Assets().empty()) {return;}
     const auto* viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos({viewport->WorkPos.x+viewport->WorkSize.x*.5f,viewport->WorkPos.y+viewport->WorkSize.y*.45f},ImGuiCond_Appearing,{.5f,.5f});
     ImGui::SetNextWindowSize({560,0},ImGuiCond_Always);
-    if (ImGui::Begin("Welcome to Minuvex",&welcome_,ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("MINUVEX");ImGui::TextWrapped("Open a model and start inspecting. No project is required.");ImGui::Spacing();
+    if (ImGui::Begin("Welcome to Minvex",&welcome_,ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("MINVEX");ImGui::TextWrapped("Open a model and start inspecting. No project is required.");ImGui::Spacing();
         if (ImGui::Button("Open Model",{520,40})) {FileDialog(Dialog::QuickOpen);}
         if (ImGui::Button("Open Scene",{255,32})) {FileDialog(Dialog::Open);}ImGui::SameLine();if (ImGui::Button("New Project",{255,32})) {FileDialog(Dialog::Project);}
         ImGui::TextDisabled("Supported: glTF / GLB / OBJ / FBX");ImGui::Separator();ImGui::TextUnformatted("Recent Files");

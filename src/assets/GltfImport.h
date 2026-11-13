@@ -1,6 +1,6 @@
 #pragma once
 
-#include <minuvex/Asset.h>
+#include <minvex/Asset.h>
 
 namespace lv::detail {
 inline std::string PathText(const std::filesystem::path& path) {

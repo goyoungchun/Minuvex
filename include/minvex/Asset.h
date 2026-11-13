@@ -1,8 +1,8 @@
 #pragma once
 
-#include <minuvex/Math.h>
-#include <minuvex/Animation.h>
-#include <minuvex/Mesh.h>
+#include <minvex/Math.h>
+#include <minvex/Animation.h>
+#include <minvex/Mesh.h>
 
 #include <filesystem>
 #include <functional>

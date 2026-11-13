@@ -1,4 +1,4 @@
-// Minuvex-authored morph fixtures. No build-time Node dependency.
+// Minvex-authored morph fixtures. No build-time Node dependency.
 import {readFileSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {dirname,resolve} from 'node:path';

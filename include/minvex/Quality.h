@@ -1,6 +1,6 @@
 #pragma once
-#include <minuvex/Result.h>
-#include <minuvex/Math.h>
+#include <minvex/Result.h>
+#include <minvex/Math.h>
 
 #include <optional>
 #include <cstdint>

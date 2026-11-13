@@ -1,4 +1,4 @@
-#include <minuvex/Viewer.h>
+#include <minvex/Viewer.h>
 
 #include <charconv>
 #include <cstdio>
@@ -6,7 +6,7 @@
 
 namespace {
 void PrintError(const lv::Error& error) {
-    std::fprintf(stderr,"Minuvex: %s\n%s\n",error.Message.c_str(),error.Hint.c_str());
+    std::fprintf(stderr,"Minvex: %s\n%s\n",error.Message.c_str(),error.Hint.c_str());
 }
 }
 
@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument(argv[i]);
         if (argument == "--help") {
-            std::puts("Usage: minuvex_standalone [model.glb|model.gltf] [--frames N] [--animation clip-index] [--preset low|medium|high] [--quality profile.mvxquality.json] [--allow-fallback] [--telemetry-json path] [--telemetry-csv path]\nLeft drag: orbit | Right/middle/Shift+left drag: pan | Wheel: zoom | F: frame | Esc: close");
+            std::puts("Usage: minvex_standalone [model.glb|model.gltf] [--frames N] [--animation clip-index] [--preset low|medium|high] [--quality profile.mvxquality.json] [--allow-fallback] [--telemetry-json path] [--telemetry-csv path]\nLeft drag: orbit | Right/middle/Shift+left drag: pan | Wheel: zoom | F: frame | Esc: close");
             return 0;
         }
         if (argument == "--frames" && i + 1 < argc) {

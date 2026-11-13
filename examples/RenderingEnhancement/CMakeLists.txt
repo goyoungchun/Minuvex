@@ -1,4 +1,4 @@
-add_executable(minuvex_rendering_enhancement Main.cpp)
-target_link_libraries(minuvex_rendering_enhancement PRIVATE minuvex::viewer)
-set_target_properties(minuvex_rendering_enhancement PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
-minuvex_configure_target(minuvex_rendering_enhancement)
+add_executable(minvex_rendering_enhancement Main.cpp)
+target_link_libraries(minvex_rendering_enhancement PRIVATE minvex::viewer)
+set_target_properties(minvex_rendering_enhancement PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+minvex_configure_target(minvex_rendering_enhancement)

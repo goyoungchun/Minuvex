@@ -1,11 +1,11 @@
-#include <minuvex/Version.h>
-#include <minuvex/EditorDocument.h>
-#include <minuvex/Viewer.h>
-#include <minuvex/EmbeddedRenderer.h>
+#include <minvex/Version.h>
+#include <minvex/EditorDocument.h>
+#include <minvex/Viewer.h>
+#include <minvex/EmbeddedRenderer.h>
 #include <cstdio>
 
 int main(int argc, char** argv) {
-    if (argc != 3 && argc != 4) {std::puts("Usage: minuvex_sdk_cpu model.glb output-directory [morph-model.gltf]");return 2;}
+    if (argc != 3 && argc != 4) {std::puts("Usage: minvex_sdk_cpu model.glb output-directory [morph-model.gltf]");return 2;}
     try {
         const auto& info=lv::GetBuildInfo();
         if (info.Version != lv::Version || info.PointerBits != sizeof(void*)*8) {return 1;}
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         lv::EmbeddedFrameOptions frame;frame.Viewport={8,8,64,48};frame.TargetLoad=lv::EmbeddedTargetLoad::Preserve;
         const auto queue=embedded.GetMetalCommandQueue();if (queue || queue.Error().Code != lv::ErrorCode::InvalidState) {return 1;}
         const auto hardware=lv::SystemInfo::QueryHardware();
-        std::printf("Minuvex %.*s | %.*s | %.*s | %d bit | graphics=%d | %s\n",
+        std::printf("Minvex %.*s | %.*s | %.*s | %d bit | graphics=%d | %s\n",
             int(info.Version.size()),info.Version.data(),int(info.Compiler.size()),info.Compiler.data(),
             int(info.Configuration.size()),info.Configuration.data(),info.PointerBits,info.GraphicsAvailable,hardware.OperatingSystem.c_str());
         return 0;

@@ -1,4 +1,4 @@
-#include <minuvex/Result.h>
+#include <minvex/Result.h>
 
 #include <cstdio>
 #include <memory>

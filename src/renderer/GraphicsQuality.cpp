@@ -62,6 +62,7 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
         if (item.Animation) {
             integer(item.Animation->Clip().has_value());integer(item.Animation->Clip().value_or(0));integer(std::bit_cast<std::uint64_t>(item.Animation->Time()));
             integer(item.Animation->Tree().has_value());if (const auto& tree=item.Animation->Tree()) {integer(tree->Tree->Signature());integer(std::bit_cast<std::uint64_t>(tree->Phase));scalar(tree->X);scalar(tree->Y);}
+            integer(item.Animation->Additive().has_value());if (const auto& a=item.Animation->Additive()) {integer(a->Clip);scalar(a->Weight);integer(a->JointMask.size());for (auto weight:a->JointMask) {scalar(weight);}if (a->Weight>0 && (a->JointMask.empty() || std::any_of(a->JointMask.begin(),a->JointMask.end(),[](float weight){return weight>0;}))) {integer(std::bit_cast<std::uint64_t>(a->Time));}integer(a->Reference.SkeletonSignature);integer(a->Reference.Joints.size());for (const auto& joint:a->Reference.Joints) {integer(joint.Joint);vector(joint.Local.Position);vector(joint.Local.Scale);const auto& q=joint.Local.Rotation;scalar(q.X);scalar(q.Y);scalar(q.Z);scalar(q.W);}}
             integer(item.Animation->Blend().has_value());
             if (const auto& blend=item.Animation->Blend()) {integer(blend->SourceClip.has_value());integer(blend->SourceClip.value_or(0));for (auto value:{blend->SourceTime,blend->Duration,blend->Elapsed}) {integer(std::bit_cast<std::uint64_t>(value));}integer(blend->SourcePose.Joints.size());for (const auto& joint:blend->SourcePose.Joints) {integer(joint.Joint);vector(joint.Local.Position);vector(joint.Local.Scale);const auto& q=joint.Local.Rotation;scalar(q.X);scalar(q.Y);scalar(q.Z);scalar(q.W);}}
             const auto morphs=[&](const auto& poses) {integer(poses.size());for (const auto& pose:poses) {integer(pose.Node);for (auto weight:pose.Weights) {scalar(weight);}}};morphs(item.Animation->MorphOverrides());if (item.Animation->Blend()) {morphs(item.Animation->Blend()->SourceMorph);}
@@ -71,6 +72,6 @@ std::uint64_t SceneRenderSignature(const Scene& scene) {
     } return hash;
 }
 bool SceneHasActiveAnimation(const Scene& scene) {
-    for (const auto& item:scene.CollectRenderItems()) {if (item.Animation && item.Animation->State() == PlaybackState::Playing && item.Animation->Speed() != 0) {return true;}}return false;
+    for (const auto& item:scene.CollectRenderItems()) {if (!item.Animation || item.Animation->Speed()==0) {continue;}if (item.Animation->State()==PlaybackState::Playing) {return true;}if (const auto& a=item.Animation->Additive();a && a->State==PlaybackState::Playing && a->Speed!=0 && a->Weight>0 && (a->JointMask.empty() || std::any_of(a->JointMask.begin(),a->JointMask.end(),[](float weight){return weight>0;}))) {return true;}}return false;
 }
 }

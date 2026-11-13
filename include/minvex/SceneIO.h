@@ -1,13 +1,13 @@
 #pragma once
 
-#include <minuvex/Result.h>
-#include <minuvex/Scene.h>
+#include <minvex/Result.h>
+#include <minvex/Scene.h>
 
 #include <span>
 
 namespace lv {
 
-// Writes version 9 with shared Blend Trees and per-player state; reads versions 1..9.
+// Writes version 10 with per-player Additive state; reads versions 1..10.
 // External model references, library, hierarchy, TRS, camera, lights, animation/pose.
 // Runtime ObjectId/AssetId values are remapped when opening an archive.
 struct SceneArchive {

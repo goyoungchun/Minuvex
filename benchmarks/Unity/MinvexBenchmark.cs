@@ -1,6 +1,6 @@
-// Target: Unity 6.0 LTS. Copy to Assets/MinuvexBenchmark.cs in a Built-in project.
+// Target: Unity 6.0 LTS. Copy to Assets/MinvexBenchmark.cs in a Built-in project.
 // Build: Unity -batchmode -quit -projectPath <project> -executeMethod
-// MinuvexBenchmark.Build -benchmarkPlayer <absolute player path>
+// MinvexBenchmark.Build -benchmarkPlayer <absolute player path>
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -15,7 +15,7 @@ using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 #endif
 
-public sealed class MinuvexBenchmark : MonoBehaviour
+public sealed class MinvexBenchmark : MonoBehaviour
 {
     readonly List<double> intervals = new List<double>();
     readonly FrameTiming[] timing = new FrameTiming[1];
@@ -50,8 +50,8 @@ public sealed class MinuvexBenchmark : MonoBehaviour
             Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
             RenderSettings.ambientMode = AmbientMode.Flat; RenderSettings.ambientLight = new Color(.25f, .25f, .25f);
             RenderSettings.ambientIntensity = 1; RenderSettings.skybox = null; RenderSettings.fog = false;
-            Material material = Resources.Load<Material>("MinuvexBenchmarkMaterial");
-            if (material == null) throw new InvalidOperationException("Run MinuvexBenchmark.Build to include the diffuse material.");
+            Material material = Resources.Load<Material>("MinvexBenchmarkMaterial");
+            if (material == null) throw new InvalidOperationException("Run MinvexBenchmark.Build to include the diffuse material.");
             material.enableInstancing = false;
             int side = (int)Math.Ceiling(Math.Pow(objects, 1.0 / 3.0)); float center = side - 1;
             for (int i = 0; i < objects; ++i)
@@ -93,7 +93,7 @@ public sealed class MinuvexBenchmark : MonoBehaviour
             string gpuMs = "null";
             if (FrameTimingManager.GetLatestTimings(1, timing) != 0 && timing[0].gpuFrameTime > 0) gpuMs = timing[0].gpuFrameTime.ToString("R", CultureInfo.InvariantCulture);
             string backend = SystemInfo.graphicsDeviceType == GraphicsDeviceType.Direct3D11 ? "d3d11" : SystemInfo.graphicsDeviceType == GraphicsDeviceType.Metal ? "metal" : SystemInfo.graphicsDeviceType.ToString();
-            string json = "{\"format\":\"MinuvexBenchmark\",\"version\":2,\"engine\":\"Unity\",\"engineVersion\":" + Q(Application.unityVersion)
+            string json = "{\"format\":\"MinvexBenchmark\",\"version\":2,\"engine\":\"Unity\",\"engineVersion\":" + Q(Application.unityVersion)
                 + ",\"scenario\":\"shared-cubes-v2-unbatched\",\"objects\":" + objects + ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" + warmup + ",\"measuredFrames\":" + frames
                 + ",\"lod\":false,\"instancing\":false,\"frustumCulling\":true,\"postProcessing\":false,\"compression\":\"none\""
                 + ",\"backend\":" + Q(backend) + ",\"gpu\":" + Q(SystemInfo.graphicsDeviceName)
@@ -112,11 +112,11 @@ public sealed class MinuvexBenchmark : MonoBehaviour
         if (GraphicsSettings.currentRenderPipeline != null) throw new InvalidOperationException("Use a Built-in Render Pipeline project.");
         Directory.CreateDirectory("Assets/Resources");
         Shader shader = Shader.Find("Legacy Shaders/Diffuse"); if (shader == null) throw new InvalidOperationException("Diffuse shader unavailable.");
-        const string materialPath = "Assets/Resources/MinuvexBenchmarkMaterial.mat";
+        const string materialPath = "Assets/Resources/MinvexBenchmarkMaterial.mat";
         if (AssetDatabase.LoadAssetAtPath<Material>(materialPath) == null) AssetDatabase.CreateAsset(new Material(shader), materialPath);
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-        new GameObject("Benchmark").AddComponent<MinuvexBenchmark>();
-        const string scene = "Assets/MinuvexBenchmark.unity"; EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(), scene);
+        new GameObject("Benchmark").AddComponent<MinvexBenchmark>();
+        const string scene = "Assets/MinvexBenchmark.unity"; EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(), scene);
         PlayerSettings.colorSpace = ColorSpace.Linear; PlayerSettings.enableFrameTimingStats = true;
         BuildTarget target = Application.platform == RuntimePlatform.OSXEditor ? BuildTarget.StandaloneOSX : BuildTarget.StandaloneWindows64;
         PlayerSettings.SetUseDefaultGraphicsAPIs(target, false);

@@ -1,11 +1,11 @@
 #pragma once
 
-#include <minuvex/Result.h>
-#include <minuvex/Scene.h>
-#include <minuvex/Quality.h>
-#include <minuvex/Telemetry.h>
-#include <minuvex/Debug.h>
-#include <minuvex/AssetLoading.h>
+#include <minvex/Result.h>
+#include <minvex/Scene.h>
+#include <minvex/Quality.h>
+#include <minvex/Telemetry.h>
+#include <minvex/Debug.h>
+#include <minvex/AssetLoading.h>
 
 #include <functional>
 #include <memory>
@@ -41,7 +41,7 @@ struct CameraControlOptions {
 
 struct ViewerOptions {
     int Width = 1280, Height = 720;
-    std::string Title = "Minuvex Viewer"; // UTF-8, at most 126 bytes.
+    std::string Title = "Minvex Viewer"; // UTF-8, at most 126 bytes.
     bool HighDpi = true;
     bool VSync = true;
     bool EnableDefaultInput = true;
@@ -110,6 +110,12 @@ public:
     Result<void> PlayBlendTree(ObjectId id, BlendTreeHandle tree, bool restart = true);
     Result<void> SetBlendParameter(ObjectId id, std::string_view name, float value);
     Result<void> SeekBlendTree(ObjectId id, double phase);
+    Result<void> SetAdditiveAnimation(ObjectId id, std::size_t clip, float weight = 1, const PoseAsset& reference = {}, std::span<const float> jointMask = {});
+    Result<void> RestoreAdditiveAnimation(ObjectId id, const AdditiveAnimationState& state);
+    Result<void> SetAdditiveWeight(ObjectId id, float weight);
+    Result<void> SetAdditiveMask(ObjectId id, std::span<const float> jointMask);
+    Result<void> SeekAdditive(ObjectId id, double seconds);
+    Result<void> ClearAdditiveAnimation(ObjectId id);
     Result<void> PauseAnimation(ObjectId id);
     Result<void> StopAnimation(ObjectId id);
     Result<void> SetPose(ObjectId id, const PoseAsset& pose); // Manual override after animation.

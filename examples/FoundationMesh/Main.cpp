@@ -1,5 +1,5 @@
-#include <minuvex/Math.h>
-#include <minuvex/Mesh.h>
+#include <minvex/Math.h>
+#include <minvex/Mesh.h>
 
 #include "renderer/MeshRenderer.h"
 #include "RuntimePlatform.h"
@@ -36,7 +36,7 @@ void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* m
 }
 
 void Fail(const char* message) {
-    std::fprintf(stderr, "Minuvex: %s\n", message);
+    std::fprintf(stderr, "Minvex: %s\n", message);
     app.Failed = true;
     sapp_request_quit();
 }
@@ -53,7 +53,7 @@ void Initialize() {
         }
         app.Renderer = std::make_unique<lv::detail::MeshRenderer>();
         app.Renderer->Initialize(lv::MakeCube());
-        std::puts("Minuvex Foundation | Space: pause/resume | Esc: quit");
+        std::puts("Minvex Foundation | Space: pause/resume | Esc: quit");
     } catch (const std::exception& error) {
         Fail(error.what());
     }
@@ -104,7 +104,7 @@ void Cleanup() {
         sg_shutdown();
     }
     if (app.SmokeTest && !app.Failed && app.Frames >= 8) {
-        std::puts("Minuvex render smoke test passed (8 frames).");
+        std::puts("Minvex render smoke test passed (8 frames).");
     }
     // Cocoa's application loop terminates the process instead of returning to
     // main. Preserve failure exit codes on macOS as well as Windows.
@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
         if (argument == "--smoke-test") {
             app.SmokeTest = true;
         } else if (argument == "--help") {
-            std::puts("Usage: minuvex_foundation [--smoke-test]\nRenders a lit cube. Space pauses rotation; Esc exits.");
+            std::puts("Usage: minvex_foundation [--smoke-test]\nRenders a lit cube. Space pauses rotation; Esc exits.");
             return 0;
         } else {
             std::fprintf(stderr, "Unknown argument: %s\n", argv[i]);
@@ -145,7 +145,7 @@ int main(int argc, char* argv[]) {
     window.height = 720;
     window.sample_count = 1;
     window.high_dpi = true;
-    window.window_title = "Minuvex | Phase 1 - Foundation Mesh";
+    window.window_title = "Minvex | Phase 1 - Foundation Mesh";
     window.logger.func = Log;
     lv::detail::RunStandaloneApplication(window);
     return (app.Failed || (app.SmokeTest && app.Frames < 8)) ? 1 : 0;

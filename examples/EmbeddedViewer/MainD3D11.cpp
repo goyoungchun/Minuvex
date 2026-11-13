@@ -1,5 +1,5 @@
 // Native Win32 Host: no Sokol App/GFX or ImGui headers, no private SDK headers.
-#include <minuvex/EmbeddedRenderer.h>
+#include <minvex/EmbeddedRenderer.h>
 #include <d3d11_1.h>
 #include <dxgi.h>
 #include <wrl/client.h>
@@ -101,9 +101,9 @@ struct Application {
     void Initialize(const std::filesystem::path& model) {
         // The Host controls DPI policy; texture/viewport dimensions are physical client pixels.
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        WNDCLASSW wc{};wc.lpfnWndProc=Events;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"MinuvexNativeHost";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(wc.hInstance,MAKEINTRESOURCEW(1));RegisterClassW(&wc);
+        WNDCLASSW wc{};wc.lpfnWndProc=Events;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"MinvexNativeHost";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(wc.hInstance,MAKEINTRESOURCEW(1));RegisterClassW(&wc);
         RECT bounds{0,0,800,600};AdjustWindowRect(&bounds,WS_OVERLAPPEDWINDOW,FALSE);
-        Window=CreateWindowExW(0,wc.lpszClassName,L"Minuvex Embedded Viewer - native D3D11 Host",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,nullptr,nullptr,wc.hInstance,this);Require(Window != nullptr,"Cannot create Host window.");
+        Window=CreateWindowExW(0,wc.lpszClassName,L"Minvex Embedded Viewer - native D3D11 Host",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,nullptr,nullptr,wc.hInstance,this);Require(Window != nullptr,"Cannot create Host window.");
         RECT client{};GetClientRect(Window,&client);PendingWidth=client.right;PendingHeight=client.bottom;
         DXGI_SWAP_CHAIN_DESC swap{};swap.BufferDesc.Width=PendingWidth;swap.BufferDesc.Height=PendingHeight;swap.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;swap.SampleDesc.Count=1;swap.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;swap.BufferCount=2;swap.OutputWindow=Window;swap.Windowed=TRUE;swap.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;
         const D3D_FEATURE_LEVEL levels[]{D3D_FEATURE_LEVEL_11_1,D3D_FEATURE_LEVEL_11_0};
@@ -126,7 +126,7 @@ struct Application {
         const double before=Scene.GetAnimation(Object).Time();Require(Renderer.Update(Scene,1.0/30));Require(Scene.GetAnimation(Object).Time() > before,"External Update did not advance animation.");const double advanced=Scene.GetAnimation(Object).Time();
         auto first=Renderer.Render(Scene,original,draw);Require(first);Require(first.Value().SceneRendered && first.Value().Presented,"Embedded frame did not draw/present.");Require(Scene.GetAnimation(Object).Time() == advanced,"Render unexpectedly advanced animation.");
         D3D11_PRIMITIVE_TOPOLOGY topology{};Context->IAGetPrimitiveTopology(&topology);D3D11_VIEWPORT restored{};UINT count=1;Context->RSGetViewports(&count,&restored);ComPtr<ID3D11RenderTargetView> restoredRtv;ComPtr<ID3D11DepthStencilView> restoredDsv;Context->OMGetRenderTargets(1,&restoredRtv,&restoredDsv);UINT mask=0;float restoredBlend[4]{};Context->OMGetBlendState(nullptr,restoredBlend,&mask);
-        Require(topology == D3D11_PRIMITIVE_TOPOLOGY_LINELIST && restored.TopLeftX == 7 && restored.Width == 59 && restoredRtv.Get() == Target.Rtv.Get() && restoredDsv.Get() == Target.Dsv.Get() && mask == 0x13579 && restoredBlend[2] == blend[2],"Minuvex changed Host pipeline state.");
+        Require(topology == D3D11_PRIMITIVE_TOPOLOGY_LINELIST && restored.TopLeftX == 7 && restored.Width == 59 && restoredRtv.Get() == Target.Rtv.Get() && restoredDsv.Get() == Target.Dsv.Get() && mask == 0x13579 && restoredBlend[2] == blend[2],"Minvex changed Host pipeline state.");
         auto pixels=Pixels(Device.Get(),Context.Get(),Target);Require(std::count_if(pixels.begin(),pixels.end(),[](auto p){return (p&0x00FFFFFF) != 0;}) > 50,"External Host target contains no 3D geometry pixels.");
         auto caps=Renderer.GetQualityCapabilities();Require(caps);Require(caps.Value().Backend == lv::GraphicsBackend::D3D11,"Wrong active Embedded backend.");
         lv::DebugOptions diagnostics;diagnostics.View=lv::DebugView::Normal;diagnostics.ShowSkeleton=true;diagnostics.DepthTest=false;Require(Renderer.SetDebugOptions(diagnostics));
@@ -160,7 +160,7 @@ struct Application {
 int main(int argc,char** argv) {
     try {
         const bool smoke=argc > 1 && std::strcmp(argv[1],"--smoke-test") == 0;
-        Application app;app.Initialize(!smoke && argc > 1 ? std::filesystem::path(argv[1]):std::filesystem::path(MINUVEX_EMBEDDED_SAMPLE));if (smoke) {app.Smoke();}
+        Application app;app.Initialize(!smoke && argc > 1 ? std::filesystem::path(argv[1]):std::filesystem::path(MINVEX_EMBEDDED_SAMPLE));if (smoke) {app.Smoke();}
         auto previous=std::chrono::steady_clock::now();std::uint64_t frames=0;
         while (!app.Closing && (!smoke || frames < 3)) {
             MSG message{};while (PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {TranslateMessage(&message);DispatchMessageW(&message);}

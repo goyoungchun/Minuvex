@@ -1,6 +1,6 @@
 #pragma once
-#include <minuvex/Debug.h>
-#include <minuvex/Telemetry.h>
+#include <minvex/Debug.h>
+#include <minvex/Telemetry.h>
 #include <memory>
 
 namespace lv {
@@ -36,7 +36,7 @@ struct EmbeddedFrameResult {
     bool SceneRendered = false, Presented = false;
     int RenderWidth = 0, RenderHeight = 0;
 };
-// Host owns the window, event loop, device and target. Minuvex owns its internal
+// Host owns the window, event loop, device and target. Minvex owns its internal
 // Sokol session/resources, never presents a window. One active graphics session/process.
 // Construct/use/shutdown/destroy on the owning render thread; no concurrent native use.
 class EmbeddedRenderer final {
@@ -59,10 +59,10 @@ public:
     Result<void> SetDebugOptions(const DebugOptions& options);
     Result<void> SetDebugDraw(const DebugDraw& commands);
     Result<RenderDebugInfo> GetRenderDebugInfo() const;
-    Result<void> DetachTarget(); // Release Minuvex's target references before Host resize/replacement.
+    Result<void> DetachTarget(); // Release Minvex's target references before Host resize/replacement.
     Result<void> WaitIdle(std::uint32_t timeoutMilliseconds = 5000); // Explicit GPU completion boundary.
     Result<const void*> GetMetalCommandQueue() const; // Borrowed id<MTLCommandQueue>; valid until Shutdown.
-    Result<void> Shutdown(); // Idempotent; releases only Minuvex's resources/references.
+    Result<void> Shutdown(); // Idempotent; releases only Minvex's resources/references.
     bool IsInitialized() const noexcept; // Thread-safe query; other calls require the owner thread.
 private:
     struct Impl;

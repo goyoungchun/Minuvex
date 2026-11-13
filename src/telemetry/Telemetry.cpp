@@ -1,5 +1,5 @@
-#include <minuvex/Telemetry.h>
-#include <minuvex/Optimization.h>
+#include <minvex/Telemetry.h>
+#include <minvex/Optimization.h>
 #include "ResourceSignature.h"
 #include <algorithm>
 #include <cmath>

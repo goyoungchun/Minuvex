@@ -1,5 +1,5 @@
 // Native Cocoa/Metal Host, independent of Sokol App and Dear ImGui.
-#include <minuvex/EmbeddedRenderer.h>
+#include <minvex/EmbeddedRenderer.h>
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -58,10 +58,10 @@ int main(int argc,char** argv) {
         try {
             const bool smoke=argc > 1 && std::strcmp(argv[1],"--smoke-test") == 0;
             auto app=[NSApplication sharedApplication];[app setActivationPolicy:NSApplicationActivationPolicyRegular];[app finishLaunching];
-            NSWindow* window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,800,600) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];[window setReleasedWhenClosed:NO];window.title=@"Minuvex Embedded Viewer - native Metal Host";
+            NSWindow* window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,800,600) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];[window setReleasedWhenClosed:NO];window.title=@"Minvex Embedded Viewer - native Metal Host";
             id<MTLDevice> device=MTLCreateSystemDefaultDevice();Require(device != nil,"No native Metal device.");
             CAMetalLayer* layer=[CAMetalLayer layer];layer.device=device;layer.pixelFormat=MTLPixelFormatBGRA8Unorm_sRGB;layer.framebufferOnly=YES;window.contentView.wantsLayer=YES;window.contentView.layer=layer;[window makeKeyAndOrderFront:nil];
-            lv::AssetRegistry assets;lv::Scene scene;const auto object=scene.AddModel(assets.LoadModel(!smoke && argc > 1 ? argv[1]:MINUVEX_EMBEDDED_SAMPLE));scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};if (!scene.GetObject(object).Model->Animations.empty()) {scene.GetAnimation(object).Play(0);}
+            lv::AssetRegistry assets;lv::Scene scene;const auto object=scene.AddModel(assets.LoadModel(!smoke && argc > 1 ? argv[1]:MINVEX_EMBEDDED_SAMPLE));scene.MainCamera.Position={0,1,5};scene.MainCamera.Target={0,1,0};if (!scene.GetObject(object).Model->Animations.empty()) {scene.GetAnimation(object).Play(0);}
             lv::EmbeddedRenderer renderer;lv::HostGraphicsContext host{lv::GraphicsBackend::Metal,(__bridge const void*)device,nullptr,lv::EmbeddedColorFormat::Bgra8Srgb,lv::EmbeddedDepthFormat::Depth32Float};lv::EmbeddedOptions options;options.Quality.Overrides.TargetFps=0;Require(renderer.Initialize(host,options));
             auto borrowed=renderer.GetMetalCommandQueue();Require(borrowed);id<MTLCommandQueue> queue=(__bridge id<MTLCommandQueue>)borrowed.Value();if (smoke) {Smoke(device,queue,renderer,scene,object,host);borrowed=renderer.GetMetalCommandQueue();Require(borrowed);queue=(__bridge id<MTLCommandQueue>)borrowed.Value();}
             auto previous=std::chrono::steady_clock::now();std::uint64_t frames=0;

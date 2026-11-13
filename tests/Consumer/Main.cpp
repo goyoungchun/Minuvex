@@ -1,5 +1,5 @@
 // A source-level SDK consumer: public headers and one CMake target only.
-#include <minuvex/Viewer.h>
+#include <minvex/Viewer.h>
 #include <cstdio>
 
 int main(int argc, char* argv[]) {

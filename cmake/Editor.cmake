@@ -10,7 +10,7 @@ FetchContent_Declare(nfde
     URL "https://codeload.github.com/btzy/nativefiledialog-extended/tar.gz/v1.4.1"
     URL_HASH SHA256=4a01eafa921169f009f3e83bea8e287d9e5d0b94ca9064cf7f0a546652d7c884
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-function(minuvex_prepare_native_dialogs)
+function(minvex_prepare_native_dialogs)
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
     set(BUILD_SHARED_LIBS OFF)
     set(NFD_BUILD_TESTS OFF)
@@ -18,43 +18,44 @@ function(minuvex_prepare_native_dialogs)
     set(CMAKE_CXX_STANDARD 20)
     FetchContent_MakeAvailable(nfde)
 endfunction()
-minuvex_prepare_native_dialogs()
-add_library(minuvex_imgui STATIC
+minvex_prepare_native_dialogs()
+add_library(minvex_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp" "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp" "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp" editor/SokolImGui.cpp)
-target_sources(minuvex_imgui PRIVATE third_party/imguizmo/ImGuizmo.cpp)
-target_include_directories(minuvex_imgui SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/third_party/imguizmo")
-target_include_directories(minuvex_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
-target_link_libraries(minuvex_imgui PRIVATE minuvex_sokol_headers)
-target_compile_features(minuvex_imgui PRIVATE cxx_std_20)
+target_sources(minvex_imgui PRIVATE third_party/imguizmo/ImGuizmo.cpp)
+target_include_directories(minvex_imgui SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/third_party/imguizmo")
+target_include_directories(minvex_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
+target_link_libraries(minvex_imgui PRIVATE minvex_sokol_headers)
+target_compile_features(minvex_imgui PRIVATE cxx_std_20)
 
-add_library(minuvex_editor_ui STATIC editor/EditorUI.cpp editor/AssetPanels.cpp editor/PerformancePanel.cpp editor/DebugPanels.cpp editor/SceneViewport.cpp editor/NativeFiles.cpp editor/EditorPreferences.cpp)
-target_sources(minuvex_editor_ui PRIVATE editor/AssetJobs.cpp)
-target_sources(minuvex_editor_ui PRIVATE editor/TransformTools.cpp)
-target_include_directories(minuvex_editor_ui PUBLIC editor PRIVATE src runtime/standalone)
-target_link_libraries(minuvex_editor_ui PUBLIC minuvex_editor_document PRIVATE minuvex_renderer minuvex_imgui minuvex_camera minuvex_sokol_headers minuvex_json_io nfd::nfd)
-target_include_directories(minuvex_editor_ui SYSTEM PRIVATE third_party/json)
+add_library(minvex_editor_ui STATIC editor/EditorUI.cpp editor/AssetPanels.cpp editor/PerformancePanel.cpp editor/DebugPanels.cpp editor/SceneViewport.cpp editor/NativeFiles.cpp editor/EditorPreferences.cpp)
+target_sources(minvex_editor_ui PRIVATE editor/AdditivePanel.cpp)
+target_sources(minvex_editor_ui PRIVATE editor/AssetJobs.cpp)
+target_sources(minvex_editor_ui PRIVATE editor/TransformTools.cpp)
+target_include_directories(minvex_editor_ui PUBLIC editor PRIVATE src runtime/standalone)
+target_link_libraries(minvex_editor_ui PUBLIC minvex_editor_document PRIVATE minvex_renderer minvex_imgui minvex_camera minvex_sokol_headers minvex_json_io nfd::nfd)
+target_include_directories(minvex_editor_ui SYSTEM PRIVATE third_party/json)
 if(APPLE)
     set_source_files_properties(editor/NativeFiles.cpp PROPERTIES LANGUAGE OBJCXX)
-    set_target_properties(minuvex_editor_ui PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
-    target_compile_options(minuvex_editor_ui PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
-    target_link_libraries(minuvex_editor_ui PRIVATE "-framework AppKit")
+    set_target_properties(minvex_editor_ui PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(minvex_editor_ui PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    target_link_libraries(minvex_editor_ui PRIVATE "-framework AppKit")
 elseif(WIN32)
-    target_link_libraries(minuvex_editor_ui PRIVATE shell32)
+    target_link_libraries(minvex_editor_ui PRIVATE shell32)
 endif()
-minuvex_configure_target(minuvex_editor_ui)
-add_executable(minuvex_editor editor/Main.cpp)
-set_target_properties(minuvex_editor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
-target_include_directories(minuvex_editor PRIVATE src runtime/standalone)
-target_link_libraries(minuvex_editor PRIVATE minuvex_editor_ui minuvex_renderer minuvex_imgui minuvex_sokol_app)
+minvex_configure_target(minvex_editor_ui)
+add_executable(minvex_editor editor/Main.cpp)
+set_target_properties(minvex_editor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+target_include_directories(minvex_editor PRIVATE src runtime/standalone)
+target_link_libraries(minvex_editor PRIVATE minvex_editor_ui minvex_renderer minvex_imgui minvex_sokol_app)
 if(WIN32)
-    target_link_libraries(minuvex_editor PRIVATE d3d11)
+    target_link_libraries(minvex_editor PRIVATE d3d11)
 endif()
-target_compile_definitions(minuvex_editor PRIVATE
-    MINUVEX_EDITOR_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/SharedBox.glb"
-    MINUVEX_EDITOR_ANIMATION_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/AnimatedRibbon.gltf"
-    MINUVEX_EDITOR_DOCUMENTATION="${PROJECT_SOURCE_DIR}/README.md"
-    MINUVEX_EDITOR_ASSET_FIXTURES="${PROJECT_SOURCE_DIR}/tests/Fixtures"
-    MINUVEX_EDITOR_TEST_OUTPUT="${PROJECT_BINARY_DIR}/test-output/editor")
-minuvex_configure_target(minuvex_editor)
+target_compile_definitions(minvex_editor PRIVATE
+    MINVEX_EDITOR_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/SharedBox.glb"
+    MINVEX_EDITOR_ANIMATION_SAMPLE="${PROJECT_SOURCE_DIR}/examples/assets/AnimatedRibbon.gltf"
+    MINVEX_EDITOR_DOCUMENTATION="${PROJECT_SOURCE_DIR}/README.md"
+    MINVEX_EDITOR_ASSET_FIXTURES="${PROJECT_SOURCE_DIR}/tests/Fixtures"
+    MINVEX_EDITOR_TEST_OUTPUT="${PROJECT_BINARY_DIR}/test-output/editor")
+minvex_configure_target(minvex_editor)

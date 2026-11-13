@@ -8,7 +8,7 @@ set(_archive "${OUTPUT_ROOT}/fixture.zip")
 file(WRITE "${_archive}" "synthetic checksum fixture; not an SDK")
 file(SHA256 "${_archive}" _digest)
 file(WRITE "${_archive}.sha256" "${_digest}  fixture.zip\n")
-minuvex_verify_archive("${_archive}")
+minvex_verify_archive("${_archive}")
 file(APPEND "${_archive}" "tampered")
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DARCHIVE=${_archive}" -P "${CMAKE_CURRENT_LIST_DIR}/../../cmake/VerifyArchive.cmake"
     RESULT_VARIABLE _result OUTPUT_QUIET ERROR_QUIET)

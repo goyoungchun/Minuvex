@@ -3,8 +3,8 @@
 #include "CameraController.h"
 #include "NativeFiles.h"
 #include "EditorPreferences.h"
-#include <minuvex/EditorDocument.h>
-#include <minuvex/AssetLoading.h>
+#include <minvex/EditorDocument.h>
+#include <minvex/AssetLoading.h>
 
 namespace lv::editor {
 enum class ConsoleLevel { Info, Warning, Error };
@@ -76,6 +76,11 @@ private:
     ModelHandle treeModel_;
     BlendTreeHandle treeDraftSource_;
     BlendTreeDesc treeDraft_;
+    ObjectId additiveObject_=NoObject;
+    ModelHandle additiveModel_;
+    std::size_t additiveClip_=0,additiveReferenceClip_=0;
+    int additiveReferenceKind_=0;
+    double additiveReferenceTime_=0;
     bool grid_=true,gizmoVisible_=false,gizmoBlockInput_=false,gizmoEditing_=false,gizmoSuppressed_=false;
     bool cameraEditing_=false;
     ObjectId gizmoObject_=NoObject;
@@ -128,6 +133,7 @@ private:
     void BoneInspector();
     void AnimationControls();
     void BlendTreeControls(ObjectId object,ModelHandle model);
+    void AdditiveControls(ObjectId object,ModelHandle model);
     void QualitySettings();
     void PerformancePanel();
     const TelemetrySnapshot& RefreshQualityAnalysis();

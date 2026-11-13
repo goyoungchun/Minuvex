@@ -22,7 +22,7 @@ Result<void> EditorPreferences::Load(const std::filesystem::path& path) {
     try {
         std::error_code ec;if (!std::filesystem::exists(path,ec) && !ec) {return Result<void>::Success();}
         const auto json=detail::ReadJsonFile(path,256*1024);
-        if (json.at("format") != "MinuvexEditor" || !json.at("version").is_number_integer() || json.at("version") != 1 || !json.at("recent").is_array() || json.at("recent").size() > 12) {throw std::invalid_argument("Invalid Editor preferences format/version or recent list.");}
+        if (!detail::MatchesDocumentFormat(json.at("format"), "MinvexEditor") || !json.at("version").is_number_integer() || json.at("version") != 1 || !json.at("recent").is_array() || json.at("recent").size() > 12) {throw std::invalid_argument("Invalid Editor preferences format/version or recent list.");}
         EditorPreferences next;next.Directory=Path(json.at("directory"));
         for (const auto& entry:json.at("recent")) {const auto kind=entry.at("kind");if (kind != "model" && kind != "scene") {throw std::invalid_argument("Invalid recent file kind.");}next.Recent.push_back({Path(entry.at("path")),kind == "model" ? RecentKind::Model:RecentKind::Scene});}
         *this=std::move(next);return Result<void>::Success();
@@ -31,7 +31,7 @@ Result<void> EditorPreferences::Load(const std::filesystem::path& path) {
 Result<void> EditorPreferences::Save(const std::filesystem::path& path) const {
     try {
         if (Recent.size() > 12) {throw std::invalid_argument("Too many recent files.");}
-        nlohmann::json json{{"format","MinuvexEditor"},{"version",1},{"directory",Utf8(Directory)},{"recent",nlohmann::json::array()}};
+        nlohmann::json json{{"format","MinvexEditor"},{"version",1},{"directory",Utf8(Directory)},{"recent",nlohmann::json::array()}};
         (void)Path(json["directory"]);
         for (const auto& entry:Recent) {if (entry.Kind != RecentKind::Model && entry.Kind != RecentKind::Scene) {throw std::invalid_argument("Invalid recent file kind.");}auto text=Utf8(entry.Path);(void)Path(text);json["recent"].push_back({{"path",text},{"kind",entry.Kind == RecentKind::Model ? "model":"scene"}});}
         detail::WriteJsonFile(json,path,256*1024);return Result<void>::Success();

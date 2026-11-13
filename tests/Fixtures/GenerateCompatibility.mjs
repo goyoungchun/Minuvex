@@ -1,4 +1,4 @@
-// Minuvex-authored FBX 7400 binary triangle; no third-party model data.
+// Minvex-authored FBX 7400 binary triangle; no third-party model data.
 import {writeFileSync} from 'node:fs';
 const u32=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n);return b;};
 function prop(v) {

@@ -1,4 +1,4 @@
-# Minuvex
+# Minvex
 
 <p align="center">
   <img src="assets/branding/Minvex_banner_transparent.png" alt="Minvex — Lightweight 3D Graphics Engine" width="760">
@@ -12,7 +12,7 @@ GLB/glTF·OBJ·FBX 모델, Scene, Skeleton·Pose·Animation 및 렌더링 디버
 Standalone·Embedded·Editor 실행 방식과 Low·Medium·High·Custom 품질 설정 제공
 
 ### English
-Minuvex is a lightweight C++20 graphics SDK for integrating 3D rendering into C++ applications.  
+Minvex is a lightweight C++20 graphics SDK for integrating 3D rendering into C++ applications.  
 Supports glTF/GLB, OBJ, FBX, scenes, skeletal animation, and rendering diagnostics.  
 Offers Standalone, Embedded, and Editor modes with Low, Medium, High, and Custom quality settings.
 
@@ -24,11 +24,11 @@ Offers Standalone, Embedded, and Editor modes with Low, Medium, High, and Custom
 ```powershell
 cmake --preset windows-release
 cmake --build --preset windows-release --parallel 4
-./out/build/windows-release/bin/minuvex_standalone.exe "path/to/model.glb"
-./out/build/windows-release/bin/minuvex_editor.exe
+./out/build/windows-release/bin/minvex_standalone.exe "path/to/model.glb"
+./out/build/windows-release/bin/minvex_editor.exe
 # 금속/비금속·거칠기 비교 예제
-./out/build/windows-release/bin/minuvex_rendering_enhancement.exe --pbr
-./out/build/windows-release/bin/minuvex_rendering_enhancement.exe --morph
+./out/build/windows-release/bin/minvex_rendering_enhancement.exe --pbr
+./out/build/windows-release/bin/minvex_rendering_enhancement.exe --morph
 ```
 
 ### macOS
@@ -37,20 +37,20 @@ cmake --build --preset windows-release --parallel 4
 ```sh
 cmake --preset macos-release
 cmake --build --preset macos-release --parallel 4
-./out/build/macos-release/bin/minuvex_editor
+./out/build/macos-release/bin/minvex_editor
 ```
 
 ### 기존 C++ 프로젝트에 SDK 연결
-**CMake 설치 및 `minuvex::viewer` 연결**
+**CMake 설치 및 `minvex::viewer` 연결**
 
 ```powershell
 cmake --install out/build/windows-release --config Release --prefix out/sdk-native
 ```
 
 ```cmake
-find_package(Minuvex 1.12 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minvex 1.12 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
-target_link_libraries(my_viewer PRIVATE minuvex::viewer)
+target_link_libraries(my_viewer PRIVATE minvex::viewer)
 ```
 
 ```powershell
@@ -59,6 +59,10 @@ cmake --build build
 ```
 
 ## 분야별 지원 기능
+
+패키지명은 `Minvex`, CMake 타깃은 `minvex::...`, 공개 헤더는 `<minvex/...>`, 실행 파일은 `minvex_*`, 빌드 옵션은 `MINVEX_*`로 통일함. 이전 이름을 사용하는 소비자는 참조를 변경하고 새 빌드 디렉터리에서 다시 구성해야 함. 기존 Scene·Pose·Quality·Editor 설정 파일은 계속 읽을 수 있으며 새 저장 파일은 Minvex 형식 식별자를 사용함.
+
+이름 통일 후 Windows Debug·Release 각각 CTest 13/13, CPU-only Debug 9/9 통과함. Native/CPU SDK ZIP·SHA-256·공백 경로 재배치와 설치된 공개 헤더·외부 소비자 빌드/실행을 확인함. macOS 실기기 빌드는 미검증임.
 
 | 분야 | 현재 지원 기능 |
 |---|---|
@@ -70,9 +74,9 @@ cmake --build build
 | **PBR** | Metallic/Roughness Material·Texture |
 | **Camera** | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking |
 | **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기 |
-| **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Blend1D/Blend2D, Clip Cross-fade, Timeline Scrubbing |
+| **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Blend1D/Blend2D, Additive Animation·Joint Mask, Clip Cross-fade, Timeline Scrubbing |
 | **실행 방식** | Standalone Viewer, Embedded Runtime, Editor |
-| **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Blend Tree 편집, Undo/Redo |
+| **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Blend Tree·Additive 편집, Undo/Redo |
 | **Debugging** | Wireframe, Normal·UV·Depth, Skeleton·Bone Weight, Shadow Map, Bounding Box, GPU Resource Inspector |
 | **Quality** | Low·Medium·High·Custom, 프로파일 저장·불러오기, 지원 기능 검사·Fallback |
 | **Hardware·Performance** | CPU/GPU/OS 정보, FPS·Frame Time, 메모리 사용량·예산, 품질 추천 |

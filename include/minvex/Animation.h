@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Math.h>
+#include <minvex/Math.h>
 
 #include <cstdint>
 #include <cstddef>
@@ -78,6 +78,11 @@ struct PoseBuffer {
     std::vector<PoseChannels> Channels; // Per-node authored TRS bits; missing channels use reference values.
 };
 struct EvaluatedPose { std::vector<Mat4> Local, Global; };
+struct AdditivePose {
+    std::uint64_t SkeletonSignature = 0;
+    std::vector<Transform> LocalDeltas; // Position difference, local rotation delta, positive Scale ratio.
+    std::vector<PoseChannels> Channels;
+};
 enum class BlendTreeKind { Blend1D, Blend2D };
 inline constexpr std::size_t MaxBlendSamples = 64;
 struct BlendSample { std::size_t Clip = 0; float X = 0, Y = 0; };
@@ -114,6 +119,15 @@ void ValidateBlendTree(const ModelAsset& model, const BlendTreeAsset& tree);
 std::vector<float> EvaluateBlendWeights(const BlendTreeAsset& tree, float x, float y = 0);
 PoseBuffer EvaluateBlendTree(const ModelAsset& model, const BlendTreeAsset& tree, float x, float y, double phase);
 enum class PlaybackState { Stopped, Playing, Paused };
+struct AdditiveAnimationState {
+    std::size_t Clip = 0;
+    double Time = 0, Speed = 1; // Layer speed multiplies AnimationPlayer::Speed().
+    bool Loop = true;
+    float Weight = 1;
+    PlaybackState State = PlaybackState::Playing;
+    PoseAsset Reference; // Frozen full/partial reference; empty default selects skeleton reference at setup.
+    std::vector<float> JointMask; // Empty means all nodes; otherwise one [0,1] value per node.
+};
 struct AnimationBlendState {
     std::optional<std::size_t> SourceClip; // Live source; absent means a frozen full SourcePose.
     double SourceTime = 0;
@@ -139,6 +153,10 @@ PoseBuffer BlendPoses(const SkeletonAsset& skeleton, const PoseBuffer& from, con
     float weight, std::span<const PoseChannels> channelMask = {});
 PoseBuffer ApplyPoseOverrides(const SkeletonAsset& skeleton, const PoseBuffer& base, const PoseAsset& overrides);
 EvaluatedPose ComposePose(const SkeletonAsset& skeleton, const PoseBuffer& pose);
+void ValidateAdditivePose(const SkeletonAsset& skeleton, const AdditivePose& pose);
+AdditivePose MakeAdditivePose(const SkeletonAsset& skeleton, const PoseBuffer& sample, const PoseBuffer& reference);
+PoseBuffer ApplyAdditivePose(const SkeletonAsset& skeleton, const PoseBuffer& base, const AdditivePose& delta,
+    float weight, std::span<const float> jointMask = {});
 
 // CPU-only, copyable instance state, strong immutable ModelHandle ownership.
 // No shared mutable pose or playback state between Scene model instances.
@@ -155,6 +173,7 @@ public:
     const PoseAsset& Overrides() const noexcept { return overrides_; }
     const std::optional<AnimationBlendState>& Blend() const noexcept { return blend_; }
     const std::optional<BlendTreeState>& Tree() const noexcept { return tree_; }
+    const std::optional<AdditiveAnimationState>& Additive() const noexcept { return additive_; }
     float BlendWeight() const noexcept; // Target weight; 1 when no transition is active.
     bool NeedsEvaluation() const noexcept;
     void Play(std::size_t clip, bool restart = true);
@@ -163,6 +182,12 @@ public:
     void SeekBlendTree(double phase);
     std::vector<float> BlendWeights() const;
     double BlendTreeDuration() const; // Weighted cycle duration in seconds at current parameters.
+    void SetAdditiveAnimation(std::size_t clip, float weight = 1, const PoseAsset& reference = {}, std::span<const float> jointMask = {});
+    void RestoreAdditiveAnimation(const AdditiveAnimationState& state); // Validated setup/Scene restore, strong replacement.
+    void SetAdditiveWeight(float weight);
+    void SetAdditiveMask(std::span<const float> jointMask);
+    void SeekAdditive(double seconds); // Clamp to additive clip duration; preserve playback state.
+    void ClearAdditiveAnimation() noexcept { additive_.reset(); }
     void CrossFade(std::size_t clip, double durationSeconds = .3); // Restarts target; zero switches immediately.
     void RestoreBlend(const AnimationBlendState& state); // Validated Scene restore on a selected, non-stopped target.
     void Pause() noexcept;
@@ -178,6 +203,8 @@ public:
     void ClearOverrides() noexcept;
     void ResetPose() noexcept; // Reference pose: clears clip and overrides.
     PoseAsset CapturePose(std::string name = {}) const;
+    PoseBuffer EvaluateBasePose() const { return EvaluateBase(); } // Before additive/manual layers.
+    AdditivePose EvaluateAdditive() const;
     PoseBuffer EvaluatePose() const; // Current blended local TRS plus manual overrides; Morph stays separate.
     EvaluatedPose Evaluate() const;
     Bounds GetBounds() const; // Current deformed geometry bounds, for camera fitting.
@@ -195,6 +222,7 @@ private:
     PoseAsset overrides_;
     std::optional<AnimationBlendState> blend_;
     std::optional<BlendTreeState> tree_;
+    std::optional<AdditiveAnimationState> additive_;
     std::vector<MorphPose> morphOverrides_;
     std::vector<float> EvaluateMorphClip(JointId node, std::optional<std::size_t> clip, double time) const;
     std::vector<float> EvaluateMorphBase(JointId node) const;

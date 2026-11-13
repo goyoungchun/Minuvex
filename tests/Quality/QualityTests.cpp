@@ -1,5 +1,5 @@
-#include <minuvex/Quality.h>
-#include <minuvex/Viewer.h>
+#include <minvex/Quality.h>
+#include <minvex/Viewer.h>
 #include "TestHarness.h"
 #include <json.hpp>
 #include <limits>
@@ -70,6 +70,9 @@ void Persistence() {
     Check(bool(lv::SaveQuality(p,file)),"quality profile saved independently of Scene");auto loaded=lv::LoadQuality(file);
     Check(loaded && loaded.Value() == p,"base and only explicit overrides round trip, including UTF-8/false/zero");
     const auto bytes=Read(file);auto json=Json::parse(bytes);Check(json["overrides"].size() == 5 && !json["overrides"].contains("msaaSamples"),"defaults are not flattened into Custom overrides");
+    Check(json.at("format") == "MinvexQuality", "new quality profiles write the renamed format");
+    auto legacyBrand=json;legacyBrand["format"]="MinuvexQuality";Write(file,legacyBrand.dump());
+    loaded=lv::LoadQuality(file);Check(loaded && loaded.Value() == p,"pre-rename quality profiles remain readable");
     const auto rejects=[&](Json bad,const char* label){Write(file,bad.dump());auto result=lv::LoadQuality(file);Check(!result && result.Error().Code == lv::ErrorCode::InvalidData,label);};
     auto bad=json;bad["version"]=2;rejects(bad,"future quality schema rejected");bad=json;bad["version"]=1.0;rejects(bad,"fractional version rejected");bad=json;bad["baseProfile"]="custom";rejects(bad,"Custom is not a base preset");
     bad=json;bad["overrides"]["typo"]=1;rejects(bad,"unknown overrides cannot silently change quality");bad=json;bad["overrides"]["targetFps"]=1.5;rejects(bad,"fractional integer option rejected");bad=json;bad["overrides"]["frustumCulling"]=1;rejects(bad,"nonboolean flag rejected");bad=json;bad["overrides"]["resolutionScale"]=nullptr;rejects(bad,"null override is not treated as missing");

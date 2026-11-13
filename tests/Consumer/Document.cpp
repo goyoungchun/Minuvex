@@ -1,4 +1,4 @@
-#include <minuvex/EditorDocument.h>
+#include <minvex/EditorDocument.h>
 
 #include <cstdio>
 

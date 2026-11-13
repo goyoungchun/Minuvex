@@ -26,7 +26,7 @@ namespace {
 struct Application {
     std::unique_ptr<lv::editor::EditorUI> UI;
     std::filesystem::path Initial, Directory = std::filesystem::current_path();
-    std::filesystem::path Preferences = std::filesystem::current_path()/".minuvex-editor.json";
+    std::filesystem::path Preferences = std::filesystem::current_path()/".minvex-editor.json";
     bool DirectoryExplicit = false;
     std::uint64_t Frames = 0, Limit = 0;
     bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, TelemetrySmoke = false, Gui = false, Failed = false;
@@ -77,11 +77,11 @@ void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* m
 }
 void CheckEditorFileWorkflows() {
     using namespace lv::editor;
-    const auto folder=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/"file-workflows";
+    const auto folder=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/"file-workflows";
     std::filesystem::create_directories(folder);
     const auto source=folder/std::filesystem::path(L"한글 sample.glb");
-    std::filesystem::copy_file(MINUVEX_EDITOR_SAMPLE,source,std::filesystem::copy_options::overwrite_existing);
-    EditorUI ui;ui.InitializeSession({},MINUVEX_EDITOR_SAMPLE,MINUVEX_EDITOR_DOCUMENTATION,false);
+    std::filesystem::copy_file(MINVEX_EDITOR_SAMPLE,source,std::filesystem::copy_options::overwrite_existing);
+    EditorUI ui;ui.InitializeSession({},MINVEX_EDITOR_SAMPLE,MINVEX_EDITOR_DOCUMENTATION,false);
     ui.SetFilePicker([](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Open && request.Filter == FilePickerFilter::Model,"Open Model picker request is incorrect.");return FilePickerResult::Success(std::nullopt);});
     ui.ChooseFiles(EditorFileAction::OpenModel);
     Require(ui.Document.GetScene().Size() == 0 && ui.ConsoleEntries().empty(),"File chooser cancellation changed the Scene or logged an error.");
@@ -103,7 +103,7 @@ void CheckEditorFileWorkflows() {
     Require(!ui.QuitRequested(),"Cancelled Exit was unexpectedly resumed by Save As.");
     ui.RequestNew();ui.RequestOpen(saved);
     Require(ui.Document.GetScene().Size() == 1 && !ui.Document.IsDirty(),"Open Scene did not restore the native Save As document.");
-    ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Multiple,"Import Assets did not request a multiselect dialog.");return FilePickerResult::Success(std::vector<std::filesystem::path>{source,MINUVEX_EDITOR_ANIMATION_SAMPLE});});
+    ui.SetFilePicker([&](const FilePickerRequest& request) {Require(request.Mode == FilePickerMode::Multiple,"Import Assets did not request a multiselect dialog.");return FilePickerResult::Success(std::vector<std::filesystem::path>{source,MINVEX_EDITOR_ANIMATION_SAMPLE});});
     ui.ChooseFiles(EditorFileAction::ImportAssets);
     AwaitPreview(ui);
     Require(ui.HasImportPreview() && ui.ImportPreviewModel() && ui.Document.Assets().size() == 1 && !ui.Document.IsDirty(),"Import Preview mutated the current document before approval.");
@@ -135,7 +135,7 @@ void Init(void* user) noexcept {
         simgui_setup(gui); app.Gui = true;
         auto& io = ImGui::GetIO(); io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        io.IniFilename = app.Smoke ? nullptr : ".minuvex-editor.ini";
+        io.IniFilename = app.Smoke ? nullptr : ".minvex-editor.ini";
 #if defined(_WIN32)
         const char* font = "C:/Windows/Fonts/malgun.ttf";
 #else
@@ -144,7 +144,7 @@ void Init(void* user) noexcept {
         if (std::filesystem::exists(font)) { io.FontDefault = io.Fonts->AddFontFromFileTTF(font,17); }
         ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding = 3; ImGui::GetStyle().FrameRounding = 3;
         app.UI = std::make_unique<lv::editor::EditorUI>();
-        app.UI->InitializeSession(app.Preferences,MINUVEX_EDITOR_SAMPLE,MINUVEX_EDITOR_DOCUMENTATION,!app.Smoke);
+        app.UI->InitializeSession(app.Preferences,MINVEX_EDITOR_SAMPLE,MINVEX_EDITOR_DOCUMENTATION,!app.Smoke);
         if (app.Smoke) {CheckEditorFileWorkflows();}
         if (app.DirectoryExplicit) {app.UI->SetDirectory(app.Directory);}
         if (!app.Initial.empty()) {
@@ -153,7 +153,7 @@ void Init(void* user) noexcept {
         }
         if (app.Smoke) {
             auto& doc = app.UI->Document;
-            const auto asset = doc.ImportModel(app.AnimationSmoke ? MINUVEX_EDITOR_ANIMATION_SAMPLE : MINUVEX_EDITOR_SAMPLE); Require(asset);
+            const auto asset = doc.ImportModel(app.AnimationSmoke ? MINVEX_EDITOR_ANIMATION_SAMPLE : MINVEX_EDITOR_SAMPLE); Require(asset);
             auto group = doc.CreateObject("Editor test group"); Require(group);
             lv::Transform t; t.Position = {-1.5f,0,0}; auto left = doc.PlaceModel(asset.Value(),t,group.Value()); Require(left);
             t.Position.X = 1.5f; Require(doc.PlaceModel(asset.Value(),t,group.Value()));
@@ -161,6 +161,7 @@ void Init(void* user) noexcept {
                 Require(doc.Select(left.Value())); Require(doc.PlayAnimation(left.Value(),0));
                 auto local = doc.GetScene().GetObject(left.Value()).Model->Skeleton.Joints[1].ReferenceLocal; local.Position.X = .25f;
                 Require(doc.SetJointPose(left.Value(),1,local));
+                Require(doc.SetAdditiveAnimation(left.Value(),2,.25f));
             }
             Require(doc.SetCamera(lv::detail::FitSceneCamera(doc.GetScene(),1.5f)));
         }
@@ -183,7 +184,7 @@ void SmokeAfterDraw(Application& app) {
             for (const auto* name : {"Bone Inspector","Animation Controls"}) { const auto* window = ImGui::FindWindowByName(name); Require(window && window->DockId,"Animation panel was not docked."); }
             const auto id = doc.Selection(); const auto& player = doc.GetScene().GetObject(id).Animation;
             Require(player.Time() > app.PreviousTime && player.Overrides().Joints.size() == 1,"Editor tick did not advance animation while preserving overrides.");
-            const auto folder = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT); std::filesystem::create_directories(folder);
+            const auto folder = std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT); std::filesystem::create_directories(folder);
             Require(doc.SavePoseFile(id,folder/"full.mvxpose.json")); Require(doc.SavePoseFile(id,folder/"partial.mvxpose.json",true));
             Require(doc.ClearPoseOverrides(id)); Require(doc.LoadPoseFile(id,folder/"partial.mvxpose.json"));
             Require(doc.GetScene().GetObject(id).Animation.Overrides().Joints.size() == 1,"Editor partial pose reload failed.");
@@ -203,13 +204,14 @@ void SmokeAfterDraw(Application& app) {
         Require(doc.GetScene().Size() == previousCount+1,"Dropping on Viewport failed to place an instance.");
         Require(doc.RemoveObject(doc.Selection()));Require(doc.Select(previousSelection));
         app.FirstTarget = ui.Viewport.ColorImage().id; app.FirstWidth = ui.Viewport.Width();
-        const auto output = std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/(app.TelemetrySmoke ? "telemetry-smoke.mvxscene.json":app.QualitySmoke ? "quality-smoke.mvxscene.json":app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
+        const auto output = std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/(app.TelemetrySmoke ? "telemetry-smoke.mvxscene.json":app.QualitySmoke ? "quality-smoke.mvxscene.json":app.AnimationSmoke ? "animation-smoke.mvxscene.json" : "smoke.mvxscene.json");
         std::filesystem::create_directories(output.parent_path()); Require(doc.Save(output));
         ui.RequestNew(); Require(doc.GetScene().Size() == 0,"New Scene did not reset the document.");
         ui.RequestOpen(output); Require(doc.GetScene().Size() == 3 && doc.Assets().size() == 1 && !doc.IsDirty(),"Editor saved Scene did not reopen.");
         if (app.AnimationSmoke) {
             const auto id = doc.GetScene().ObjectIds()[1]; Require(doc.Select(id));
             Require(doc.GetScene().GetObject(id).Animation.State() == lv::PlaybackState::Playing && doc.GetScene().GetObject(id).Animation.Overrides().Joints.size() == 1,"Editor Scene did not restore animation and pose.");
+            Require(doc.GetScene().GetObject(id).Animation.Additive() && doc.GetScene().GetObject(id).Animation.Additive()->Clip==2,"Editor Scene did not restore its additive preview layer.");
         }
     }
     if (app.AnimationSmoke && app.Frames == 0) { app.PreviousTime = doc.GetScene().GetObject(doc.Selection()).Animation.Time(); }
@@ -221,7 +223,7 @@ void SmokeAfterDraw(Application& app) {
         Require(r.Profiles.size() == 3 && !r.PerformanceValidated,"Editor quality comparison lost initial recommendation assessments.");
         app.RecommendedQuality=r.Preset;Require(!doc.IsDirty(),"Telemetry collection dirtied scene.");
         if (r.Preset) {auto recommended=lv::MakeQualityProfile(*r.Preset);if (app.QualitySmoke) {recommended.Overrides.TargetFps=0;}ui.RequestQualityProfile(std::move(recommended));}
-        const auto dir=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT);Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.json"));Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.csv",lv::TelemetryFormat::Csv));
+        const auto dir=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT);Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.json"));Require(lv::SaveTelemetry(t,dir/"telemetry-smoke.csv",lv::TelemetryFormat::Csv));
         std::puts("Editor telemetry: visible Performance panel, active device/counters, profile comparison/application and JSON/CSV exports passed.");
     }
     if (app.QualitySmoke && app.Frames == 2) {Require(ui.Viewport.Quality().Requested.Base == lv::QualityPreset::High && ui.Viewport.Quality().Applied,"Editor High quality did not commit.");Require(!doc.IsDirty(),"Quality application dirtied Scene data.");}
@@ -271,7 +273,7 @@ void Frame(void* user) noexcept {
         if (!advanced) { throw std::runtime_error(advanced.Error().Message); }
         if (app.QualitySmoke && app.Frames == 2) {
             auto high=lv::MakeQualityProfile(lv::QualityPreset::High);high.AllowFallback=true;high.Overrides.TargetFps=0;Require(app.UI->ApplyQualityProfile(high));
-            const auto file=std::filesystem::path(MINUVEX_EDITOR_TEST_OUTPUT)/"profile.mvxquality.json";Require(lv::SaveQuality(high,file));app.UI->LoadQualityProfile(file);
+            const auto file=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/"profile.mvxquality.json";Require(lv::SaveQuality(high,file));app.UI->LoadQualityProfile(file);
         }
         if (app.QualitySmoke && app.Frames == 4) {
             Require(app.UI->Document.PauseAnimation(app.UI->Document.Selection()));auto p=app.UI->Viewport.Quality().Requested;p.Overrides.OnDemand=lv::OnDemandMode::On;Require(app.UI->ApplyQualityProfile(p));
@@ -291,7 +293,7 @@ void Frame(void* user) noexcept {
             Require(app.UI->Viewport.ColorImage().id != app.FirstTarget && app.UI->Viewport.Width() != app.FirstWidth,"Viewport resize did not replace the target.");
             app.UI->Viewport.Render(app.UI->Document.GetScene());
             app.UI->Viewport.Resize(0,0); Require(!app.UI->Viewport.Texture().id,"Suspended viewport retained its target.");
-            app.UI->Import(std::filesystem::path(MINUVEX_EDITOR_ASSET_FIXTURES)/"Compatibility.obj",false);
+            app.UI->Import(std::filesystem::path(MINVEX_EDITOR_ASSET_FIXTURES)/"Compatibility.obj",false);
             AwaitPreview(*app.UI);
         }
         if (app.Smoke && app.Frames == 5) {ImGui::SetWindowFocus("Asset Inspector");}
@@ -350,13 +352,13 @@ int Run(const std::vector<std::string>& args) {
             } else if (args[i] == "--assets" && i+1 < args.size()) { app.Directory = std::filesystem::absolute(lv::detail::PathFromUtf8(args[++i]));app.DirectoryExplicit=true; }
             else if (args[i] == "--preferences" && i+1 < args.size()) {app.Preferences=std::filesystem::absolute(lv::detail::PathFromUtf8(args[++i]));}
             else if (!args[i].starts_with("--") && app.Initial.empty()) { app.Initial = lv::detail::PathFromUtf8(args[i]); }
-            else { throw std::invalid_argument("Usage: minuvex_editor [model.glb | scene.mvxscene.json] [--assets directory] [--preferences file.json] [--frames N] [--smoke-test]"); }
+            else { throw std::invalid_argument("Usage: minvex_editor [model.glb | scene.mvxscene.json] [--assets directory] [--preferences file.json] [--frames N] [--smoke-test]"); }
         }
         if (app.Smoke) {app.Limit=std::max<std::uint64_t>(18,app.Limit);}
         Require(lv::detail::StandaloneMainThread() && lv::detail::StandaloneApplicationAvailable(),"Editor requires a standalone main-thread application.");
         sapp_desc desc{}; desc.user_data = &app; desc.init_userdata_cb = Init; desc.frame_userdata_cb = Frame;
         desc.cleanup_userdata_cb = Cleanup; desc.event_userdata_cb = Event;
-        desc.width = 1440; desc.height = 900; desc.window_title = "Minuvex Editor"; desc.sample_count = 1;
+        desc.width = 1440; desc.height = 900; desc.window_title = "Minvex Editor"; desc.sample_count = 1;
         desc.high_dpi = true; desc.srgb = true; desc.enable_clipboard = true; desc.clipboard_size = 65536;
         desc.enable_dragndrop = true; desc.max_dropped_files = 32; desc.max_dropped_file_path_length = 16384;
         desc.logger.func = Log; desc.logger.user_data = &app;

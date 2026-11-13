@@ -1,6 +1,6 @@
 #pragma once
-#include <minuvex/Mesh.h>
-#include <minuvex/Math.h>
+#include <minvex/Mesh.h>
+#include <minvex/Math.h>
 #include <span>
 #include <cstddef>
 namespace lv {

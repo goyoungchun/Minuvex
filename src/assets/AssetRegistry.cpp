@@ -1,5 +1,5 @@
-#include <minuvex/Asset.h>
-#include <minuvex/Optimization.h>
+#include <minvex/Asset.h>
+#include <minvex/Optimization.h>
 
 #include "ImportCommon.h"
 

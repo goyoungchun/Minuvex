@@ -31,13 +31,13 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
 
     sg_buffer_desc vertexDesc{};
     vertexDesc.data = {data.Vertices.data(), data.Vertices.size() * sizeof(Vertex)};
-    vertexDesc.label = "minuvex-mesh-vertices";
+    vertexDesc.label = "minvex-mesh-vertices";
     vertices_ = sg_make_buffer(vertexDesc);
 
     sg_buffer_desc indexDesc{};
     indexDesc.usage.index_buffer = true;
     indexDesc.data = {data.Indices.data(), data.Indices.size() * sizeof(std::uint32_t)};
-    indexDesc.label = "minuvex-mesh-indices";
+    indexDesc.label = "minvex-mesh-indices";
     indices_ = sg_make_buffer(indexDesc);
     for (const auto& level:optimized.Lods) {indexDesc.data={level.Indices.data(),level.Indices.size()*sizeof(std::uint32_t)};indexDesc.label="mesh-lod-indices";const auto buffer=sg_make_buffer(indexDesc);lodBuffers_.push_back(buffer);lodCounts_.push_back(static_cast<int>(level.Indices.size()));if (sg_query_buffer_state(buffer) != SG_RESOURCESTATE_VALID) {Shutdown();throw std::runtime_error("Cannot create LOD index buffer.");}}
     morphCount_=morphs.size();morphVertices_=mesh.Vertices.size();
@@ -85,7 +85,7 @@ void MeshRenderer::Initialize(const MeshData& mesh, bool doubleSided, bool skinn
     pipelineDesc.cull_mode = skinned ? SG_CULLMODE_NONE : SG_CULLMODE_BACK;
     pipelineDesc.depth.write_enabled = true;
     pipelineDesc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-    pipelineDesc.label = "minuvex-mesh-pipeline";
+    pipelineDesc.label = "minvex-mesh-pipeline";
     for (int i = 0; i < 2; ++i) {
         pipelineDesc.face_winding = i == 0 ? SG_FACEWINDING_CCW : SG_FACEWINDING_CW;
         pipelines_[i] = sg_make_pipeline(pipelineDesc);

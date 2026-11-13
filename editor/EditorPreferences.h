@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Result.h>
+#include <minvex/Result.h>
 #include <vector>
 
 namespace lv::editor {

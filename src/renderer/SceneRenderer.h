@@ -1,7 +1,7 @@
 #pragma once
 
-#include <minuvex/Scene.h>
-#include <minuvex/Quality.h>
+#include <minvex/Scene.h>
+#include <minvex/Quality.h>
 #include "MeshRenderer.h"
 
 #include <memory>

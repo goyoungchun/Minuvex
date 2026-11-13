@@ -1,5 +1,5 @@
 #pragma once
-#include <minuvex/Optimization.h>
+#include <minvex/Optimization.h>
 #include <algorithm>
 #include <random>
 namespace test {

@@ -1,4 +1,4 @@
-#include <minuvex/AssetLoading.h>
+#include <minvex/AssetLoading.h>
 #include <condition_variable>
 #include <deque>
 #include <mutex>

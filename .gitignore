@@ -4,8 +4,8 @@
 /CMakeUserPresets.json
 .DS_Store
 *.user
-/.minuvex-editor.ini
-/.minuvex-editor.json
+/.minvex-editor.ini
+/.minvex-editor.json
 
 # Publish README and API; keep local planning documents and agent notes ignored.
 *.[mM][dD]

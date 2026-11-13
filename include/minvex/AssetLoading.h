@@ -1,6 +1,6 @@
 #pragma once
-#include <minuvex/Asset.h>
-#include <minuvex/Result.h>
+#include <minvex/Asset.h>
+#include <minvex/Result.h>
 #include <span>
 namespace lv {
 using AssetLoadId=std::uint64_t;

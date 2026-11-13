@@ -1,5 +1,5 @@
 // Regenerate the small, original test assets with `node tests/Fixtures/Generate.mjs`.
-// Node is not needed to build or run Minuvex; generated fixtures are committed.
+// Node is not needed to build or run Minvex; generated fixtures are committed.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { dirname, resolve } from 'node:path';
@@ -48,7 +48,7 @@ for (const [positions, normal] of faces) {
   for (const index of [0,1,2,0,2,3]) geometry.writeUInt16LE(v - 4 + index, 864 + t++ * 2);
 }
 const model = {
-  asset: { version: '2.0', generator: 'Minuvex original fixture generator' },
+  asset: { version: '2.0', generator: 'Minvex original fixture generator' },
   buffers: [{ byteLength: geometry.length, uri: `data:application/octet-stream;base64,${geometry.toString('base64')}` }],
   bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 864, byteStride: 36 }, { buffer: 0, byteOffset: 864, byteLength: 72 }],
   accessors: [

@@ -1,5 +1,5 @@
-#include <minuvex/SceneIO.h>
-#include <minuvex/PoseIO.h>
+#include <minvex/SceneIO.h>
+#include <minvex/PoseIO.h>
 
 int main(int argc, char** argv) {
     if (argc != 4) { return 2; }

@@ -1,5 +1,5 @@
-#include <minuvex/Math.h>
-#include <minuvex/Mesh.h>
+#include <minvex/Math.h>
+#include <minvex/Mesh.h>
 
 #include <array>
 #include <cmath>
