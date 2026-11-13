@@ -66,14 +66,14 @@ cmake --build build
 | **Scene** | 객체 계층·Transform, 모델 인스턴스 공유, Scene 저장·불러오기 |
 | **Mesh** | Static/Skeletal Mesh, GPU Skinning, 정점당 최대 4개 Bone 영향 |
 | **Morph** | Morph Target, GPU Morph, 노드별 독립 Weight, Weight Animation |
-| **Material·Lighting** | Base Color·Texture·Normal Map, Directional/Point/Spot Light, Basic/PCF Shadow, HDR·FXAA |
+| **Material·Lighting** | Base Color·Texture·Normal Map, Directional/Point/Spot Light, Basic/PCF/PCSS Shadow, HDR·FXAA |
 | **PBR** | Metallic/Roughness Material·Texture |
 | **Camera** | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking |
 | **Skeleton·Pose** | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기 |
 | **Animation** | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Blend1D/Blend2D, Additive Animation·Joint Mask, Animation Event, Clip Cross-fade, Timeline Scrubbing |
 | **실행 방식** | Standalone Viewer, Embedded Runtime, Editor |
 | **Editor UX** | OS 파일 탐색기, Quick Open, Drag & Drop, Asset Browser, Hierarchy, Inspector, Gizmo, Blend Tree·Additive·Event Track 편집, Undo/Redo |
-| **Debugging** | Wireframe, Normal·UV·Depth, Skeleton·Bone Weight, Shadow Map, Bounding Box, GPU Resource Inspector |
+| **Debugging** | Wireframe, Normal·UV·Depth, Skeleton·Bone Weight, Shadow Map·Blocker·Penumbra·Visibility, Bounding Box, GPU Resource Inspector |
 | **Quality** | Low·Medium·High·Custom, 프로파일 저장·불러오기, 지원 기능 검사·Fallback |
 | **Hardware·Performance** | CPU/GPU/OS 정보, FPS·Frame Time, 메모리 사용량·예산, 품질 추천 |
 | **Optimization** | Frustum Culling, Rigid LOD, Static Instancing, Mesh Optimization, BC3, On-Demand Rendering |

@@ -32,9 +32,11 @@ void Policy() {
     high.AllowFallback=true;resolved=lv::ResolveQuality(high,caps,640,480);
     Check(resolved && resolved.Value().Effective->Anisotropy == 2 && resolved.Value().Effective->MaxTextureSize == 1024,"texture and anisotropy fallback is reported");
     request=lv::MakeQualityProfile(lv::QualityPreset::Medium);request.Overrides.Lighting=lv::LightingMode::Advanced;request.Overrides.Shadow=lv::ShadowMode::Pcss;request.Overrides.PostProcessing=true;request.Overrides.Lod=true;request.Overrides.LodBias=1.0f;
-    Check(!lv::ResolveQuality(request,Caps(),640,480),"unimplemented rendering enhancements cannot be advertised as effective");
-    request.AllowFallback=true;resolved=lv::ResolveQuality(request,Caps(),640,480);
-    Check(resolved && resolved.Value().Effective->Lighting == lv::LightingMode::Advanced && resolved.Value().Effective->Shadow == lv::ShadowMode::Pcf && resolved.Value().Effective->PostProcessing && resolved.Value().Effective->Lod && resolved.Value().Effective->LodBias == 1 && resolved.Value().Adjustments.size() == 1,"fallback preserves implemented LOD and adjusts only PCSS");
+    resolved=lv::ResolveQuality(request,Caps(),640,480);
+    Check(resolved && resolved.Value().Effective->Shadow == lv::ShadowMode::Pcss && resolved.Value().Adjustments.empty(),"PCSS resolves strictly without fallback on raw shadow-capable devices");
+    auto missing=Caps();missing.ShadowMapping=false;Check(!lv::ResolveQuality(request,missing,640,480),"PCSS requires renderable sampleable shadow formats");
+    request.AllowFallback=true;resolved=lv::ResolveQuality(request,missing,640,480);
+    Check(resolved && resolved.Value().Effective->Shadow == lv::ShadowMode::Off && resolved.Value().Adjustments.size() == 1,"explicit fallback disables unavailable PCSS without changing the request");
     auto compressed=lv::MakeQualityProfile(lv::QualityPreset::Low);compressed.Overrides.Compression=lv::TextureCompression::Bc3;Check(!lv::ResolveQuality(compressed,Caps(),640,480),"explicit BC3 requires capability support");compressed.AllowFallback=true;auto fallback=lv::ResolveQuality(compressed,Caps(),640,480);Check(fallback && fallback.Value().Effective->Compression == lv::TextureCompression::None && !fallback.Value().Adjustments.empty(),"BC3 fallback is explicit and reported");
     request=lv::MakeQualityProfile(lv::QualityPreset::High);caps=Caps();caps.ShadowMapping=caps.HdrPostProcessing=false;
     const auto unavailable=lv::ResolveQuality(request,caps,640,480);request.AllowFallback=true;resolved=lv::ResolveQuality(request,caps,640,480);
@@ -74,7 +76,7 @@ void Persistence() {
     auto legacyBrand=json;legacyBrand["format"]="MinuvexQuality";Write(file,legacyBrand.dump());
     loaded=lv::LoadQuality(file);Check(loaded && loaded.Value() == p,"pre-rename quality profiles remain readable");
     const auto rejects=[&](Json bad,const char* label){Write(file,bad.dump());auto result=lv::LoadQuality(file);Check(!result && result.Error().Code == lv::ErrorCode::InvalidData,label);};
-    auto bad=json;bad["version"]=2;rejects(bad,"future quality schema rejected");bad=json;bad["version"]=1.0;rejects(bad,"fractional version rejected");bad=json;bad["baseProfile"]="custom";rejects(bad,"Custom is not a base preset");
+    auto bad=json;bad["version"]=3;rejects(bad,"future quality schema rejected");bad=json;bad["version"]=1.0;rejects(bad,"fractional version rejected");bad=json;bad["baseProfile"]="custom";rejects(bad,"Custom is not a base preset");
     bad=json;bad["overrides"]["typo"]=1;rejects(bad,"unknown overrides cannot silently change quality");bad=json;bad["overrides"]["targetFps"]=1.5;rejects(bad,"fractional integer option rejected");bad=json;bad["overrides"]["frustumCulling"]=1;rejects(bad,"nonboolean flag rejected");bad=json;bad["overrides"]["resolutionScale"]=nullptr;rejects(bad,"null override is not treated as missing");
     bad=json;bad.erase("format");bad["overrides"]["onDemandRendering"]=true;Write(file,bad.dump());loaded=lv::LoadQuality(file);Check(loaded && loaded.Value().Overrides.OnDemand == lv::OnDemandMode::On,"planning-document v1 boolean onDemand schema remains readable");
     Write(file,"{\"version\":1,\"version\":1}");Check(!lv::LoadQuality(file),"duplicate JSON keys rejected");Write(file,std::string(1024*1024+1,' '));Check(!lv::LoadQuality(file),"oversized quality JSON rejected");
@@ -103,4 +105,28 @@ void PbrPolicy() {
     p.AllowFallback=false;caps.PbrLighting=true;p.Overrides.Lighting=lv::LightingMode::Basic;Check(!lv::ResolveQuality(p,caps,128,128),"PBR requires Advanced lighting");
     p.Overrides.Lighting=lv::LightingMode::Advanced;TemporaryDirectory temp;const auto path=temp.File("Pbr.mvxquality.json");Check(bool(lv::SaveQuality(p,path)) && lv::LoadQuality(path).Value().Overrides.Pbr == true,"PBR override persists in Quality JSON");
 }
-int main() {try {Policy();Persistence();CullingAndPacing();PbrPolicy();}catch (const std::exception& e) {Check(false,e.what());}return Finish();}
+void PcssPolicy() {
+    auto p=lv::MakeQualityProfile(lv::QualityPreset::Low);
+    Check(lv::ExpandQuality(p).Value().Shadow == lv::ShadowMode::Off,"Low retains zero shadow sample cost by default");
+    p.Overrides.Shadow=lv::ShadowMode::Pcss;p.Overrides.ShadowSourceAngle=0.f;p.Overrides.ShadowBlockerSamples=1;p.Overrides.ShadowFilterSamples=64;
+    p.Overrides.ShadowMaxFilterRadius=64.f;p.Overrides.ShadowDepthBias=0.f;p.Overrides.ShadowSlopeBias=.1f;
+    auto resolved=lv::ResolveQuality(p,Caps(),128,128);
+    Check(resolved && resolved.Value().Effective->ShadowSourceAngle == 0 && p.IsCustom(),"zero-angle hard shadow and bounded PCSS overrides remain Custom");
+    auto raw=*resolved.Value().Effective;auto pcf=raw;pcf.Shadow=lv::ShadowMode::Pcf;
+    Check(lv::RenderTargetBytes(raw,128,128) == lv::RenderTargetBytes(pcf,128,128),"PCSS reuses PCF attachments without extra memory");
+    TemporaryDirectory temp;const auto path=temp.File("Pcss.mvxquality.json");
+    Check(lv::SaveQuality(p,path) && lv::LoadQuality(path).Value() == p,"all six PCSS controls preserve explicit zero/one values in Quality v2");
+    auto legacy=Json::parse(Read(path));legacy["version"]=1;legacy["overrides"]=Json::object();Write(path,legacy.dump());
+    auto loaded=lv::LoadQuality(path);Check(loaded && lv::ExpandQuality(loaded.Value()).Value().ShadowSourceAngle == .535f,"legacy v1 profiles receive PCSS defaults without implicit overrides");
+    const auto rejects=[&](auto field,auto value,const char* label) {auto invalid=p;invalid.Overrides.*field=value;Check(!lv::ExpandQuality(invalid),label);};
+    rejects(&lv::QualityOverrides::ShadowSourceAngle,-1.f,"negative angular size rejected");
+    rejects(&lv::QualityOverrides::ShadowSourceAngle,21.f,"oversized angular size rejected");
+    rejects(&lv::QualityOverrides::ShadowSourceAngle,std::numeric_limits<float>::quiet_NaN(),"nonfinite angular size rejected");
+    rejects(&lv::QualityOverrides::ShadowBlockerSamples,0,"empty blocker search rejected");
+    rejects(&lv::QualityOverrides::ShadowFilterSamples,65,"unbounded filter work rejected");
+    rejects(&lv::QualityOverrides::ShadowMaxFilterRadius,.5f,"sub-texel maximum rejected");
+    rejects(&lv::QualityOverrides::ShadowMaxFilterRadius,65.f,"unbounded filter radius rejected");
+    rejects(&lv::QualityOverrides::ShadowDepthBias,-.01f,"negative depth bias rejected");
+    rejects(&lv::QualityOverrides::ShadowSlopeBias,std::numeric_limits<float>::infinity(),"nonfinite slope bias rejected");
+}
+int main() {try {Policy();Persistence();CullingAndPacing();PbrPolicy();PcssPolicy();}catch (const std::exception& e) {Check(false,e.what());}return Finish();}

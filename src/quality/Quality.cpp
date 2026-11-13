@@ -23,7 +23,7 @@ int TextureLimit(TextureQuality q) {
 }
 }
 bool QualityOverrides::Empty() const noexcept {
-    return !Resolution && !ResolutionScale && !FixedWidth && !FixedHeight && !MaxRenderHeight && !TargetFps && !MsaaSamples && !Textures && !Anisotropy && !Lighting && !FrustumCulling && !OnDemand && !Shadow && !ShadowResolution && !Lod && !LodBias && !PostProcessing && !Instancing && !Compression && !Pbr;
+    return !Resolution && !ResolutionScale && !FixedWidth && !FixedHeight && !MaxRenderHeight && !TargetFps && !MsaaSamples && !Textures && !Anisotropy && !Lighting && !FrustumCulling && !OnDemand && !Shadow && !ShadowResolution && !ShadowSourceAngle && !ShadowBlockerSamples && !ShadowFilterSamples && !ShadowMaxFilterRadius && !ShadowDepthBias && !ShadowSlopeBias && !Lod && !LodBias && !PostProcessing && !Instancing && !Compression && !Pbr;
 }
 RenderSettings QualityPresetSettings(QualityPreset preset) {
     RenderSettings s;
@@ -48,6 +48,8 @@ Result<RenderSettings> ExpandQuality(const QualityProfile& p) {
         LV_OVERRIDE(TargetFps) LV_OVERRIDE(MsaaSamples) LV_OVERRIDE(Textures) LV_OVERRIDE(Anisotropy) LV_OVERRIDE(Lighting) LV_OVERRIDE(FrustumCulling)
         LV_OVERRIDE(OnDemand) LV_OVERRIDE(Shadow) LV_OVERRIDE(ShadowResolution) LV_OVERRIDE(Lod) LV_OVERRIDE(LodBias) LV_OVERRIDE(PostProcessing)
         LV_OVERRIDE(Instancing) LV_OVERRIDE(Compression) LV_OVERRIDE(Pbr)
+        LV_OVERRIDE(ShadowSourceAngle) LV_OVERRIDE(ShadowBlockerSamples) LV_OVERRIDE(ShadowFilterSamples)
+        LV_OVERRIDE(ShadowMaxFilterRadius) LV_OVERRIDE(ShadowDepthBias) LV_OVERRIDE(ShadowSlopeBias)
 #undef LV_OVERRIDE
         Require(s.Resolution == ResolutionMode::Relative || s.Resolution == ResolutionMode::Fixed,"Invalid resolution mode.");
         Require(std::isfinite(s.ResolutionScale) && s.ResolutionScale >= .5f && s.ResolutionScale <= 1,"Resolution scale must be in [0.5,1].");
@@ -59,6 +61,10 @@ Result<RenderSettings> ExpandQuality(const QualityProfile& p) {
         Require(s.OnDemand == OnDemandMode::Off || s.OnDemand == OnDemandMode::On || s.OnDemand == OnDemandMode::Auto,"Invalid on-demand mode.");
         Require(s.Shadow == ShadowMode::Off || s.Shadow == ShadowMode::Basic || s.Shadow == ShadowMode::Pcf || s.Shadow == ShadowMode::Pcss,"Invalid shadow mode.");
         Require(s.ShadowResolution == 512 || s.ShadowResolution == 1024 || s.ShadowResolution == 2048 || s.ShadowResolution == 4096,"Shadow resolution must be 512/1024/2048/4096.");
+        Require(std::isfinite(s.ShadowSourceAngle) && s.ShadowSourceAngle >= 0 && s.ShadowSourceAngle <= 20,"Shadow source angle must be in [0,20] degrees.");
+        Require(s.ShadowBlockerSamples >= 1 && s.ShadowBlockerSamples <= 64 && s.ShadowFilterSamples >= 1 && s.ShadowFilterSamples <= 64,"PCSS sample counts must be in [1,64].");
+        Require(std::isfinite(s.ShadowMaxFilterRadius) && s.ShadowMaxFilterRadius >= 1 && s.ShadowMaxFilterRadius <= 64,"Shadow filter radius must be in [1,64] texels.");
+        Require(std::isfinite(s.ShadowDepthBias) && s.ShadowDepthBias >= 0 && s.ShadowDepthBias <= .1f && std::isfinite(s.ShadowSlopeBias) && s.ShadowSlopeBias >= 0 && s.ShadowSlopeBias <= .1f,"Shadow depth/slope bias must be in [0,0.1].");
         Require(std::isfinite(s.LodBias) && std::abs(s.LodBias) <= 4,"LOD bias must be finite and in [-4,4].");
         Require(s.Compression == TextureCompression::None || s.Compression == TextureCompression::Auto || s.Compression == TextureCompression::Bc3,"Invalid texture compression.");
         s.MaxTextureSize=TextureLimit(s.Textures); return Result<RenderSettings>::Success(s);
@@ -78,7 +84,6 @@ Result<QualityState> ResolveQuality(const QualityProfile& p,const QualityCapabil
         };
         const auto unsupported=[&](const char* message) { return Result<QualityState>::Failure({ErrorCode::UnsupportedFeature,message,"Choose supported settings or explicitly allow fallback.",{}}); };
         if (!adjust(s.Pbr && (!caps.PbrLighting || s.Lighting!=LightingMode::Advanced),"pbr","PBR requires supported Advanced lighting; using Basic material shading.",[&]{s.Pbr=false;})) {return unsupported("PBR requires supported Advanced lighting.");}
-        if (!adjust(s.Shadow == ShadowMode::Pcss,"shadow","PCSS is not implemented; using PCF.",[&]{s.Shadow=ShadowMode::Pcf;})) {return unsupported("PCSS is not implemented.");}
         if (!adjust(s.Shadow != ShadowMode::Off && !caps.ShadowMapping,"shadow","Shadow format support is unavailable; disabled.",[&]{s.Shadow=ShadowMode::Off;})) {return unsupported("Shadow render/sample formats are unavailable.");}
         if (!adjust(s.Shadow != ShadowMode::Off && s.ShadowResolution > caps.MaxRenderSize,"shadowResolution","Shadow size clamped to supported power of two.",[&]{while (s.ShadowResolution > 512 && s.ShadowResolution > caps.MaxRenderSize) {s.ShadowResolution/=2;}if (s.ShadowResolution > caps.MaxRenderSize) {s.Shadow=ShadowMode::Off;}})) {return unsupported("Shadow map exceeds the device extent limit.");}
         if (!adjust(s.PostProcessing && !caps.HdrPostProcessing,"postProcessing","HDR render/filter formats are unavailable; disabled.",[&]{s.PostProcessing=false;})) {return unsupported("HDR post processing is unavailable.");}
@@ -109,7 +114,7 @@ Result<QualityState> ResolveQuality(const QualityProfile& p,const QualityCapabil
 }
 std::uint64_t RenderTargetBytes(const RenderSettings& s,int width,int height) {
     Require(width > 0 && height > 0 && width <= 65536 && height <= 65536 && (s.MsaaSamples == 1 || s.MsaaSamples == 2 || s.MsaaSamples == 4 || s.MsaaSamples == 8),"Invalid render target extent/sample count.");
-    Require(s.Shadow == ShadowMode::Off || ((s.Shadow == ShadowMode::Basic || s.Shadow == ShadowMode::Pcf) && (s.ShadowResolution == 512 || s.ShadowResolution == 1024 || s.ShadowResolution == 2048 || s.ShadowResolution == 4096)),"Invalid shadow target settings.");
+    Require(s.Shadow == ShadowMode::Off || ((s.Shadow == ShadowMode::Basic || s.Shadow == ShadowMode::Pcf || s.Shadow == ShadowMode::Pcss) && (s.ShadowResolution == 512 || s.ShadowResolution == 1024 || s.ShadowResolution == 2048 || s.ShadowResolution == 4096)),"Invalid shadow target settings.");
     const std::uint64_t color=s.PostProcessing ? 8:4;
     return std::uint64_t(width)*height*((color+4)*s.MsaaSamples+(s.MsaaSamples > 1 ? color:0)+(s.PostProcessing ? 4:0))+(s.Shadow != ShadowMode::Off ? std::uint64_t(s.ShadowResolution)*s.ShadowResolution*8:0);
 }

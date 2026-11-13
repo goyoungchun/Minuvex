@@ -1,13 +1,13 @@
 # Minvex API
 
-**C++20 Graphics SDK · Version 1.16.0 · Namespace `lv`**
+**C++20 Graphics SDK · Version 1.17.0 · Namespace `lv`**
 
 모듈별 주요 타입과 API를 정리한 사용 안내임. 전체 선언은 연결된 공개 헤더에서 확인할 수 있음.
 
 ## SDK 연결
 
 ```cmake
-find_package(Minvex 1.16 CONFIG REQUIRED COMPONENTS viewer graphics)
+find_package(Minvex 1.17 CONFIG REQUIRED COMPONENTS viewer graphics)
 add_executable(my_viewer main.cpp)
 target_link_libraries(my_viewer PRIVATE minvex::viewer)
 ```
@@ -126,7 +126,7 @@ Blend1D는 X 오름차순·Y=0인 1~64개 sample을 요구하며 인접 두 Clip
 
 Viewer·EditorDocument도 `PlayBlendTree/SetBlendParameter/SeekBlendTree` Result Facade를 제공함. Editor Animation Controls에서 이름·파라미터·Clip·threshold/좌표 편집과 Apply/Play, 현재 weight·2D 삼각분할 보기를 제공하며 편집은 Undo/Redo 대상임. Scene v11은 최대 1024개 공유 Tree 정의와 독립 phase/파라미터/재생 상태를 저장하며 reader는 v1~v11임. Reimport는 실제 Skeleton/Morph layout과 모든 참조 Clip index/name·Scale 호환성을 검사함.
 
-잘못된 입력/호환성은 low-level API에서 `std::invalid_argument`임. 반환한 handle은 정의의 수명을 유지하며 `Tree()` 참조는 Player/Scene 편집 후 다시 조회함. immutable 정의의 동시 조회·서로 다른 Player 사용은 가능하고 같은 Player의 동시 수정/평가는 금지임. SDK 1.16.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
+잘못된 입력/호환성은 low-level API에서 `std::invalid_argument`임. 반환한 handle은 정의의 수명을 유지하며 `Tree()` 참조는 Player/Scene 편집 후 다시 조회함. immutable 정의의 동시 조회·서로 다른 Player 사용은 가능하고 같은 Player의 동시 수정/평가는 금지임. SDK 1.17.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
 
 ### Additive Animation
 
@@ -149,7 +149,7 @@ Player는 TRS Additive 레이어 1개를 보유함. `SetAdditiveAnimation(clip, 
 
 Viewer·EditorDocument에도 같은 제어의 Result Facade를 제공함. Editor는 Clip·Skeleton/현재 base/Clip sample 기준 선택, weight·시간·속도·loop, Joint/Subtree mask, Base/Delta/Final 비교를 제공함. 편집은 Undo/Redo 대상이며 Scene v11은 레이어 reference·mask·재생 상태를 저장하고 reader는 v1~v11임. Reimport는 Skeleton·레이어 Clip index/name·시간과 reference/Scale 호환성을 검사함. Pose v1은 최종 TRS snapshot만 저장함.
 
-공유 Model/Clip은 수정하지 않으며 레이어·기준 Pose·mask는 Player별로 소유함. 상태 참조는 Player/Scene 편집 후 다시 조회하고 같은 Player의 동시 수정/평가는 금지임. weight 0 또는 전체 mask 0인 레이어의 시간 변화는 정적인 base의 On-Demand 이미지를 무효화하지 않음. SDK 1.16.0 소비자는 함께 재빌드해야 하며 ImportVersion 6은 유지함.
+공유 Model/Clip은 수정하지 않으며 레이어·기준 Pose·mask는 Player별로 소유함. 상태 참조는 Player/Scene 편집 후 다시 조회하고 같은 Player의 동시 수정/평가는 금지임. weight 0 또는 전체 mask 0인 레이어의 시간 변화는 정적인 base의 On-Demand 이미지를 무효화하지 않음. SDK 1.17.0 소비자는 함께 재빌드해야 하며 ImportVersion 6은 유지함.
 
 ### Animation Event
 
@@ -174,7 +174,7 @@ Player 큐는 최대 1024개임. 초과 시 `AnimationEventOverflow`를 던지�
 
 track당 최대 1024개, overlay 최대 256 track, 기본 track별·인스턴스 전체 overlay별 이름/페이로드 합계는 각각 1 MiB임. 이름은 1~256 bytes, payload는 최대 4096 bytes의 NUL 없는 UTF-8이며 시간은 유한한 [0,duration] 오름차순임. 잘못된 데이터는 `std::invalid_argument`임. Player/Scene의 동시 수정·평가는 금지이고 Viewer는 생성한 owner thread에서 사용함. callback은 명시적 Dispatch를 호출한 스레드에서 실행하며 전달된 참조는 해당 호출 동안만 유효함.
 
-Editor는 Timeline marker, 추가·삭제·시간·이름·payload 편집, 수집 Seek 선택과 발생 로그를 제공함. marker 편집은 Undo/Redo 대상이며 큐 배출·로그는 문서를 dirty로 만들지 않음. Scene v11은 overlay와 Clip identity를 저장하고 reader는 v1~v11임. 발생 큐·callback·로그는 저장하지 않으며 Undo/Redo는 과거 큐를 재발송하지 않음. Reimport는 overlay Clip identity/duration을 검사함. SDK 1.16.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
+Editor는 Timeline marker, 추가·삭제·시간·이름·payload 편집, 수집 Seek 선택과 발생 로그를 제공함. marker 편집은 Undo/Redo 대상이며 큐 배출·로그는 문서를 dirty로 만들지 않음. Scene v11은 overlay와 Clip identity를 저장하고 reader는 v1~v11임. 발생 큐·callback·로그는 저장하지 않으며 Undo/Redo는 과거 큐를 재발송하지 않음. Reimport는 overlay Clip identity/duration을 검사함. SDK 1.17.0 소비자는 함께 재빌드해야 하며 Pose v1·ImportVersion 6은 유지함.
 
 ### PBR Material
 
@@ -215,6 +215,33 @@ Mesh당 최대 8개 target이며 `ImportSettings::MaxMorphTargets`로 더 낮출
 
 Scene v11은 node별 override와 frozen source Morph, layout signature를 저장함. 사용 중인 node/mesh·target 이름/순서·vertex 수·기본값 변경은 Reimport에서 거부함. Pose v1은 Morph를 저장하지 않음. 반환된 override 참조는 Player/Scene 편집 후 다시 조회하며 기존 owner-thread·오류 계약을 따름. `--morph` 렌더링 예제와 `examples/assets/MorphRibbon.gltf`를 제공함.
 
+### PCSS Shadow
+
+단일 Directional Sun의 직교 그림자에 blocker search → 거리별 penumbra → 가변 반경 PCF를 적용함. R32F raw map을 재사용하며 Spot/Point shadow·atlas·cascade는 제공하지 않음. Low는 Off, Medium은 Basic, High는 PCF 기본값을 유지하고 Custom에서 PCSS를 선택함.
+
+| RenderSettings / QualityOverrides | 기본값 · 유효 범위 |
+|---|---|
+| `ShadowSourceAngle` | 전체 광원 각도 .535°, [0,20]°임. 0은 Basic과 같은 hard shadow임 |
+| `ShadowBlockerSamples / ShadowFilterSamples` | 16 / 32, 각각 정수 [1,64]임 |
+| `ShadowMaxFilterRadius` | 32, shadow-map texel 단위 [1,64]임 |
+| `ShadowDepthBias / ShadowSlopeBias` | .0008 / .003, 정규화된 map depth 단위 [0,.1]임. Basic/PCF에도 적용함 |
+
+```cpp
+auto quality = lv::MakeQualityProfile(lv::QualityPreset::Medium);
+quality.Overrides.Shadow = lv::ShadowMode::Pcss;
+quality.Overrides.ShadowSourceAngle = 2.f;
+quality.Overrides.ShadowBlockerSamples = 16;
+quality.Overrides.ShadowFilterSamples = 32;
+auto changed = viewer.SetQuality(quality); // Result<void> 확인 필요
+// lv::SaveQuality(quality, "SoftSun.mvxquality.json")로 독립 저장함
+```
+
+직교 map의 선형 깊이를 world 거리로 변환하고 거리×tan(광원 각도/2)로 반경을 구함. 깊이의 perspective 나눗셈은 사용하지 않음. 고정 disk 샘플과 수신면 깊이 보정으로 프레임 간 패턴과 경사면 자기 그림자를 관리하며 맵 밖은 lit로 처리함. blocker가 없으면 완전한 lit, 최대 반경은 texel 기준으로 제한함. 동일한 Skinning·Morph·Instancing·Alpha Mask shadow pass를 사용하며 추가 attachment 메모리는 필요하지 않음.
+
+`DebugView::ShadowBlockers / ShadowBlockerDepth / ShadowPenumbra / ShadowVisibility`는 각각 blocker 수/검색 수, 수신면 기준으로 보정한 평균 선형 깊이, 반경/최대 반경, 최종 가시성의 grayscale임. blocker가 없으면 깊이=1·반경=0임. 앞의 세 뷰는 PCSS, Visibility는 활성 shadow가 필요하며 부적합한 뷰/품질 전환은 `UnsupportedFeature`이고 이전 상태를 유지함. Editor Quality Settings와 Debugger에서 같은 설정·뷰를 제공하며 `minvex_rendering_enhancement --pcss`는 접촉·부유 그림자 예제임.
+
+`ExpandQuality`는 비유한 값·범위 초과를 `InvalidArgument`로 반환함. `ResolveQuality`는 `QualityCapabilities::ShadowMapping`을 요구하고 `AllowFallback=true`인 경우만 shadow를 끔. 설정은 값으로 복사하며 Viewer/Embedded/Editor 적용은 기존 owner/graphics thread에서 pass 밖에 호출함. 변경은 On-Demand 이미지를 무효화함. Quality writer v2는 PCSS 키를 저장하고 reader는 v1~v2임. v1에 없는 값은 기본값이며 정적 SDK 1.17 소비자는 공개 구조체 변경에 따라 재빌드가 필요함.
+
 ### Embedded Runtime
 
 호출 순서는 `Initialize()` → 프레임마다 `Update()/Render()` → 종료 시 `WaitIdle()/Shutdown()`임. Host가 창·이벤트·입력·device·target·Present를 관리함. resize 전에는 GPU 완료 대기 → `DetachTarget()` → Host target 교체 순서를 따름.
@@ -253,18 +280,18 @@ Facade·IO는 Result를 사용하고, low-level Asset/Scene/Animation API는 `Im
 | 항목 | 현재 규칙 |
 |---|---|
 | **Scene** | writer v11 / reader v1~v11. 외부 모델 참조·계층·카메라·조명·Pose·Clip/Cross-fade·Blend Tree·Additive·Event overlay·재질/Morph override 저장. 로드 시 runtime ID 재매핑 |
-| **Pose / Quality / Import** | Pose v1, Quality v1, ImportVersion 6. Pose는 skeleton signature 호환 필요 |
+| **Pose / Quality / Import** | Pose v1, Quality writer v2 / reader v1~v2, ImportVersion 6. Pose는 skeleton signature 호환 필요 |
 | **Quality** | Low·Medium·High, Overrides가 있으면 Custom. 기본 `AllowFallback=false`; 미지원 설정 대체는 명시적으로 허용 |
 | **SDK** | 정적 라이브러리. 같은 architecture·compiler/toolset·configuration·C++ runtime으로 소비자 재빌드 필요. 바이너리 ABI 비고정 |
 
 Scene v11은 이전 SDK reader로 읽을 수 없음. Scene/Pose/Quality 저장은 임시 파일 작성 후 교체하며 모델 파일 자체를 Scene에 내장하지 않음. Undo 이력·UI 상태·Telemetry는 Scene에 저장하지 않음.
 
-Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND·PCSS·Python/WebAssembly는 후속 범위임.
+Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND·Python/WebAssembly는 후속 범위임.
 
 ## 검증 범위
 
-SDK 1.16.0의 Windows Release 전체 빌드와 Animation 391개·Document·Editor marker/log·저장·재열기를 확인함. 정·역방향 반열린 경계·복수 loop·큰 시간의 Seek/loop·Tree 주 Clip·overlay·queue overflow·callback 예외/객체 삭제/재진입·Scene v11을 검사함.
+SDK 1.17.0의 Windows Release 전체 빌드와 핵심 CTest 4종(Quality·Telemetry·Viewer·Editor), D3D11 PCSS 15개·PBR 15개, Viewer 품질 적용 17개, PCSS 공개 예제를 확인함. 거리별 penumbra·PCF 비교·0도 광원·맵 경계·경사 수신면·Morph/Skinning과 8/32/64 샘플의 GPU timestamp 비교가 범위임. HLSL5·Metal 셰이더 생성을 확인함.
 
-CPU-only Debug SDK와 공백 포함 설치 경로의 공개 헤더 18개·독립 Event polling/dispatch 소비자를 확인함. 기본 CTest 등록은 13종으로 유지하며 macOS 실기기·전체 회귀는 이번 검증 범위에 포함하지 않았음.
+CPU-only Debug SDK와 공백 포함 설치 경로의 공개 헤더 18개·독립 PCSS 설정/Quality v2 소비자를 확인함. 기본 CTest 등록은 13종으로 유지하며 macOS 실기기·전체 회귀는 이번 검증 범위에 포함하지 않았음.
 
 [기능·빌드 안내](../README.md) · [공식 SDK 예제](../examples/SdkConsumer) · [공개 헤더](../include/minvex)

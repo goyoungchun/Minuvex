@@ -35,7 +35,7 @@ public:
     void Prepare(const Scene& scene);
     void Draw(const Scene& scene, float aspect,const ShadowSampling& shadow={});
     void DrawShadow(const Scene& scene,const Mat4& lightViewProjection);
-    Mat4 ShadowViewProjection(const Scene& scene) const;
+    Mat4 ShadowViewProjection(const Scene& scene, Vec3* extent=nullptr) const;
     SceneRenderStats GetStats() const noexcept { return stats_; }
     void Clear() noexcept;
     void SetDrawSettings(const RenderSettings& settings) noexcept {settings_=settings;}

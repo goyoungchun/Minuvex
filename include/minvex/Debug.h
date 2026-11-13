@@ -5,7 +5,8 @@
 #include <span>
 
 namespace lv {
-enum class DebugView { Lit, Unlit, Wireframe, Normal, UV, Depth, ShadowMap, BoneWeight, Skeleton, BoundingBox };
+enum class DebugView { Lit, Unlit, Wireframe, Normal, UV, Depth, ShadowMap, BoneWeight, Skeleton, BoundingBox,
+    ShadowBlockers, ShadowBlockerDepth, ShadowPenumbra, ShadowVisibility };
 const char* DebugViewName(DebugView view) noexcept;
 struct DebugOptions {
     DebugView View=DebugView::Lit;

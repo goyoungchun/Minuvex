@@ -536,15 +536,25 @@ void EditorUI::QualitySettings() {
             int lighting=static_cast<int>(s.Lighting);if (ImGui::Combo("Lighting",&lighting,"Unlit\0Basic\0Advanced (normal maps + local lights)\0")) {o.Lighting=static_cast<LightingMode>(lighting);}
             if (ImGui::Checkbox("Frustum culling",&s.FrustumCulling)) {o.FrustumCulling=s.FrustumCulling;}
             int demand=static_cast<int>(s.OnDemand);if (ImGui::Combo("On demand",&demand,"Off\0On\0Auto\0")) {o.OnDemand=static_cast<OnDemandMode>(demand);}
-            int shadow=static_cast<int>(s.Shadow);if (ImGui::Combo("Sun shadow",&shadow,"Off\0Basic\0PCF (3x3)\0PCSS (unavailable)\0")) {o.Shadow=static_cast<ShadowMode>(shadow);}
+            int shadow=static_cast<int>(s.Shadow);if (ImGui::Combo("Sun shadow",&shadow,"Off\0Basic\0PCF (3x3)\0PCSS (contact softening)\0")) {o.Shadow=static_cast<ShadowMode>(shadow);}
             int shadowSize=s.ShadowResolution == 512 ? 0:s.ShadowResolution == 1024 ? 1:s.ShadowResolution == 2048 ? 2:3;if (ImGui::Combo("Shadow size",&shadowSize,"512\0 1024\0 2048\0 4096\0")) {o.ShadowResolution=512<<shadowSize;}
+            if (s.Shadow != ShadowMode::Off) {
+                if (ImGui::SliderFloat("Shadow depth bias",&s.ShadowDepthBias,0,.1f,"%.5f")) {o.ShadowDepthBias=s.ShadowDepthBias;}
+                if (ImGui::SliderFloat("Shadow slope bias",&s.ShadowSlopeBias,0,.1f,"%.5f")) {o.ShadowSlopeBias=s.ShadowSlopeBias;}
+            }
+            if (s.Shadow == ShadowMode::Pcss) {
+                if (ImGui::SliderFloat("Sun source angle (degrees)",&s.ShadowSourceAngle,0,20,"%.3f")) {o.ShadowSourceAngle=s.ShadowSourceAngle;}
+                if (ImGui::SliderInt("Blocker samples",&s.ShadowBlockerSamples,1,64)) {o.ShadowBlockerSamples=s.ShadowBlockerSamples;}
+                if (ImGui::SliderInt("Filter samples",&s.ShadowFilterSamples,1,64)) {o.ShadowFilterSamples=s.ShadowFilterSamples;}
+                if (ImGui::SliderFloat("Max shadow radius (texels)",&s.ShadowMaxFilterRadius,1,64,"%.1f")) {o.ShadowMaxFilterRadius=s.ShadowMaxFilterRadius;}
+            }
             if (ImGui::Checkbox("HDR + FXAA + Reinhard",&s.PostProcessing)) {o.PostProcessing=s.PostProcessing;}
             if (ImGui::Checkbox("Automatic rigid LOD",&s.Lod)) {o.Lod=s.Lod;}
             if (ImGui::SliderFloat("LOD bias",&s.LodBias,-4,4,"%.2f")) {o.LodBias=s.LodBias;}
             if (ImGui::Checkbox("Static GPU instancing",&s.Instancing)) {o.Instancing=s.Instancing;}
             if (ImGui::Checkbox("PBR materials (Advanced)",&s.Pbr)) {o.Pbr=s.Pbr;}
             int compression=static_cast<int>(s.Compression);if (ImGui::Combo("Texture compression",&compression,"None\0Auto\0BC3\0")) {o.Compression=static_cast<TextureCompression>(compression);}
-            ImGui::TextWrapped("LOD and instancing retain animated/skinned draw paths. PCSS remains unavailable.");
+            ImGui::TextWrapped("PCSS softens the directional Sun shadow with receiver distance. Low disables shadows by default.");
         } else {ImGui::TextWrapped("%s",expanded.Error().Message.c_str());}
         ImGui::Checkbox("Allow supported fallback",&qualityDraft_.AllowFallback);
         ImGui::TextUnformatted(qualityDraft_.IsCustom() ? "Custom overrides":"Preset defaults");

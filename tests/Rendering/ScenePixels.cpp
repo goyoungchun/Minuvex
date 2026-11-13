@@ -15,6 +15,8 @@
 #include <array>
 #include <cstring>
 #include <numbers>
+#include <chrono>
+#include <cstdio>
 
 using Microsoft::WRL::ComPtr;
 using namespace test;
@@ -31,6 +33,7 @@ bool qualityTests = false;
 bool compatibilityTests = false;
 bool pbrTests = false;
 bool morphTests = false;
+bool pcssTests = false;
 
 void Log(const char* tag, std::uint32_t level, std::uint32_t item, const char* message,
          std::uint32_t line, const char* file, void* user) {
@@ -236,7 +239,7 @@ void RunQuality() {
     sg_begin_pass(pass);surface.Present();sg_end_pass();sg_commit();
     Check(ReadImage(destination.Color,Size,Size) == bright,"fullscreen presentation preserves image orientation and pixels");
     const auto originalImage=surface.ColorImage().id;const auto originalRequest=surface.Quality().Requested;
-    auto invalid=profile;invalid.Overrides.Shadow=lv::ShadowMode::Pcss;
+    auto invalid=profile;invalid.Overrides.ShadowBlockerSamples=0;
     Check(!surface.ApplyQuality(invalid,scene,Size,Size) && surface.ColorImage().id == originalImage && surface.Quality().Requested == originalRequest,"capability rejection preserves the previous GPU target and request");
     auto bad=std::make_shared<lv::ModelAsset>(*triangle);bad->Meshes[0].Primitives[0].Geometry.Vertices[0].Normal={0,0,0};lv::Scene badScene;badScene.AddModel(bad);
     auto changed=profile;changed.Overrides.Textures=lv::TextureQuality::Low;changed.Overrides.FixedWidth=64;
@@ -285,6 +288,63 @@ void RunQuality() {
 std::shared_ptr<lv::ModelAsset> EnhancementPlane(float half=1) {
     auto model=std::make_shared<lv::ModelAsset>();lv::MeshPrimitive primitive;
     primitive.Geometry.Vertices={{{-half,-half,0},{0,0,1},{1,1,1,1},{0,0}},{{half,-half,0},{0,0,1},{1,1,1,1},{1,0}},{{half,half,0},{0,0,1},{1,1,1,1},{1,1}},{{-half,half,0},{0,0,1},{1,1,1,1},{0,1}}};primitive.Geometry.Indices={0,1,2,0,2,3};model->Meshes.push_back({"Plane",{primitive}});model->Materials.push_back({});model->Materials[0].DoubleSided=true;model->Parts.push_back({0});model->ModelBounds={{-half,-half,0},{half,half,0}};return model;
+}
+void RunPcss() {
+    lv::Scene scene;scene.MainCamera.Position={0,0,5};scene.MainCamera.Target={};scene.MainCamera.Projection=lv::CameraProjection::Orthographic;scene.MainCamera.OrthographicHeight=4;
+    scene.Sun.Direction={2,0,-1};scene.Sun.Intensity=2.236068f;scene.Sun.Ambient=0;
+    const auto floor=scene.AddModel(EnhancementPlane(2));const auto caster=scene.AddModel(EnhancementPlane(.3f));
+    const auto place=[&](float height) {lv::Transform t;t.Position={-2*height,0,height};scene.SetTransform(caster,t);};place(.3f);
+    auto p=lv::MakeQualityProfile(lv::QualityPreset::Medium);p.Overrides.TargetFps=0;p.Overrides.OnDemand=lv::OnDemandMode::On;p.Overrides.ShadowResolution=1024;
+    p.Overrides.Shadow=lv::ShadowMode::Pcss;p.Overrides.ShadowSourceAngle=20.f;p.Overrides.ShadowMaxFilterRadius=64.f;p.Overrides.ShadowBlockerSamples=32;p.Overrides.ShadowFilterSamples=64;
+    lv::detail::RenderSurface surface;double clock=1;
+    const auto apply=[&] {auto r=surface.ApplyQuality(p,scene,Size,Size);Require(bool(r),r ? "":r.Error().Message.c_str());};
+    const auto render=[&] {Require(surface.Render(scene,clock++,false,{0,0,0,1}),"PCSS edit did not invalidate cached pixels.");sg_commit();return ReadImage(surface.ColorImage(),Size,Size);};
+    const auto debug=[&](lv::DebugView view) {Require(bool(surface.SetDebugOptions({view})),"Cannot select shadow diagnostic.");return render();};
+    const auto partial=[](const auto& image) {int n=0;for (int y=48;y<80;++y) {for (int x=52;x<84;++x) {const auto v=image[y*Size+x][0];n+=v>12 && v<240;}}return n;};
+    apply();const auto nearImage=render();Check(surface.Quality().Effective->Shadow == lv::ShadowMode::Pcss && surface.Stats().LastShadowDrawCalls == 2,"PCSS executes the shared Sun shadow pass");
+    const auto nearRadius=debug(lv::DebugView::ShadowPenumbra);place(1);const auto farRadius=render();
+    const auto peak=[](const auto& image) {int value=0;for (int y=52;y<76;++y) {for (int x=54;x<80;++x) {value=std::max(value,int(image[y*Size+x][0]));}}return value;};
+    std::printf("PCSS radius near=%d far=%d\n",peak(nearRadius),peak(farRadius));
+    Check(peak(farRadius)>peak(nearRadius)+5,"directional PCSS penumbra increases with world receiver-blocker distance");
+    const auto blockers=debug(lv::DebugView::ShadowBlockers),depth=debug(lv::DebugView::ShadowBlockerDepth),visibility=debug(lv::DebugView::ShadowVisibility);
+    Check(blockers[64*Size+64][0]>0 && depth[64*Size+64][0]<250 && visibility[64*Size+64][0]<100,"blocker count, linear average depth and final visibility expose real occlusion");
+    Check(blockers[24*Size+110][0]==0 && depth[24*Size+110][0]==255 && visibility[24*Size+110][0]>250,"no-blocker search returns fully lit without division by zero");
+    const auto farImage=debug(lv::DebugView::Lit);Check(partial(farImage)>partial(nearImage)+8,"farther PCSS receiver has a wider filtered transition than near contact");
+    p.Overrides.Shadow=lv::ShadowMode::Pcf;apply();const auto pcf=render();Check(partial(farImage)>partial(pcf)+8,"variable-radius PCSS is softer than fixed 3x3 PCF at distance");
+    p.Overrides.Shadow=lv::ShadowMode::Basic;apply();const auto hard=render();p.Overrides.Shadow=lv::ShadowMode::Pcss;p.Overrides.ShadowSourceAngle=0.f;apply();const auto zero=render();
+    Check(zero==hard,"zero source angle exactly reproduces Basic hard shadows");
+    const auto zeroDepth=debug(lv::DebugView::ShadowBlockerDepth);Check(zeroDepth[24*Size+110][0]==255,"zero-angle no-blocker depth retains the diagnostic sentinel");
+    (void)debug(lv::DebugView::Lit);
+    p.Overrides.ShadowSourceAngle=20.f;p.Overrides.ShadowMaxFilterRadius=1.f;apply();const auto capped=debug(lv::DebugView::ShadowPenumbra);Check(peak(capped)>240,"penumbra radius is clamped to the configured texel maximum");
+    Require(!surface.ApplyQuality(lv::MakeQualityProfile(lv::QualityPreset::Low),scene,Size,Size) && surface.Quality().Effective->Shadow == lv::ShadowMode::Pcss,"incompatible quality change preserves active PCSS diagnostic and resources");
+    (void)debug(lv::DebugView::Lit);p.Overrides.ShadowMaxFilterRadius=64.f;apply();scene.RemoveObject(caster);const auto clear=render();bool clean=true;
+    for (int y=2;y<Size-2;++y) {for (int x=2;x<Size-2;++x) {clean &= clear[y*Size+x][0]>250;}}
+    Check(clean,"isolated receiver remains free of self-shadow acne and map-edge darkening at maximum radius");
+    Check(!surface.Render(scene,clock++,false,{0,0,0,1}),"unchanged PCSS scene reuses its On-Demand image");
+    auto estimate=lv::EstimateQualityResources(p,surface.Quality().Capabilities,scene,Size,Size);Check(estimate && estimate.Value().Cost.TotalBytes == surface.Telemetry(lv::detail::RenderClockSeconds()).Resident.TotalBytes,"PCSS estimate matches resident shadow attachments without extra allocations");
+    // Exercise the shared deformed caster path, not a separate PCSS-only shader.
+    lv::AssetRegistry assets;auto morphCaster=std::make_shared<lv::ModelAsset>(*assets.LoadModel(Fixture("MorphRibbon.gltf")));morphCaster->Parts.resize(1);const auto rig=scene.AddModel(morphCaster);scene.GetAnimation(rig).Play(0);scene.GetAnimation(rig).Seek(.5);(void)render();
+    Check(surface.Stats().LastShadowDrawCalls == 2,"Morph plus skinning remains a PCSS caster");scene.RemoveObject(rig);
+    auto* device=static_cast<ID3D11Device*>(const_cast<void*>(sg_d3d11_device()));auto* context=static_cast<ID3D11DeviceContext*>(const_cast<void*>(sg_d3d11_device_context()));
+    // Average GPU timestamps over a short batch. Timing is diagnostic, never a flaky speed assertion.
+    for (int samples:{8,32,64}) {
+        p.Overrides.ShadowBlockerSamples=samples;p.Overrides.ShadowFilterSamples=samples;apply();
+        // A visible elevated caster keeps search and filtering active in the timed region.
+        const auto timed=scene.AddModel(EnhancementPlane(.3f));lv::Transform t;t.Position={-1,0,.5f};scene.SetTransform(timed,t);(void)render();
+        ComPtr<ID3D11Query> disjoint,start,stop;D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+        Require(SUCCEEDED(device->CreateQuery(&q,disjoint.GetAddressOf())),"Cannot create GPU disjoint query.");q.Query=D3D11_QUERY_TIMESTAMP;
+        Require(SUCCEEDED(device->CreateQuery(&q,start.GetAddressOf())) && SUCCEEDED(device->CreateQuery(&q,stop.GetAddressOf())),"Cannot create GPU timestamps.");
+        context->Begin(disjoint.Get());context->End(start.Get());
+        for (int i=0;i<16;++i) {surface.Render(scene,clock++,true,{0,0,0,1});sg_commit();}
+        context->End(stop.Get());context->End(disjoint.Get());context->Flush();
+        const auto wait=[&](ID3D11Query* query,void* data,UINT size) {const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(3);HRESULT hr=S_FALSE;while ((hr=context->GetData(query,data,size,0))==S_FALSE && std::chrono::steady_clock::now()<until) {}Require(hr==S_OK,"GPU timestamp query timed out.");};
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT d{};UINT64 a=0,b=0;wait(disjoint.Get(),&d,sizeof(d));wait(start.Get(),&a,sizeof(a));wait(stop.Get(),&b,sizeof(b));
+        if (!d.Disjoint) {std::printf("PCSS GPU %d+%d samples: %.4f ms/frame (128x128, 1024 shadow)\n",samples,samples,1000.0*double(b-a)/double(d.Frequency)/16);}
+        scene.RemoveObject(timed);
+    }
+    auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);Require(bool(surface.ApplyQuality(low,scene,Size,Size)),"Cannot disable PCSS with Low.");(void)render();
+    Check(surface.Stats().LastShadowDrawCalls == 0 && !surface.InspectionTexture(2).id && !surface.SetDebugOptions({lv::DebugView::ShadowBlockers}),"Low releases shadow resources and rejects PCSS diagnostics");
+    (void)floor;
 }
 void RunEnhancements() {
     lv::Scene scene;scene.MainCamera.Position={0,0,2};scene.MainCamera.Target={0,0,0};scene.MainCamera.VerticalFovRadians=std::numbers::pi_v<float>/2;scene.Sun.Direction={0,0,-1};scene.Sun.Intensity=1;scene.Sun.Ambient=0;
@@ -493,7 +553,7 @@ void RunCompatibility() {
 void Frame() {
     if (ran) { sapp_request_quit(); return; }
     ran = true;
-    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunTree();RunAdditive();RunPbr();RunMorph();} else if (additiveTests) {RunAdditive();}else if (treeTests) {RunTree();}else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
+    try { Require(sg_isvalid(), "Sokol initialization failed."); if (qualityTests) {RunQuality();RunEnhancements();RunCompatibility();RunDebug();RunOptimization();RunCamera();RunBlend();RunTree();RunAdditive();RunPbr();RunMorph();RunPcss();} else if (pcssTests) {RunPcss();}else if (additiveTests) {RunAdditive();}else if (treeTests) {RunTree();}else if (morphTests) {RunMorph();}else if (pbrTests) {RunPbr();}else if (animationTests) { RunAnimation();RunBlend(); } else if (compatibilityTests) {RunCompatibility();}else { Run(); } }
     catch (const std::exception& error) { Check(false, error.what()); }
     sapp_request_quit();
 }
@@ -507,6 +567,7 @@ int main(int argc, char** argv) {
     qualityTests=argc > 1 && std::strcmp(argv[1],"--quality") == 0;
     compatibilityTests=argc > 1 && std::strcmp(argv[1],"--compatibility") == 0;
     pbrTests=argc > 1 && std::strcmp(argv[1],"--pbr") == 0;
+    pcssTests=argc > 1 && std::strcmp(argv[1],"--pcss") == 0;
     morphTests=argc > 1 && std::strcmp(argv[1],"--morph") == 0;
     sapp_desc app{};
     app.width = app.height = 64; app.window_title = "Minvex D3D11 pixel tests";

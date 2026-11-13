@@ -51,7 +51,7 @@ void Resources() {
     auto replacement=std::make_shared<lv::ModelAsset>(*imageModel);lv::Scene replacedScene;replacedScene.AddModel(replacement);
     auto replaced=lv::EstimateQualityResources(lv::MakeQualityProfile(lv::QualityPreset::Low),caps,replacedScene,100,50,&low.Value());
     Check(replaced && replaced.Value().AssetSignature != low.Value().AssetSignature && replaced.Value().AdditionalBytes == replaced.Value().Cost.BufferBytes+replaced.Value().Cost.TextureBytes,"different immutable assets do not reuse a same-sized resident cache");
-    p.Overrides.Shadow=lv::ShadowMode::Pcss;const auto unsupported=lv::EstimateQualityResources(p,caps,scene,100,50);Check(!unsupported && unsupported.Error().Code == lv::ErrorCode::UnsupportedFeature,"estimate applies the same strict capability policy as rendering");
+    p.Overrides.Shadow=lv::ShadowMode::Pcss;auto missingShadow=caps;missingShadow.ShadowMapping=false;const auto unsupported=lv::EstimateQualityResources(p,missingShadow,scene,100,50);Check(!unsupported && unsupported.Error().Code == lv::ErrorCode::UnsupportedFeature,"estimate applies the same strict capability policy as rendering");
     Check(!lv::EstimateQualityResources(p,caps,scene,0,0),"suspended extent does not invent cost");
     imageModel->Images[0].Width=0;Check(!lv::EstimateQualityResources(lv::QualityProfile{},caps,imageScene,100,50),"invalid image data rejected without large allocation");
 }

@@ -18,7 +18,7 @@ void EditorUI::RenderDebugger() {
         auto o=Viewport.Debug();bool changed=false;
         const bool shadow=Viewport.Quality().Effective && Viewport.Quality().Effective->Shadow != ShadowMode::Off;
         if (ImGui::BeginCombo("Debug view",DebugViewName(o.View))) {
-            for (int i=0;i<=static_cast<int>(DebugView::BoundingBox);++i) {const auto v=static_cast<DebugView>(i);const bool supported=v != DebugView::ShadowMap || shadow;ImGui::BeginDisabled(!supported);if (ImGui::Selectable(DebugViewName(v),o.View == v)) {o.View=v;changed=true;}ImGui::EndDisabled();if (!supported && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {ImGui::SetTooltip("Apply supported shadows in Quality Settings first.");}}
+            for (int i=0;i<=static_cast<int>(DebugView::ShadowVisibility);++i) {const auto v=static_cast<DebugView>(i);const bool pcss=Viewport.Quality().Effective && Viewport.Quality().Effective->Shadow == ShadowMode::Pcss;const bool supported=(v == DebugView::ShadowMap || v == DebugView::ShadowVisibility) ? shadow:(v >= DebugView::ShadowBlockers && v <= DebugView::ShadowPenumbra) ? pcss:true;ImGui::BeginDisabled(!supported);if (ImGui::Selectable(DebugViewName(v),o.View == v)) {o.View=v;changed=true;}ImGui::EndDisabled();if (!supported && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {ImGui::SetTooltip("Apply compatible Sun shadows (PCSS for blocker/penumbra views) in Quality Settings first.");}}
             ImGui::EndCombo();
         }
         changed=ImGui::Checkbox("Skeleton overlay",&o.ShowSkeleton)||changed;
@@ -28,6 +28,7 @@ void EditorUI::RenderDebugger() {
         if (o.View == DebugView::BoneWeight) {changed=ImGui::SliderInt("Skin palette index (-1 = strongest)",&o.WeightJoint,-1,127)||changed;ImGui::TextWrapped("Indices refer to each mesh skin's palette, not global Skeleton node IDs. Rigid vertices show zero (blue).");}
         if (changed) {Report(Viewport.SetDebugOptions(o));}
         if (o.View == DebugView::Depth) {ImGui::TextWrapped("Linear view depth / FarPlane: near black, far white. Surface depth is recomputed into color; the hardware depth attachment is not directly sampled.");}
+        if (o.View >= DebugView::ShadowBlockers) {ImGui::TextWrapped("Grayscale: blockers / search samples, average linear map depth (1 = none), radius / maximum, or final visibility. Single directional Sun only.");}
         if (o.View == DebugView::ShadowMap) {ImGui::TextWrapped("Raw directional shadow depth in grayscale. Overlays are hidden in this view.");}
         if (ImGui::Button("Draw origin axis")) {editorDebugDraw_.Clear();editorDebugDraw_.DrawAxis(Mat4::Identity());Report(Viewport.SetDebugDraw(editorDebugDraw_));}ImGui::SameLine();if (ImGui::Button("Clear lines")) {editorDebugDraw_.Clear();Report(Viewport.SetDebugDraw(editorDebugDraw_));}
         const auto info=Viewport.Inspect();const auto t=Viewport.Telemetry();

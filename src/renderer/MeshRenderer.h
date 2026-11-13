@@ -16,8 +16,8 @@ struct alignas(16) ShaderVec4 { float X, Y, Z, W; };
 struct ShadowSampling {
     Mat4 ViewProjection=Mat4::Identity();
     sg_view Texture{};sg_sampler Sampler{};
-    ShadowMode Mode=ShadowMode::Off;
-    int Resolution=1024;
+    RenderSettings Settings;
+    Vec3 Extent{1,1,1}; // Orthographic width, height and linear depth range, in world units.
 };
 struct MeshLighting {
     sg_view NormalTexture{};sg_sampler NormalSampler{};

@@ -123,6 +123,8 @@ layout(binding=1) uniform material_params {
     vec4 options;
     vec4 normal_options;
     vec4 shadow_options;
+    vec4 shadow_geometry; // depth range, inverse world width/height, tan(source angle / 2)
+    vec4 pcss_options; // blocker samples, filter samples, max radius in texels
     vec4 debug_options;
     vec4 pbr_options;
     vec4 eye_position;
@@ -159,20 +161,131 @@ vec3 direct_brdf(vec3 base,float metallic,float roughness,vec3 n,vec3 v,vec3 l) 
     vec3 f0=mix(vec3(.04),base,metallic);vec3 f=f0+(vec3(1)-f0)*pow(1.0-vh,5.0);
     return ((vec3(1)-f)*(1.0-metallic)*base/3.14159265+f*(distribution*gv*gl/max(4.0*nv*nl,0.00001)))*nl;
 }
-float visibility(vec3 n) {
-    if (shadow_options.x < 0.5) {return 1.0;}
+// Fixed progressive disk: deterministic across frames and shared by search/filter.
+const vec2 shadow_disk[64]=vec2[64](
+    vec2(0.00000000,0.00000000),
+    vec2(-0.52139853,0.47764377),
+    vec2(0.04371286,-0.49808552),
+    vec2(0.52692351,0.68727841),
+    vec2(-0.34814879,-0.06158262),
+    vec2(0.66704713,-0.42432078),
+    vec2(-0.15897452,0.59137729),
+    vec2(-0.43113904,-0.83013199),
+    vec2(0.23483032,0.08575966),
+    vec2(-0.69325917,0.28616731),
+    vec2(0.23693711,-0.50632085),
+    vec2(0.26977083,0.86007192),
+    vec2(-0.37464744,-0.21711585),
+    vec2(0.80981677,-0.17803595),
+    vec2(-0.38041236,0.54109744),
+    vec2(-0.12442994,-0.96021726),
+    vec2(0.13517212,0.11392321),
+    vec2(-0.72824657,0.03011528),
+    vec2(0.37591356,-0.37408420),
+    vec2(-0.04082786,0.88294002),
+    vec2(-0.25326253,-0.30349315),
+    vec2(0.80285798,0.10802341),
+    vec2(-0.52319658,0.36402656),
+    vec2(0.20894004,-0.92875942),
+    vec2(0.15222993,0.26566153),
+    vec2(-0.73409909,-0.23419763),
+    vec2(0.53223973,-0.24590825),
+    vec2(-0.35461975,0.84734576),
+    vec2(-0.15829656,-0.44010476),
+    vec2(0.75045586,0.39441857),
+    vec2(-0.66203911,0.17451138),
+    vec2(0.53232008,-0.82788003),
+    vec2(0.02117202,0.12319393),
+    vec2(-0.56772304,-0.43967664),
+    vec2(0.51362850,-0.04255307),
+    vec2(-0.59419443,0.64230677),
+    vec2(0.00182935,-0.37499554),
+    vec2(0.53777052,0.59281351),
+    vec2(-0.62233294,-0.05767768),
+    vec2(0.75173649,-0.57054119),
+    vec2(-0.05002743,0.27499501),
+    vec2(-0.40496417,-0.64352857),
+    vec2(0.55245079,0.15140386),
+    vec2(-0.80962676,0.41548708),
+    vec2(0.15666878,-0.42258714),
+    vec2(0.31615988,0.77663887),
+    vec2(-0.60829196,-0.28828091),
+    vec2(0.93294678,-0.28763746),
+    vec2(-0.10947045,0.18679192),
+    vec2(-0.15526188,-0.72302749),
+    vec2(0.44419744,0.31553706),
+    vec2(-0.88582567,0.11039875),
+    vec2(0.26871687,-0.31569961),
+    vec2(0.02987177,0.81913532),
+    vec2(-0.45590631,-0.46262775),
+    vec2(0.95889060,0.04902872),
+    vec2(-0.25495125,0.21065342),
+    vec2(0.10786682,-0.77313631),
+    vec2(0.33997690,0.49375166),
+    vec2(-0.90341756,-0.20787427),
+    vec2(0.42121695,-0.23864468),
+    vec2(-0.26443876,0.81513627),
+    vec2(-0.28882018,-0.63321237),
+    vec2(0.91335859,0.38749333));
+float shadow_depth(vec2 coord) {
+    // Outside the single Sun map is unoccluded; never wrap to an unrelated edge.
+    if (any(lessThan(coord,vec2(0))) || any(greaterThan(coord,vec2(1)))) {return 1.0;}
+    float edge=shadow_options.y*.5;
+    return textureLod(sampler2D(shadow_texture,shadow_sampler),clamp(coord,vec2(edge),vec2(1.0-edge)),0.0).r;
+}
+float shadow_relative_depth(vec2 coord,vec2 offset,vec2 plane) {
+    vec2 sampleCoord=coord+offset;
+    if (any(lessThan(sampleCoord,vec2(0))) || any(greaterThan(sampleCoord,vec2(1)))) {return 1.0;}
+    return shadow_depth(sampleCoord)-dot(plane,offset);
+}
+vec2 shadow_radius(float worldRadius) {
+    vec2 radius=worldRadius*shadow_geometry.yz;
+    return radius*min(1.0,pcss_options.z*shadow_options.y/max(max(radius.x,radius.y),.00000001));
+}
+// Visibility, normalized blocker count, receiver-plane-corrected linear depth, normalized radius.
+vec4 shadow_result(vec3 n,vec2 plane) {
+    if (shadow_options.x < .5) {return vec4(1,0,1,0);}
     vec3 p=shadow_position.xyz/shadow_position.w;vec2 coord=vec2(p.x*.5+.5,.5-p.y*.5);
-    if (p.z < 0.0 || p.z > 1.0 || any(lessThan(coord,vec2(0.0))) || any(greaterThan(coord,vec2(1.0)))) {return 1.0;}
+    if (p.z < 0.0 || p.z > 1.0 || any(lessThan(coord,vec2(0))) || any(greaterThan(coord,vec2(1)))) {return vec4(1,0,1,0);}
     float bias=shadow_options.z+shadow_options.w*(1.0-max(dot(n,light_direction.xyz),0.0));
-    if (shadow_options.x < 1.5) {return p.z-bias <= textureLod(sampler2D(shadow_texture,shadow_sampler),coord,0.0).r ? 1.0:0.0;}
-    float sum=0.0;for (int y=-1;y<=1;++y) {for (int x=-1;x<=1;++x) {float depth=textureLod(sampler2D(shadow_texture,shadow_sampler),coord+vec2(float(x),float(y))*shadow_options.y,0.0).r;sum+=p.z-bias <= depth ? 1.0:0.0;}}
-    return sum/9.0;
+    float receiver=p.z-bias;
+    if (shadow_options.x < 1.5 || (shadow_options.x > 2.5 && shadow_geometry.w == 0.0)) {
+        float depth=shadow_depth(coord),v=receiver<=depth ? 1.0:0.0;return vec4(v,1.0-v,v>.5 ? 1.0:depth,0);
+    }
+    if (shadow_options.x < 2.5) {
+        float sum=0.0;for (int y=-1;y<=1;++y) {for (int x=-1;x<=1;++x) {sum+=receiver<=shadow_depth(coord+vec2(float(x),float(y))*shadow_options.y) ? 1.0:0.0;}}
+        return vec4(sum/9.0,0,1,0);
+    }
+    // Orthographic raw depth is linear. An angular source grows with separation;
+    // perspective PCSS's receiver/blocker division is intentionally absent.
+    vec2 search=shadow_radius(p.z*shadow_geometry.x*shadow_geometry.w);
+    float count=0.0,total=0.0;
+    for (int i=0;i<64;++i) {if (i>=int(pcss_options.x)) {break;}
+        vec2 offset=shadow_disk[i]*search;
+        float depth=shadow_relative_depth(coord,offset,plane);
+        if (depth<receiver) {count+=1.0;total+=depth;}
+    }
+    if (count==0.0) {return vec4(1,0,1,0);}
+    float average=total/count;
+    vec2 radius=shadow_radius(max(p.z-average,0.0)*shadow_geometry.x*shadow_geometry.w);
+    float sum=0.0;
+    for (int i=0;i<64;++i) {if (i>=int(pcss_options.y)) {break;}
+        vec2 offset=shadow_disk[i]*radius;
+        sum+=receiver<=shadow_relative_depth(coord,offset,plane) ? 1.0:0.0;
+    }
+    return vec4(sum/pcss_options.y,count/pcss_options.x,average,max(radius.x,radius.y)/(shadow_options.y*pcss_options.z));
 }
 void main() {
     vec4 albedo=base_color*color*texture(sampler2D(base_texture,base_sampler),uv);
     vec3 geometric=normalize(world_normal);vec3 n=geometric;
     // Evaluate derivatives before dynamic branches (and support meshes without authored TANGENT).
     vec3 dp1=dFdx(world_position),dp2=dFdy(world_position);vec2 duv1=dFdx(uv),duv2=dFdy(uv);
+    vec3 projected=shadow_position.xyz/shadow_position.w;
+    vec3 sx=dFdx(projected),sy=dFdy(projected);
+    vec2 ux=vec2(sx.x*.5,-sx.y*.5),uy=vec2(sy.x*.5,-sy.y*.5);
+    float determinant=ux.x*uy.y-ux.y*uy.x;
+    // Receiver-plane correction avoids classifying a tilted receiver as its own blocker.
+    vec2 shadow_plane=abs(determinant)>.0000000001 ? vec2(sx.z*uy.y-sy.z*ux.y,ux.x*sy.z-uy.x*sx.z)/determinant:vec2(0);
     if (options.x >= 0.0 && albedo.a < options.x) {discard;}
     if (debug_options.x > .5 && debug_options.x < 1.5) {frag_color=vec4(albedo.rgb,1);return;}
     if (debug_options.x > 1.5 && debug_options.x < 2.5) {frag_color=vec4(1);return;}
@@ -195,13 +308,18 @@ void main() {
         if (dot(transformed,transformed) > 0.00000001) {n=normalize(transformed);}
     }
     n*=gl_FrontFacing ? 1.0:-1.0;
+    vec4 shadow=shadow_result(n,shadow_plane);
+    if (debug_options.x>9.5) {
+        float value=debug_options.x<10.5 ? shadow.y:debug_options.x<11.5 ? shadow.z:debug_options.x<12.5 ? shadow.w:shadow.x;
+        frag_color=vec4(vec3(value),1);return;
+    }
     if (pbr_options.z>.5 && options.y<.5) {
         vec2 mr=texture(sampler2D(metallic_roughness_texture,metallic_roughness_sampler),uv).gb;
         float metallic=clamp(pbr_options.x*mr.y,0.0,1.0),roughness=clamp(pbr_options.y*mr.x,.045,1.0);
         vec3 eye=debug_options.w>.5 ? view_direction.xyz:eye_position.xyz-world_position;
         vec3 v=dot(eye,eye)>0.0000001 ? normalize(eye):n;
         vec3 result=albedo.rgb*light_color.w*(1.0-metallic);
-        result+=direct_brdf(albedo.rgb,metallic,roughness,n,v,light_direction.xyz)*light_color.rgb*light_direction.w*visibility(n);
+        result+=direct_brdf(albedo.rgb,metallic,roughness,n,v,light_direction.xyz)*light_color.rgb*light_direction.w*shadow.x;
         for (int i=0;i<8;++i) {if (float(i)<options.z) {
             vec3 delta=local_positions[i].xyz-world_position;float distance=length(delta);vec3 direction=delta/max(distance,.00001);
             float attenuation=pow(max(1.0-distance/max(local_positions[i].w,.00001),0.0),2.0)/(1.0+distance*distance);
@@ -211,7 +329,7 @@ void main() {
         frag_color=vec4(clamp(result,vec3(0),vec3(65000)),1);return;
     }
     float diffuse=max(dot(n,light_direction.xyz),0.0);
-    vec3 illumination=vec3(light_color.w)+light_color.rgb*diffuse*light_direction.w*visibility(geometric);
+    vec3 illumination=vec3(light_color.w)+light_color.rgb*diffuse*light_direction.w*shadow.x;
     if (options.w > .5 && options.z > .5) {for (int i=0;i<8;++i) {
         if (i >= int(options.z)) {break;}
         vec3 delta=local_positions[i].xyz-world_position;float distance=length(delta);

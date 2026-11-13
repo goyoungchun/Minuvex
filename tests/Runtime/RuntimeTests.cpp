@@ -61,9 +61,9 @@ int main(int argc, char* argv[]) {
         if (mode == "quality") {
             auto caps=v.GetQualityCapabilities();Check(caps && caps.Value().GraphicsAvailable,"Viewer exposes active graphics capabilities");
             if (info.FrameNumber == 0) {
-                auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);low.Overrides.ResolutionScale=.5f;Require(v.SetQuality(low));
-                auto state=v.GetQuality();Check(state && state.Value().Applied && state.Value().RenderWidth <= info.FramebufferWidth/2 && state.Value().Effective->TargetFps == 30,"SetQuality applies Low resolution and pacing inside OnFrame");
-                auto invalid=low;invalid.Overrides.Shadow=lv::ShadowMode::Pcss;Check(!v.SetQuality(invalid) && v.GetQuality().Value().Requested == low,"runtime quality failure retains prior requested/effective settings");
+                auto low=lv::MakeQualityProfile(lv::QualityPreset::Low);low.Overrides.ResolutionScale=.5f;low.Overrides.Shadow=lv::ShadowMode::Pcss;low.Overrides.ShadowSourceAngle=2.f;Require(v.SetQuality(low));
+                auto state=v.GetQuality();Check(state && state.Value().Applied && state.Value().RenderWidth <= info.FramebufferWidth/2 && state.Value().Effective->TargetFps == 30 && state.Value().Effective->Shadow == lv::ShadowMode::Pcss,"SetQuality applies Custom PCSS with Low resolution and pacing inside OnFrame");
+                auto invalid=low;invalid.Overrides.ShadowBlockerSamples=0;Check(!v.SetQuality(invalid) && v.GetQuality().Value().Requested == low,"runtime quality failure retains prior requested/effective settings");
             }
             if (info.FrameNumber == 1) {
                 auto high=lv::MakeQualityProfile(lv::QualityPreset::High);high.AllowFallback=true;Require(v.SetQuality(high));

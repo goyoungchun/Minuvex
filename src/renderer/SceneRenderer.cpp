@@ -228,7 +228,8 @@ void SceneRenderer::DrawImpl(const Scene& scene,const Mat4& viewProjection,bool 
     if (!shadowPass) {stats_.Optimization.CulledParts=stats_.LastCulledParts;}
 }
 
-Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene) const {
+Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene,Vec3* extent) const {
+    if (extent) {*extent={1,1,1};}
     Bounds world;bool first=true;
     const auto add=[&](Vec3 p) {if (first) {world={p,p};first=false;}world.Min={std::min(world.Min.X,p.X),std::min(world.Min.Y,p.Y),std::min(world.Min.Z,p.Z)};world.Max={std::max(world.Max.X,p.X),std::max(world.Max.Y,p.Y),std::max(world.Max.Z,p.Z)};};
     for (const auto& item:scene.CollectRenderItems()) {
@@ -249,6 +250,7 @@ Mat4 SceneRenderer::ShadowViewProjection(const Scene& scene) const {
     const Mat4 view=Mat4::LookAt({center.X-d.X*(radius*2+10),center.Y-d.Y*(radius*2+10),center.Z-d.Z*(radius*2+10)},center,std::abs(d.Y) > .98f ? Vec3{0,0,1}:Vec3{0,1,0});
     Bounds b;bool initial=true;for (unsigned mask=0;mask<8;++mask) {const auto p=view.TransformPoint({mask&1?world.Max.X:world.Min.X,mask&2?world.Max.Y:world.Min.Y,mask&4?world.Max.Z:world.Min.Z});if (initial) {b={p,p};initial=false;}b.Min={std::min(b.Min.X,p.X),std::min(b.Min.Y,p.Y),std::min(b.Min.Z,p.Z)};b.Max={std::max(b.Max.X,p.X),std::max(b.Max.Y,p.Y),std::max(b.Max.Z,p.Z)};}
     const auto margin=std::max(.05f,radius*.02f);const float left=b.Min.X-margin,right=b.Max.X+margin,bottom=b.Min.Y-margin,top=b.Max.Y+margin,near=std::max(.01f,-b.Max.Z-margin),far=std::max(near+.01f,-b.Min.Z+margin);
+    if (extent) {*extent={right-left,top-bottom,far-near};}
     Mat4 projection=Mat4::Identity();projection.Elements[0]=2/(right-left);projection.Elements[5]=2/(top-bottom);projection.Elements[10]=1/(near-far);projection.Elements[12]=-(right+left)/(right-left);projection.Elements[13]=-(top+bottom)/(top-bottom);projection.Elements[14]=near/(near-far);
     return projection*view;
 }

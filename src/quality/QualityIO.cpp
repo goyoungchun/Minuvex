@@ -36,6 +36,8 @@ Result<void> SaveQuality(const QualityProfile& p,const std::filesystem::path& pa
         LV_SAVE(TargetFps,"targetFps") LV_SAVE(MsaaSamples,"msaaSamples") LV_SAVE(Anisotropy,"anisotropy") LV_SAVE(FrustumCulling,"frustumCulling")
         LV_SAVE(ShadowResolution,"shadowResolution") LV_SAVE(Lod,"lod") LV_SAVE(LodBias,"lodBias") LV_SAVE(PostProcessing,"postProcessing")
         LV_SAVE(Instancing,"instancing") LV_SAVE(Pbr,"pbr")
+        LV_SAVE(ShadowSourceAngle,"shadowSourceAngle") LV_SAVE(ShadowBlockerSamples,"shadowBlockerSamples") LV_SAVE(ShadowFilterSamples,"shadowFilterSamples")
+        LV_SAVE(ShadowMaxFilterRadius,"shadowMaxFilterRadius") LV_SAVE(ShadowDepthBias,"shadowDepthBias") LV_SAVE(ShadowSlopeBias,"shadowSlopeBias")
         if (a.Compression) {o["textureCompression"]=*a.Compression == TextureCompression::None ? "none":*a.Compression == TextureCompression::Auto ? "auto":"bc3";}
 #undef LV_SAVE
         if (a.Resolution) {o["resolution"]=Choice(*a.Resolution,{"relative","fixed"});}
@@ -43,14 +45,15 @@ Result<void> SaveQuality(const QualityProfile& p,const std::filesystem::path& pa
         if (a.Lighting) {o["lighting"]=Choice(*a.Lighting,{"unlit","basic","advanced"});}
         if (a.Shadow) {o["shadow"]=Choice(*a.Shadow,{"off","basic","pcf","pcss"});}
         if (a.OnDemand) {o["onDemandRendering"]=Choice(*a.OnDemand,{"off","on","auto"});}
-        Json root{{"format","MinvexQuality"},{"version",1},{"name",p.Name},{"baseProfile",Choice(p.Base,{"low","medium","high"})},{"allowFallback",p.AllowFallback},{"overrides",o}};
+        Json root{{"format","MinvexQuality"},{"version",2},{"name",p.Name},{"baseProfile",Choice(p.Base,{"low","medium","high"})},{"allowFallback",p.AllowFallback},{"overrides",o}};
         detail::WriteJsonFile(root,path,Limit);return Result<void>::Success();
     } catch (...) {return Result<void>::Failure(Failure(path));}
 }
 Result<QualityProfile> LoadQuality(const std::filesystem::path& path) {
     try {
         const auto root=detail::ReadJsonFile(path,Limit);
-        if ((root.contains("format") && !detail::MatchesDocumentFormat(root.at("format"), "MinvexQuality")) || Integer(root.at("version")) != 1) {throw std::invalid_argument("Unsupported quality format/version.");}
+        const int version=Integer(root.at("version"));
+        if ((root.contains("format") && !detail::MatchesDocumentFormat(root.at("format"), "MinvexQuality")) || version < 1 || version > 2) {throw std::invalid_argument("Unsupported quality format/version.");}
         QualityProfile p;p.Name=root.at("name").get<std::string>();p.Base=Choice<QualityPreset>(root.at("baseProfile"),{"low","medium","high"});
         if (root.contains("allowFallback")) {p.AllowFallback=root.at("allowFallback").get<bool>();}
         const auto& o=root.at("overrides");if (!o.is_object()) {throw std::invalid_argument("Quality overrides must be an object.");}
@@ -62,6 +65,8 @@ Result<QualityProfile> LoadQuality(const std::filesystem::path& path) {
             LV_INT(FixedWidth,"fixedWidth") LV_INT(FixedHeight,"fixedHeight") LV_INT(MaxRenderHeight,"maxRenderHeight") LV_INT(TargetFps,"targetFps") LV_INT(MsaaSamples,"msaaSamples") LV_INT(Anisotropy,"anisotropy") LV_INT(ShadowResolution,"shadowResolution")
             LV_FLOAT(ResolutionScale,"resolutionScale") LV_FLOAT(LodBias,"lodBias") LV_BOOL(FrustumCulling,"frustumCulling") LV_BOOL(Lod,"lod") LV_BOOL(PostProcessing,"postProcessing")
             LV_BOOL(Instancing,"instancing") LV_BOOL(Pbr,"pbr")
+            LV_INT(ShadowBlockerSamples,"shadowBlockerSamples") LV_INT(ShadowFilterSamples,"shadowFilterSamples")
+            LV_FLOAT(ShadowSourceAngle,"shadowSourceAngle") LV_FLOAT(ShadowMaxFilterRadius,"shadowMaxFilterRadius") LV_FLOAT(ShadowDepthBias,"shadowDepthBias") LV_FLOAT(ShadowSlopeBias,"shadowSlopeBias")
 #undef LV_INT
 #undef LV_FLOAT
 #undef LV_BOOL

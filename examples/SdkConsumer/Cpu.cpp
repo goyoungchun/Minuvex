@@ -25,6 +25,12 @@ int main(int argc, char** argv) {
         lv::QualityCapabilities caps;caps.GraphicsAvailable=true;
         const auto estimate=lv::EstimateQualityResources(low,caps,reopened.GetScene(),1280,720);
         if (!estimate || !estimate.Value().Cost.BufferBytes) {return 1;}
+        auto pcss=low;pcss.Overrides.Shadow=lv::ShadowMode::Pcss;pcss.Overrides.ShadowSourceAngle=2.f;pcss.Overrides.ShadowBlockerSamples=8;pcss.Overrides.ShadowFilterSamples=16;
+        pcss.Overrides.ShadowMaxFilterRadius=24.f;pcss.Overrides.ShadowDepthBias=.001f;pcss.Overrides.ShadowSlopeBias=.004f;
+        if (!lv::SaveQuality(pcss,output/"Pcss.mvxquality.json")) {return 1;}
+        const auto savedPcss=lv::LoadQuality(output/"Pcss.mvxquality.json");caps.ShadowMapping=true;
+        if (!savedPcss || savedPcss.Value()!=pcss || !lv::ResolveQuality(pcss,caps,128,128)) {return 1;}
+        lv::ValidateDebugOptions({lv::DebugView::ShadowPenumbra});
         lv::Viewer viewer;if (!viewer.AddModel(argv[1]) || !viewer.SetQuality(low)) {return 1;}
         const auto object=viewer.GetScene().ObjectIds().front();auto material=viewer.GetScene().GetMaterial(object,0);material.Shading=lv::ShadingModel::Pbr;material.MetallicFactor=.7f;material.RoughnessFactor=.3f;
         if (!viewer.SetMaterial(object,0,material) || viewer.GetScene().GetMaterial(object,0).RoughnessFactor!=.3f || !viewer.ResetMaterial(object,0)) {return 1;}

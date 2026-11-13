@@ -83,7 +83,7 @@ Result<void> RenderSurface::ApplyQuality(const QualityProfile& profile,const Sce
     if (!sg_isvalid() || sg_query_pass_state() != SG_PASSSTATE_NONE || applying_) {return Fail({ErrorCode::InvalidState,"Apply quality outside render passes on the graphics thread.","Apply from OnFrame or between frames.",{}});}
     const auto caps=QueryQualityCapabilities();auto resolved=ResolveQuality(profile,caps,std::max(1,width),std::max(1,height));
     if (!resolved) {return Fail(resolved.Error());}
-    if (debug_.View == DebugView::ShadowMap && resolved.Value().Effective->Shadow == ShadowMode::Off) {return Fail({ErrorCode::UnsupportedFeature,"Shadow Map view requires active shadow mapping.","Select Lit before disabling shadows.",{}});}
+    if (((debug_.View == DebugView::ShadowMap || debug_.View == DebugView::ShadowVisibility) && resolved.Value().Effective->Shadow == ShadowMode::Off) || (debug_.View >= DebugView::ShadowBlockers && debug_.View <= DebugView::ShadowPenumbra && resolved.Value().Effective->Shadow != ShadowMode::Pcss)) {return Fail({ErrorCode::UnsupportedFeature,"The selected shadow diagnostic requires compatible shadow settings.","Select Lit before disabling shadows.",{}});}
     applying_=true;struct Reset {bool& Flag;~Reset(){Flag=false;}}reset{applying_};
     try {
         auto next=std::move(resolved).Value();const auto& settings=*next.Effective;
@@ -132,7 +132,7 @@ bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::a
     monitoredAssets_=assets;ShadowSampling shadow;
     if (debugRenderer_) {debugRenderer_->Prepare(scene,debug_,debugDraw_);}
     debugLines_=debugRenderer_ ? debugRenderer_->LineCount():0;debugCalls_=debugLines_ ? 1:0;
-    if (shadow_) {shadow.ViewProjection=renderer_->ShadowViewProjection(scene);shadow.Texture=shadow_->Texture;shadow.Sampler=shadow_->Sampler;shadow.Mode=state_.Effective->Shadow;shadow.Resolution=state_.Effective->ShadowResolution;sg_pass p{};p.attachments.colors[0]=shadow_->ColorView;p.attachments.depth_stencil=shadow_->DepthView;p.action.colors[0].load_action=SG_LOADACTION_CLEAR;p.action.colors[0].clear_value={1,1,1,1};p.action.depth.load_action=SG_LOADACTION_CLEAR;p.action.depth.clear_value=1;sg_begin_pass(p);try {renderer_->DrawShadow(scene,shadow.ViewProjection);}catch (...) {sg_end_pass();throw;}sg_end_pass();}
+    if (shadow_) {shadow.ViewProjection=renderer_->ShadowViewProjection(scene,&shadow.Extent);shadow.Texture=shadow_->Texture;shadow.Sampler=shadow_->Sampler;shadow.Settings=*state_.Effective;sg_pass p{};p.attachments.colors[0]=shadow_->ColorView;p.attachments.depth_stencil=shadow_->DepthView;p.action.colors[0].load_action=SG_LOADACTION_CLEAR;p.action.colors[0].clear_value={1,1,1,1};p.action.depth.load_action=SG_LOADACTION_CLEAR;p.action.depth.clear_value=1;sg_begin_pass(p);try {renderer_->DrawShadow(scene,shadow.ViewProjection);}catch (...) {sg_end_pass();throw;}sg_end_pass();}
     sg_pass pass{};pass.attachments.colors[0]=targets_->Attachment;pass.attachments.resolves[0]=targets_->Resolve;pass.attachments.depth_stencil=targets_->DepthAttachment;
     pass.action.colors[0].load_action=SG_LOADACTION_CLEAR;pass.action.colors[0].clear_value={clear[0],clear[1],clear[2],clear[3]};pass.action.depth.load_action=SG_LOADACTION_CLEAR;pass.action.depth.clear_value=1;
     const auto aspect=static_cast<float>(std::max(1,outputWidth_))/static_cast<float>(std::max(1,outputHeight_));
@@ -166,7 +166,7 @@ void RenderSurface::Clear() noexcept {debugRenderer_.reset();debugPreview_.reset
 Result<void> RenderSurface::SetDebugOptions(const DebugOptions& options) {
     if (!sg_isvalid() || sg_query_pass_state() != SG_PASSSTATE_NONE) {return Result<void>::Failure({ErrorCode::InvalidState,"Change debug options outside passes on the graphics thread.","Use OnFrame or between renders.",{}});}
     try {ValidateDebugOptions(options);}catch (const std::exception& e) {return Result<void>::Failure({ErrorCode::InvalidArgument,e.what(),"Select a valid view and palette index.",{}});}
-    if (options.View == DebugView::ShadowMap && (!state_.Effective || state_.Effective->Shadow == ShadowMode::Off)) {return Result<void>::Failure({ErrorCode::UnsupportedFeature,"Shadow Map view is unavailable while shadows are off.","Apply a profile with supported shadows first.",{}});}
+    if (((options.View == DebugView::ShadowMap || options.View == DebugView::ShadowVisibility) && (!state_.Effective || state_.Effective->Shadow == ShadowMode::Off)) || (options.View >= DebugView::ShadowBlockers && options.View <= DebugView::ShadowPenumbra && (!state_.Effective || state_.Effective->Shadow != ShadowMode::Pcss))) {return Result<void>::Failure({ErrorCode::UnsupportedFeature,"The selected shadow diagnostic requires compatible shadow settings.","Apply a profile with supported shadows first.",{}});}
     if (debug_ != options) {debug_=options;frameMonitor_.Reset();if (telemetry_) {telemetry_->ResetGpu();}scheduler_.Invalidate();}return Result<void>::Success();
 }
 Result<void> RenderSurface::SetDebugDraw(const DebugDraw& commands) {

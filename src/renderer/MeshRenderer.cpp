@@ -150,7 +150,12 @@ void MeshRenderer::Draw(const Mat4& model, const Mat4& viewProjection, const Dir
     fragment.eye_position={lighting.Eye.X,lighting.Eye.Y,lighting.Eye.Z,0};fragment.view_direction={lighting.ViewDirection.X,lighting.ViewDirection.Y,lighting.ViewDirection.Z,0};
     fragment.normal_options={material.NormalScale,lighting.Advanced && lighting.NormalTexture.id ? 1.0f:0.0f,0,0};
     fragment.debug_options={static_cast<float>(lighting.Debug.View),lighting.NearPlane,lighting.FarPlane,lighting.Orthographic ? 1.0f:0.0f};
-    if (lighting.Shadow) {fragment.shadow_options={static_cast<float>(lighting.Shadow->Mode),1.0f/lighting.Shadow->Resolution,.0008f,.003f};}
+    if (lighting.Shadow) {
+        const auto& s=lighting.Shadow->Settings;const auto e=lighting.Shadow->Extent;
+        fragment.shadow_options={static_cast<float>(s.Shadow),1.0f/s.ShadowResolution,s.ShadowDepthBias,s.ShadowSlopeBias};
+        fragment.shadow_geometry={e.Z,1.0f/e.X,1.0f/e.Y,std::tan(s.ShadowSourceAngle*.00872664626f)};
+        fragment.pcss_options={static_cast<float>(s.ShadowBlockerSamples),static_cast<float>(s.ShadowFilterSamples),s.ShadowMaxFilterRadius,0};
+    }
     std::size_t local=0;
     const auto point=[&](Vec3 position,Vec3 color,float intensity,float range) {fragment.local_positions[local]={position.X,position.Y,position.Z,range};fragment.local_colors[local]={color.X,color.Y,color.Z,intensity};};
     for (const auto& l:lighting.Points) {if (local >= MaxLocalLights) {throw std::invalid_argument("Local light limit exceeded.");}point(l.Position,l.Color,l.Intensity,l.Range);++local;}

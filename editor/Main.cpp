@@ -279,10 +279,10 @@ void Frame(void* user) noexcept {
             const auto file=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/"profile.mvxquality.json";Require(lv::SaveQuality(high,file));app.UI->LoadQualityProfile(file);
         }
         if (app.QualitySmoke && app.Frames == 4) {
-            Require(app.UI->Document.PauseAnimation(app.UI->Document.Selection()));auto p=app.UI->Viewport.Quality().Requested;p.Overrides.OnDemand=lv::OnDemandMode::On;Require(app.UI->ApplyQualityProfile(p));
+            Require(app.UI->Document.PauseAnimation(app.UI->Document.Selection()));auto p=app.UI->Viewport.Quality().Requested;p.Overrides.OnDemand=lv::OnDemandMode::On;p.Overrides.Shadow=lv::ShadowMode::Pcss;p.Overrides.ShadowSourceAngle=2.f;Require(app.UI->ApplyQualityProfile(p));
         }
         if (app.QualitySmoke && app.Frames == 6) {
-            const auto prior=app.UI->Viewport.ColorImage().id;auto p=app.UI->Viewport.Quality().Requested;p.AllowFallback=false;p.Overrides.Shadow=lv::ShadowMode::Pcss;
+            const auto prior=app.UI->Viewport.ColorImage().id;auto p=app.UI->Viewport.Quality().Requested;p.AllowFallback=false;p.Overrides.ShadowBlockerSamples=0;
             Require(!app.UI->ApplyQualityProfile(p) && prior == app.UI->Viewport.ColorImage().id,"Editor quality rejection did not retain GPU resources.");
             const auto applied=app.UI->Viewport.Quality().Requested;const auto dirty=app.UI->Document.IsDirty();
             auto draft=applied;draft.Overrides.TargetFps=120;app.UI->SetQualityDraft(draft);

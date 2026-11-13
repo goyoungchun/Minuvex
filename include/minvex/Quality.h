@@ -30,6 +30,10 @@ struct RenderSettings {
     OnDemandMode OnDemand = OnDemandMode::Off;
     ShadowMode Shadow = ShadowMode::Off;
     int ShadowResolution = 1024;
+    float ShadowSourceAngle = .535f; // Directional source full angular diameter, degrees [0,20].
+    int ShadowBlockerSamples = 16, ShadowFilterSamples = 32; // PCSS, each [1,64].
+    float ShadowMaxFilterRadius = 32; // Shadow-map texels [1,64].
+    float ShadowDepthBias = .0008f, ShadowSlopeBias = .003f; // Normalized shadow depth [0,0.1].
     bool Lod = false;
     float LodBias = 0;
     bool PostProcessing = false;
@@ -51,6 +55,8 @@ struct QualityOverrides {
     std::optional<OnDemandMode> OnDemand;
     std::optional<ShadowMode> Shadow;
     std::optional<int> ShadowResolution;
+    std::optional<float> ShadowSourceAngle, ShadowMaxFilterRadius, ShadowDepthBias, ShadowSlopeBias;
+    std::optional<int> ShadowBlockerSamples, ShadowFilterSamples;
     std::optional<bool> Lod;
     std::optional<float> LodBias;
     std::optional<bool> PostProcessing;
