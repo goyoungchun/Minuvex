@@ -1,5 +1,6 @@
 #include <minvex/Version.h>
 #include <minvex/Viewer.h>
+#include "CadenceSamples.h"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -42,12 +43,26 @@ int main(int argc,char** argv) {
         for (int i=0;i<objects;++i) {lv::Transform t;t.Position={float(i%side)*2-center,float((i/side)%side)*2-center,float(i/(side*side))*2-center};scene.AddModel(model,t);}
         scene.MainCamera.Position={side*2.5f,side*2.0f,side*2.5f};scene.MainCamera.Target={};scene.MainCamera.NearPlane=.1f;scene.MainCamera.FarPlane=1000;
         scene.Sun.Direction={-.4f,-.8f,-.6f};scene.Sun.Intensity=.75f;scene.Sun.Ambient=.25f;
-        const auto built=Clock::now();double initMs=0;std::vector<double> intervals;intervals.reserve(frames);auto previous=Clock::now();
+        const auto built=Clock::now();double initMs=0;benchmark::CadenceSamples samples(warmup,frames);
+        std::optional<lv::TelemetrySnapshot> telemetry;
         lv::ViewerRunOptions run;run.FrameLimit=std::uint64_t(warmup)+frames+1;
-        run.OnFrame=[&](lv::Viewer&,const lv::ViewerFrameInfo& info) {if (info.FramebufferWidth != 1280 || info.FramebufferHeight != 720) {throw std::runtime_error("Benchmark requires an unchanged 1280x720 framebuffer.");}const auto now=Clock::now();if (info.FrameNumber == 0) {initMs=Milliseconds(now-built);}if (info.FrameNumber > std::uint64_t(warmup)) {intervals.push_back(Milliseconds(now-previous));}previous=now;};
+        run.OnFrame=[&](lv::Viewer& current,const lv::ViewerFrameInfo& info) {
+            if (info.FramebufferWidth != 1280 || info.FramebufferHeight != 720) {throw std::runtime_error("Benchmark requires an unchanged 1280x720 framebuffer.");}
+            const auto nowMs=Milliseconds(Clock::now()-built);if (!samples.Callbacks()) {initMs=nowMs;}
+            samples.Record(info.FrameNumber,nowMs);
+            if (samples.Complete()) {
+                // Capture while the native device/window still exists. This
+                // callback follows the final measured submission, so no extra
+                // frame or teardown-dependent telemetry is needed.
+                const auto snapshot=current.GetTelemetry();
+                if (!snapshot) {throw std::runtime_error("Cannot capture benchmark telemetry: "+snapshot.Error().Message);}
+                telemetry=snapshot.Value();telemetry->Live=false;
+                current.RequestClose();
+            }
+        };
         const auto rendered=viewer.Run(run);if (!rendered) {throw std::runtime_error(rendered.Error().Message);}
-        const auto telemetry=viewer.GetTelemetry();if (!telemetry || intervals.size() != std::size_t(frames)) {throw std::runtime_error("Incomplete benchmark samples.");}
-        const auto& snapshot=telemetry.Value();const auto saved=lv::SaveTelemetry(snapshot,output.string()+".telemetry.json");if (!saved) {throw std::runtime_error(saved.Error().Message);}
+        if (!samples.Complete() || !telemetry) {throw std::runtime_error("Incomplete benchmark samples: expected "+std::to_string(frames)+", collected "+std::to_string(samples.Intervals().size())+", callbacks "+std::to_string(samples.Callbacks())+", telemetry "+(telemetry ? "captured":"missing")+". Keep the window open until measurement completes.");}
+        const auto& intervals=samples.Intervals();const auto& snapshot=*telemetry;const auto saved=lv::SaveTelemetry(snapshot,output.string()+".telemetry.json");if (!saved) {throw std::runtime_error(saved.Error().Message);}
         std::ofstream file(output,std::ios::binary);file << std::setprecision(12);
         file << "{\n  \"format\":\"MinvexBenchmark\",\"version\":2,\"engine\":\"Minvex\",\"engineVersion\":" << Quote(lv::Version)
              << ",\n  \"scenario\":\"shared-cubes-v2-unbatched\",\"objects\":" << objects << ",\"width\":1280,\"height\":720,\"msaa\":1,\"vsync\":false,\"shadows\":false,\"warmupFrames\":" << warmup << ",\"measuredFrames\":" << frames
@@ -58,7 +73,8 @@ int main(int argc,char** argv) {
         if (snapshot.Frames.AverageCpuMs.Value) {file << *snapshot.Frames.AverageCpuMs.Value;}else {file << "null";}
         file << ",\"gpuLatestMs\":";if (snapshot.Frames.GpuFrameMs.Value) {file << *snapshot.Frames.GpuFrameMs.Value;}else {file << "null";}
         file << ",\"processResidentBytes\":";if (snapshot.System.ProcessResidentMemory.Value) {file << *snapshot.System.ProcessResidentMemory.Value;}else {file << "null";}
-        file << ",\"modelLoadMs\":null,\"executableBytes\":" << std::filesystem::file_size(argv[0]) << "\n}\n";
+        file << ",\"modelLoadMs\":null,\"executableBytes\":" << std::filesystem::file_size(argv[0])
+             << ",\"callbackCount\":" << samples.Callbacks() << ",\"duplicateCallbacks\":" << samples.DuplicateCallbacks() << ",\"telemetryCapture\":\"measurement-end\"\n}\n";
         file.close();if (!file) {throw std::runtime_error("Cannot write benchmark report.");}
         std::printf("%d objects, %d measured frames: %s\n",objects,frames,output.string().c_str());return 0;
     }catch (const std::exception& e) {std::fprintf(stderr,"%s\n",e.what());return 1;}

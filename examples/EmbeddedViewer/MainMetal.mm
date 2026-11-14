@@ -42,7 +42,17 @@ void Smoke(id<MTLDevice> device,id<MTLCommandQueue> queue,lv::EmbeddedRenderer& 
     lv::EmbeddedRenderer other;auto busy=other.Initialize(host);Require(!busy && busy.Error().Code == lv::ErrorCode::InvalidState,"Concurrent Metal session was accepted.");
     bool wrong=false;std::thread thread([&]{auto result=renderer.Shutdown();wrong=!result && result.Error().Code == lv::ErrorCode::WrongThread;});thread.join();Require(wrong,"Owner thread was not enforced.");
     auto mismatch=target.Target();++mismatch.Height;Require(!renderer.Render(scene,mismatch),"Mismatched Metal extent was accepted.");
-    const auto quality=renderer.GetQuality().Value();auto bad=quality.Requested;bad.Overrides.Shadow=lv::ShadowMode::Pcss;Require(!renderer.SetQuality(bad,scene) && renderer.GetQuality().Value().Requested == quality.Requested,"Rejected Metal quality changed the active profile.");
+    const auto quality=renderer.GetQuality().Value();auto bad=quality.Requested;bad.Overrides.Shadow=static_cast<lv::ShadowMode>(99);
+    const auto rejected=renderer.SetQuality(bad,scene);Require(!rejected && rejected.Error().Code == lv::ErrorCode::InvalidArgument && renderer.GetQuality().Value().Requested == quality.Requested,"Rejected Metal quality changed the active profile.");
+    auto pcss=lv::MakeQualityProfile(lv::QualityPreset::Low);pcss.Overrides.Shadow=lv::ShadowMode::Pcss;pcss.Overrides.TargetFps=0;
+    const auto capabilities=renderer.GetQualityCapabilities();Require(capabilities);
+    for (bool fallback:{false,true}) {
+        pcss.AllowFallback=fallback;const auto expected=lv::ResolveQuality(pcss,capabilities.Value(),target.Width,target.Height);
+        const auto applied=renderer.SetQuality(pcss,scene);Require(bool(applied) == bool(expected),"Metal PCSS application disagrees with device capabilities.");
+        if (expected) {Require(renderer.GetQuality().Value().Effective == expected.Value().Effective,"Metal PCSS fallback changed the effective settings.");}
+        else {Require(applied.Error().Code == expected.Error().Code && renderer.GetQuality().Value().Requested == quality.Requested,"Rejected Metal PCSS changed the active profile.");}
+    }
+    Require(renderer.SetQuality(quality.Requested,scene));
     auto paced=quality.Requested;paced.Overrides.TargetFps=1;Require(renderer.SetQuality(paced,scene));
     Require(renderer.Render(scene,target.Target(),frame).Value().SceneRendered && renderer.Render(scene,target.Target(),frame).Value().SceneRendered,"ForceRedraw did not bypass the Metal FPS limiter.");
     auto normal=frame;normal.ForceRedraw=false;Require(!renderer.Render(scene,target.Target(),normal).Value().SceneRendered,"Normal Metal rendering bypassed the FPS limiter.");

@@ -44,6 +44,14 @@ struct Application {
 };
 void Require(bool valid, const char* message) { if (!valid) { throw std::runtime_error(message); } }
 template<typename T> void Require(const lv::Result<T>& result) { if (!result) { throw std::runtime_error(result.Error().Message); } }
+ImVec2 GizmoScreenPosition(Application& app) {
+    const auto& ui=*app.UI;const auto area=ui.ViewportArea();
+    const auto point=ui.Document.GetScene().GetWorldTransform(app.GizmoObject).TransformPoint({});
+    const auto vp=ui.Document.GetScene().MainCamera.ViewProjection(ui.Viewport.Aspect());const auto clip=vp.TransformPoint(point);const auto& m=vp.Elements;
+    const float w=m[3]*point.X+m[7]*point.Y+m[11]*point.Z+m[15];
+    Require(std::isfinite(w) && std::abs(w)>1e-6f,"Gizmo test point is outside the camera projection.");
+    return {area[0]+(.5f+clip.X/w*.5f)*area[2],area[1]+(.5f-clip.Y/w*.5f)*area[3]};
+}
 void AwaitPreview(lv::editor::EditorUI& ui) {const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);while (ui.ImportPreviewPending() && std::chrono::steady_clock::now()<deadline) {ui.PollAssetJobs();std::this_thread::sleep_for(std::chrono::milliseconds(1));}Require(!ui.ImportPreviewPending(),"Background Import Preview timed out.");}
 bool ConfirmPreview(lv::editor::EditorUI& ui) {AwaitPreview(ui);return ui.ConfirmImportPreview();}
 #if defined(_WIN32)
@@ -263,12 +271,15 @@ void SmokeAfterDraw(Application& app) {
     if (app.Frames == 9) {const auto area=ui.ViewportArea();Require(ui.GizmoVisible() && area[2]>10 && area[3]>10,"Transform Gizmo is not connected to the Viewport.");app.GizmoCenter={area[0]+area[2]*.5f,area[1]+area[3]*.5f};ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x,app.GizmoCenter.y);ImGui::GetIO().AddMouseButtonEvent(0,true);}
     if (app.Frames == 10) {Require(doc.IsEditing() && ImGuizmo::IsUsing(),"Gizmo click did not begin a grouped edit.");ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x+40,app.GizmoCenter.y+20);}
     if (app.Frames == 11) {app.GizmoMoved=doc.GetScene().GetObject(app.GizmoObject).LocalTransform;Require(std::abs(app.GizmoMoved.Position.X)+std::abs(app.GizmoMoved.Position.Y)>.01f,"Gizmo drag did not update the selected transform.");ImGui::GetIO().AddMouseButtonEvent(0,false);}
-    if (app.Frames == 12) {Require(!doc.IsEditing() && doc.CanUndo(),"Gizmo release did not commit its group.");Require(doc.Undo());Require(std::abs(doc.GetScene().GetObject(app.GizmoObject).LocalTransform.Position.X)<1e-5f,"Gizmo undo did not restore the original transform.");Require(doc.Redo());ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x+40,app.GizmoCenter.y+20);ImGui::GetIO().AddMouseButtonEvent(0,true);}
-    if (app.Frames == 13) {Require(doc.IsEditing(),"Second Gizmo drag did not begin.");ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x+60,app.GizmoCenter.y+30);}
-    if (app.Frames == 14) {ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,true);}
-    if (app.Frames == 15) {Require(!doc.IsEditing() && std::abs(doc.GetScene().GetObject(app.GizmoObject).LocalTransform.Position.X-app.GizmoMoved.Position.X)<1e-5f && doc.Selection() == app.GizmoObject,"Escape did not cancel the Gizmo without clearing selection.");ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,false);ImGui::GetIO().AddMouseButtonEvent(0,false);}
-    if (app.Frames == 16) {Require(ui.GizmoVisible(),"Perspective Gizmo is unavailable.");const auto area=ui.ViewportArea();const auto point=doc.GetScene().GetWorldTransform(app.GizmoObject).TransformPoint({});const auto vp=doc.GetScene().MainCamera.ViewProjection(ui.Viewport.Aspect());const auto clip=vp.TransformPoint(point);const auto& m=vp.Elements;const float w=m[3]*point.X+m[7]*point.Y+m[11]*point.Z+m[15];ImGui::GetIO().AddMousePosEvent(area[0]+(.5f+clip.X/w*.5f)*area[2],area[1]+(.5f-clip.Y/w*.5f)*area[3]);ImGui::GetIO().AddKeyEvent(ImGuiKey_E,true);}
-    if (app.Frames == 17) {Require(ui.TransformTool() == 1,"Viewport tool shortcut was blocked by Gizmo hover.");ImGui::GetIO().AddKeyEvent(ImGuiKey_E,false);std::puts("Editor transform tools: orthographic drag, grouped undo/redo, Escape rollback, perspective overlay and hovered tool shortcut passed.");}
+    if (app.Frames == 12) {Require(!doc.IsEditing() && doc.CanUndo(),"Gizmo release did not commit its group.");Require(doc.Undo());Require(std::abs(doc.GetScene().GetObject(app.GizmoObject).LocalTransform.Position.X)<1e-5f,"Gizmo undo did not restore the original transform.");Require(doc.Redo());app.GizmoCenter=GizmoScreenPosition(app);ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x,app.GizmoCenter.y);}
+    // Draw one released/hovered frame after Undo/Redo, then hit the actual
+    // projected origin. The previous drag delta is not a stable screen target.
+    if (app.Frames == 13) {app.GizmoCenter=GizmoScreenPosition(app);ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x,app.GizmoCenter.y);ImGui::GetIO().AddMouseButtonEvent(0,true);}
+    if (app.Frames == 14) {Require(doc.IsEditing() && ImGuizmo::IsUsing(),"Second Gizmo drag did not begin.");ImGui::GetIO().AddMousePosEvent(app.GizmoCenter.x+20,app.GizmoCenter.y+10);}
+    if (app.Frames == 15) {const auto moved=doc.GetScene().GetObject(app.GizmoObject).LocalTransform.Position;Require(std::abs(moved.X-app.GizmoMoved.Position.X)+std::abs(moved.Y-app.GizmoMoved.Position.Y)>.01f,"Second Gizmo drag did not update the transform.");ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,true);}
+    if (app.Frames == 16) {Require(!doc.IsEditing() && doc.GetScene().GetObject(app.GizmoObject).LocalTransform.Matrix().Elements == app.GizmoMoved.Matrix().Elements && doc.Selection() == app.GizmoObject,"Escape did not cancel the Gizmo without clearing selection.");ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape,false);ImGui::GetIO().AddMouseButtonEvent(0,false);}
+    if (app.Frames == 17) {Require(ui.GizmoVisible(),"Perspective Gizmo is unavailable.");const auto point=GizmoScreenPosition(app);ImGui::GetIO().AddMousePosEvent(point.x,point.y);ImGui::GetIO().AddKeyEvent(ImGuiKey_E,true);}
+    if (app.Frames == 18) {Require(ui.TransformTool() == 1,"Viewport tool shortcut was blocked by Gizmo hover.");ImGui::GetIO().AddKeyEvent(ImGuiKey_E,false);std::puts("Editor transform tools: orthographic drag, grouped undo/redo, Escape rollback, perspective overlay and hovered tool shortcut passed.");}
 }
 void Frame(void* user) noexcept {
     auto& app = *static_cast<Application*>(user);
@@ -312,7 +323,7 @@ void Frame(void* user) noexcept {
         if (app.QualitySmoke && app.Frames == 6) {ImGui::SetWindowFocus("Quality Settings");}
         if (app.Smoke && app.Frames == 7) {const auto dirty=app.UI->Document.IsDirty();app.UI->ShowDebuggers();lv::DebugOptions debug;debug.View=lv::DebugView::Normal;debug.ShowSkeleton=debug.ShowBounds=debug.ShowReferencePose=true;debug.DepthTest=false;Require(app.UI->Viewport.SetDebugOptions(debug));Require(app.UI->Document.IsDirty() == dirty,"Debug display dirtied the Scene.");}
         if (app.Smoke && app.Frames == 9) {auto& doc=app.UI->Document;app.UI->ResolvePending(lv::editor::UnsavedChoice::Cancel);ImGui::ClosePopupToLevel(0,true);doc.New();app.GizmoObject=doc.CreateObject("Gizmo test").Value();lv::Camera camera;camera.Position={0,0,10};camera.Target={};camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=6;Require(doc.SetCamera(camera));ImGui::SetWindowFocus("Viewport");}
-        if (app.Smoke && app.Frames == 16) {auto camera=app.UI->Document.GetScene().MainCamera;camera.Projection=lv::CameraProjection::Perspective;Require(app.UI->Document.SetCamera(camera));}
+        if (app.Smoke && app.Frames == 17) {auto camera=app.UI->Document.GetScene().MainCamera;camera.Projection=lv::CameraProjection::Perspective;Require(app.UI->Document.SetCamera(camera));}
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());
         if (app.Smoke) { SmokeAfterDraw(app); }
@@ -365,7 +376,7 @@ int Run(const std::vector<std::string>& args) {
             else if (!args[i].starts_with("--") && app.Initial.empty()) { app.Initial = lv::detail::PathFromUtf8(args[i]); }
             else { throw std::invalid_argument("Usage: minvex_editor [model.glb | scene.mvxscene.json] [--assets directory] [--preferences file.json] [--frames N] [--smoke-test]"); }
         }
-        if (app.Smoke) {app.Limit=std::max<std::uint64_t>(18,app.Limit);}
+        if (app.Smoke) {app.Limit=std::max<std::uint64_t>(19,app.Limit);}
         Require(lv::detail::StandaloneMainThread() && lv::detail::StandaloneApplicationAvailable(),"Editor requires a standalone main-thread application.");
         sapp_desc desc{}; desc.user_data = &app; desc.init_userdata_cb = Init; desc.frame_userdata_cb = Frame;
         desc.cleanup_userdata_cb = Cleanup; desc.event_userdata_cb = Event;
@@ -375,7 +386,7 @@ int Run(const std::vector<std::string>& args) {
         desc.logger.func = Log; desc.logger.user_data = &app;
         lv::detail::RunStandaloneApplication(desc);
         if (app.Failed) { std::fprintf(stderr,"Editor failed: %s\n",app.Message); return 1; }
-        if (app.Smoke && app.Frames < 17) { std::fprintf(stderr,"Editor smoke ended too early.\n"); return 1; }
+        if (app.Smoke && app.Frames < 19) { std::fprintf(stderr,"Editor smoke ended too early.\n"); return 1; }
         return 0;
     } catch (const std::exception& e) { std::fprintf(stderr,"%s\n",e.what()); return 1; }
 }

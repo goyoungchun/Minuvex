@@ -4,7 +4,7 @@
 
 모듈별 주요 타입과 API를 정리한 사용 안내임. 전체 선언은 연결된 공개 헤더에서 확인할 수 있음.
 
-제품의 목적·공식 지원 목표·현재 구현 분석·완료 기준과 Issue는 [PRD](PRD.md)에서 관리함. 이 문서는 현재 공개 API의 사용 계약을 설명하며 과거 Phase별 작업 기록을 누적하지 않음.
+설치·실행 요구사항과 기능 개요는 [README](../README.md)를 참고함. 이 문서는 공개 API의 동작·한도·소유권·오류·호환성을 설명함.
 
 ## SDK 연결
 
@@ -63,7 +63,7 @@ int main() {
 
 기본값은 1280×720, VSync·기본 입력·자동 Focus 활성화, Medium 품질임. `ViewerRunOptions::OnFrame`에서 Scene을 갱신할 수 있으며 Animation은 기본적으로 callback 전에 자동 진행함. 직접 진행하려면 `AdvanceAnimations=false`를 사용함.
 
-Standalone·Editor의 기본 창 아이콘은 `Minvex_logo_transparent.png`에서 만든 투명 아이콘임. 이미지 데이터는 런타임에 내장되어 별도 이미지 파일이나 실행 디렉터리에 의존하지 않음. Windows는 크기별 창·실행 파일 아이콘, macOS는 애플리케이션/Dock 아이콘 경로를 제공하며 macOS 표시는 실기기 미검증임.
+Standalone·Editor의 기본 창 아이콘은 실행 파일에 포함되며 별도 이미지 파일이나 실행 디렉터리에 의존하지 않음.
 
 ### Animation / Cross-fade
 
@@ -243,7 +243,7 @@ Follower는 자체 애니메이션 Player의 TRS·Morph 재생과 이벤트 수�
 
 Scene writer는 v12이며 reader는 v1~v12임. 최대 1024개의 공유 Skeleton 정의를 중복 없이 저장하고 본/기준 자세/공유 소켓, 인스턴스 소켓 override, Leader·Transform 부모·부착 소켓을 복원함. 파일의 ObjectId는 새 런타임 ID로 매핑하며 모순된 참조·순환·256단계 초과 chain은 거부함. v1~v11에서는 새 관계가 없는 일반 객체로 읽음. 기존 16 MiB JSON·65536 객체·4096 모델 제한을 유지함. 이전 SDK reader는 v12를 읽을 수 없음. Pose v1·ImportVersion 6은 유지하고 정적 SDK 소비자는 1.20.0 헤더/라이브러리로 함께 재빌드해야 함.
 
-예제는 [Equipment](../examples/Equipment/Main.cpp), 설치 SDK 소비자는 [SdkConsumer/Equipment](../examples/SdkConsumer/Equipment.cpp)임. C++/Editor 기능을 제공하며 Python/JavaScript의 장착 제어 바인딩은 제공하지 않음. 환경별 검증 상태와 남은 작업은 PRD를 따름.
+예제는 [Equipment](../examples/Equipment/Main.cpp), 설치 SDK 소비자는 [SdkConsumer/Equipment](../examples/SdkConsumer/Equipment.cpp)임. C++/Editor 기능을 제공하며 Python/JavaScript의 장착 제어 바인딩은 제공하지 않음.
 
 ### PBR Material
 
@@ -331,7 +331,7 @@ python -m pip install --force-reinstall out/wheels/minvex-1.20.0-cp312-cp312-win
 python python/examples/viewer.py examples/assets/MorphRibbon.gltf --frames 60
 ```
 
-루트 `pyproject.toml`의 scikit-build-core 빌드이며 CMake·C++20 도구와 플랫폼 SDK가 필요함. Windows는 x64 MSVC 런타임을 사용함. macOS wheel 파일명은 빌드 환경에 따름. 기본 wheel은 `MINVEX_BUILD_RENDERER=ON`을 매번 전달하므로 같은 `out/python/{wheel_tag}`의 이전 CPU-only OFF cache도 갱신함. `python -m pip wheel . --wheel-dir out/wheels-cpu -C cmake.define.MINVEX_BUILD_RENDERER=OFF`로 CPU-only wheel을 만들 수 있으며 이 구성의 `run()`은 `UnsupportedFeature`임. Native/CPU wheel의 버전과 파일명은 같으므로 출력 폴더를 구분하고, 같은 환경에 교체 설치할 때는 `--force-reinstall`을 사용함. PyPI 공개 설치를 전제로 하지 않으며 위 명령은 로컬 wheel 생성·설치임.
+루트 `pyproject.toml`의 scikit-build-core 빌드이며 CMake·C++20 도구와 플랫폼 SDK가 필요함. Windows는 x64 MSVC 런타임을 사용함. macOS wheel 파일명은 빌드 환경에 따름. 기본 wheel은 `MINVEX_BUILD_RENDERER=ON`으로 구성함. `python -m pip wheel . --wheel-dir out/wheels-cpu -C cmake.define.MINVEX_BUILD_RENDERER=OFF`로 CPU-only wheel을 만들 수 있으며 이 구성의 `run()`은 `UnsupportedFeature`임. Native/CPU wheel의 버전과 파일명은 같으므로 출력 폴더를 구분하고, 같은 환경에 교체 설치할 때는 `--force-reinstall`을 사용함. PyPI 공개 설치를 전제로 하지 않으며 위 명령은 로컬 wheel 생성·설치임.
 
 ```python
 import minvex as mvx
@@ -400,11 +400,11 @@ viewer.dispose();
 
 `info`는 Transform·Clip·Node별 Morph weight·시간·Blend weight의 복사본임. Blend Tree description은 `kind: '1d'/'2d'`, `parameterX/parameterY`, `samples: [{clip, x, y}]`임. Additive의 `clip, weight=1, mask=[]`는 Skeleton reference를 기준으로 함. `seekAnimation(time, collect=false)`는 기본 무발생이며 이벤트는 `onEvent` 또는 polling으로 배출함. Clip·Node·Material index와 정수 품질 설정은 소수점·범위 초과 값을 `InvalidArgument`로 거부하며 다른 대상이나 적용 상태를 수정하지 않음.
 
-메모리 입력은 임시 MEMFS에 복사한 뒤 기존 Importer를 호출하고 파일을 제거함. `files`는 URI→typed array의 Object/Map이며 `resolve(uri, absoluteURL, signal)`로 의존성을 제공할 수 있음. URL 로딩은 상대 URI를 원래 URL 기준으로 Fetch하고, File Input은 선택한 파일·상대 경로·유일한 basename으로 해석함. 네트워크/file URI를 C++ 파일 경로로 전달하지 않음. ArrayBuffer/typed array의 추가 소유 복사 전에 파일당 64 MiB·의존성 합계 128 MiB를 검사하며 초과는 `InsufficientResource`임. 이미지 최대 4096·정점 50만·Scene 객체 256개가 초기 제한임. dispose 후 resolver가 완료되어도 다음 의존성 요청이나 데이터 복사·Import를 진행하지 않음.
+메모리 입력은 임시 MEMFS에 복사한 뒤 기존 Importer를 호출하고 파일을 제거함. `files`는 URI→typed array의 Object/Map이며 `resolve(uri, absoluteURL, signal)`로 의존성을 제공할 수 있음. URL 로딩은 상대 URI를 원래 URL 기준으로 Fetch하고, File Input은 선택한 파일·상대 경로·유일한 basename으로 해석함. 네트워크/file URI를 C++ 파일 경로로 전달하지 않음. ArrayBuffer/typed array의 추가 소유 복사 전에 파일당 64 MiB·의존성 합계 128 MiB를 검사하며 초과는 `InsufficientResource`임. 이미지 최대 4096·정점 50만·Scene 객체 256개가 한도임. dispose 후 resolver가 완료되어도 다음 의존성 요청이나 데이터 복사·Import를 진행하지 않음.
 
 WebGL2 Skinning은 최소 uniform 사양에 맞춰 Skin당 48 Joint이며 초과는 `UnsupportedFeature`임. Morph는 C++ 평가→객체·Node별 정점 stream→GPU Skinning 순서로 적용하며 공유 Asset의 weight를 바꾸지 않음. 직접광 PBR·Normal Map·Static Instancing·Frustum Culling을 재사용함. Canvas는 CSS pixel 기준임. `setCamera`는 position/target/up·projection·orthographicHeight·fovRadians·nearPlane/farPlane을 지원하고 입력은 드래그 Orbit·우클릭 Pan·휠 Zoom임.
 
-품질은 preset 문자열 또는 `{preset, allowFallback, pbr, targetFps, resolutionScale, shadow, postProcessing, msaaSamples, onDemand}`임. 초기 Web 경로는 Shadow/PCSS·HDR·BC3 OFF, MSAA·anisotropy 1임. `allowFallback` 기본 true이며 High의 미지원 값은 조정 내역으로 반환함. false이면 거부하고 이전 설정을 유지함. 웹 PCSS는 지원 기능으로 포함하지 않음.
+품질은 preset 문자열 또는 `{preset, allowFallback, pbr, targetFps, resolutionScale, shadow, postProcessing, msaaSamples, onDemand}`임. Web 경로는 Shadow/PCSS·HDR·BC3 OFF, MSAA·anisotropy 1임. `allowFallback` 기본 true이며 High의 미지원 값은 조정 내역으로 반환함. false이면 거부하고 이전 설정을 유지함. 웹 PCSS는 지원 기능으로 포함하지 않음.
 
 Viewer마다 독립 Wasm module·Canvas를 사용하며 같은 Canvas의 중복 소유는 거부함. 브라우저 GC에 GPU 해제를 맡기지 않고 `dispose()`를 호출함. Object는 약한 Viewer 참조이며 삭제 후 `InvalidHandle`, dispose 후 `InvalidState`임. 미완료 Fetch는 취소하며 File 읽기 중 dispose도 완료 후 `InvalidState`임. File 읽기 실패는 `AssetLoad`이며 cause를 보존함. context loss에서는 프레임을 멈추고 CPU Scene을 유지하며 복구 시 extension·GPU 자원을 재생성함. `MinvexError`의 `code/message/hint/sourcePath/cause`를 제공함. rAF 오류는 `onError` 또는 Canvas의 `minvexerror` 이벤트로 전달함. callback 실패는 `CallbackFailure`이며 이벤트 큐는 최대 1024개임. 초과 프레임은 오류로 중단하고 새 전달분은 저장하지 않으며 시간은 이미 진행된 상태임.
 
@@ -418,13 +418,13 @@ Viewer마다 독립 Wasm module·Canvas를 사용하며 같은 Canvas의 중복 
 
 ## macOS Metal 실행 조건
 
-첫 공식 지원 목표는 macOS Apple Silicon arm64임. 최소 OS·toolchain·배포 타깃 확정과 실기기 검증은 PRD의 ISSUE-01~04에 남아 있음. Intel Mac은 후속 범위이며 구현 경로의 존재를 공식 지원 완료와 동일시하지 않음.
+macOS Metal 경로는 **Apple Silicon arm64용 Preview**임. Intel Mac은 공식 지원 대상에 포함되지 않으며 최소 macOS 버전과 배포 타깃은 지정하지 않음.
 
-- **백엔드·셰이더:** [CMake 셰이더 설정](../cmake/Shaders.cmake)은 `metal_macos` 소스를 생성함. 현재 고정 Sokol 백엔드는 Metal 라이브러리를 실행 중 컴파일하며 MSL 언어 버전을 명시적으로 고정하지 않음. Metal 3/4 전용 API가 필수라는 계약은 없으며 최소 Metal/MSL 버전은 실기기에서 확정해야 함. Windows에서 Metal 소스 생성 성공은 macOS GPU 컴파일·실행 검증을 대신하지 않음.
-- **OS·아키텍처:** 프로젝트는 `CMAKE_OSX_DEPLOYMENT_TARGET`을 고정하지 않음. 대상 `arm64`에 맞는 macOS SDK·컴파일러·라이브러리를 함께 사용해야 함. Apple의 Metal 지원 OS 범위와 Minvex 바이너리의 실행 가능한 OS 범위는 별도로 확인함. macOS용 Python wheel도 해당 플랫폼에서 빌드·검증해야 하며 Windows wheel을 그대로 사용하지 않음.
-- **GPU 기능:** [GraphicsQuality.cpp](../src/renderer/GraphicsQuality.cpp)는 실제 컨텍스트의 컬러·깊이·Shadow·HDR·BC3 포맷과 MSAA sample count를 조회함. GPU 초기화 후 `GetQualityCapabilities()`를 확인하고 `AllowFallback` 정책에 따라 품질을 적용함. GPU 제품명만으로 High 품질이나 모든 포맷 지원을 확정하지 않음. Metal의 기능 조회 원칙은 [Apple GPU 기능 감지 안내](https://developer.apple.com/documentation/metal/detecting-gpu-features-and-metal-software-versions)를 참고함.
-- **Embedded:** Host가 제공하는 `MTLDevice`·command queue·target의 실제 GPU와 포맷을 기준으로 판정함. 다중 GPU Intel Mac에서는 시스템에 나열된 GPU와 Host가 선택한 GPU가 다를 수 있음. 기존 owner-thread·target·동기화 계약을 함께 충족해야 함.
-- **현재 검증 상태:** macOS 실기기 빌드, Standalone/Editor 실행·정상 종료, Embedded Host, Python wheel, 입력·resize·HiDPI, 품질별 GPU 출력은 미검증임. macOS 최소 지원 버전·GPU별 성능·공식 지원 기종은 위 검증을 수행한 뒤 확정함.
+- **빌드:** `CMAKE_OSX_ARCHITECTURES=arm64`와 대상 환경에 맞는 macOS SDK·컴파일러·라이브러리를 사용함. 배포할 애플리케이션의 `CMAKE_OSX_DEPLOYMENT_TARGET`은 Host 프로젝트에서 설정함.
+- **셰이더:** Metal 라이브러리는 런타임에 컴파일함. MSL 언어 버전을 명시적으로 고정하지 않음.
+- **GPU 기능:** 초기화 후 `GetQualityCapabilities()`로 컬러·깊이·Shadow·HDR·BC3 포맷과 MSAA 지원 범위를 확인함. 품질 적용은 실제 컨텍스트의 capability와 `AllowFallback` 정책을 따름.
+- **Embedded:** Host가 제공하는 `MTLDevice`·command queue·target의 GPU와 포맷을 사용함. owner-thread·target 수명·queue 동기화 계약을 충족해야 함.
+- **Python:** macOS arm64용 CPython 3.12 wheel이 필요함. Windows용 wheel과 바이너리 호환되지 않음.
 
 ## 소유권과 스레드
 
@@ -462,12 +462,12 @@ Facade·IO는 Result를 사용하고, low-level Asset/Scene/Animation API는 `Im
 
 Scene v12는 v11 이하만 지원하는 이전 SDK reader로 읽을 수 없음. Scene/Pose/Quality 저장은 임시 파일 작성 후 교체하며 모델 파일 자체를 Scene에 내장하지 않음. Undo 이력·UI 상태·Telemetry는 Scene에 저장하지 않음.
 
-Scene의 모델·텍스처 디렉터리 상대 참조는 실제 부모 디렉터리를 기준으로 계산함. macOS의 `/var` → `/private/var` 같은 디렉터리 링크나 Windows junction을 통해 저장·로드해도 같은 리소스를 가리키며, 프로젝트를 함께 옮길 수 있음. 공개 함수와 Scene 형식 버전은 변경하지 않음.
+Scene의 모델·텍스처 디렉터리 상대 참조는 실제 부모 디렉터리를 기준으로 계산함. macOS의 `/var` → `/private/var` 같은 디렉터리 링크나 Windows junction을 통해 저장·로드해도 같은 리소스를 가리키며, 프로젝트를 함께 옮길 수 있음.
 
-Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND는 후속 범위임.
+CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함.
 
-## 구현 한도와 검증 근거
+## 지원 범위
 
-이 API의 구현 기준은 SDK 1.20.0이다. 실제 지원 플랫폼·현재 검증 결과·미완료 작업은 [PRD](PRD.md)의 구현 분석과 Issue 목록에서 관리한다. Windows 검증 기록을 macOS 실행 증거로 대신하지 않으며, 구현된 기능과 공식 지원 완료를 구분한다.
+이 문서는 SDK 1.20.0의 공개 API를 설명함. 플랫폼별 실행 요구사항은 [README](../README.md#실행-요구사항)를 참고함.
 
-Python wheel의 기본 renderer ON과 명시적 CPU-only OFF를 구분하고, Web은 Skin당 48 Joint·CPU Morph·Shadow/PCSS/HDR/BC3 제외 등 위의 별도 계약을 따른다. Asset Import의 지원 subset과 경고를 확인하며 IBL·Emissive/Occlusion·Alpha BLEND·Point/Spot shadow를 현재 기능으로 가정하지 않는다.
+Python wheel은 기본 renderer ON이며 CPU-only wheel은 `MINVEX_BUILD_RENDERER=OFF`로 구성함. Web은 Skin당 48 Joint·CPU Morph를 사용하며 Shadow/PCSS·HDR·BC3를 제공하지 않음. Asset Import는 문서화된 subset과 진단 경고를 따름. IBL·Emissive/Occlusion 렌더링·Alpha BLEND·Point/Spot shadow는 지원하지 않음.
