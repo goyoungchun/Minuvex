@@ -1,4 +1,5 @@
 #include "RenderSurface.h"
+#include "UiRenderer.h"
 #include "GraphicsTelemetry.h"
 #include "DebugRenderer.h"
 #include "DebugResources.h"
@@ -87,8 +88,13 @@ double RenderClockSeconds() noexcept {
 }
 RenderSurface::RenderSurface()=default;
 RenderSurface::~RenderSurface()=default;
-sg_view RenderSurface::Texture() const noexcept {return targets_ ? (targets_->PostTexture.id ? targets_->PostTexture:targets_->Texture):sg_view{};}
-sg_image RenderSurface::ColorImage() const noexcept {return targets_ ? (targets_->PostColor.id ? targets_->PostColor:targets_->Color):sg_image{};}
+sg_view RenderSurface::Texture() const noexcept {return uiRenderer_ ? uiRenderer_->Texture():targets_ ? (targets_->PostTexture.id ? targets_->PostTexture:targets_->Texture):sg_view{};}
+sg_image RenderSurface::ColorImage() const noexcept {return uiRenderer_ ? uiRenderer_->Image():targets_ ? (targets_->PostColor.id ? targets_->PostColor:targets_->Color):sg_image{};}
+void RenderSurface::SetUi(const UiCanvas* canvas,float scale) {
+    const auto revision=canvas ? canvas->Revision():0;
+    if (ui_!=canvas || uiRevision_!=revision || uiScale_!=scale) {scheduler_.Invalidate();}
+    ui_=canvas;uiRevision_=revision;uiScale_=scale;
+}
 Result<void> RenderSurface::Fail(lv::Error error) {state_.LastError=error;scheduler_.Invalidate();return Result<void>::Failure(std::move(error));}
 Result<void> RenderSurface::ApplyQuality(const QualityProfile& profile,const Scene& scene,int width,int height) {
     if (!sg_isvalid() || sg_query_pass_state() != SG_PASSSTATE_NONE || applying_) {return Fail({ErrorCode::InvalidState,"Apply quality outside render passes on the graphics thread.","Apply from OnFrame or between frames.",{}});}
@@ -152,8 +158,9 @@ bool RenderSurface::Render(const Scene& scene,double now,bool force,const std::a
         else {renderer_->Draw(scene,aspect,shadow);if (debugRenderer_) {debugRenderer_->Draw(scene.MainCamera.ViewProjection(aspect),debug_.DepthTest);}}
     }catch (...) {sg_end_pass();throw;}sg_end_pass();
     if (targets_->PostAttachment.id) {sg_pass p{};p.attachments.colors[0]=targets_->PostAttachment;p.action.colors[0].load_action=SG_LOADACTION_DONTCARE;sg_begin_pass(p);sg_bindings bindings{};bindings.views[VIEW_rendered_texture]=targets_->Texture;bindings.samplers[SMP_rendered_sampler]=presenter_->Sampler;post_params_t post{};post.post_options={1.0f/state_.RenderWidth,1.0f/state_.RenderHeight,debug_.View == DebugView::Lit ? 0.0f:1.0f,0};sg_apply_pipeline(presenter_->PostPipeline);sg_apply_bindings(bindings);sg_apply_uniforms(UB_post_params,SG_RANGE(post));sg_draw(0,3,1);sg_end_pass();}
+    if (ui_&&!ui_->Empty()) {if (!uiRenderer_) {uiRenderer_=std::make_unique<UiRenderer>();}uiRenderer_->Composite(*ui_,targets_->PostTexture.id ? targets_->PostTexture:targets_->Texture,outputWidth_,outputHeight_,uiScale_);}else {uiRenderer_.reset();}
     const auto cpuEnd=RenderClockSeconds();const auto stats=renderer_->GetStats();
-    frameMonitor_.Record(cpuEnd,(cpuEnd-cpuStart)*1000,(debug_.View == DebugView::ShadowMap ? 1:stats.LastDrawCalls+debugCalls_)+stats.LastShadowDrawCalls+(state_.Effective->PostProcessing ? 1:0),(debug_.View == DebugView::ShadowMap ? 1:stats.LastTriangles)+stats.LastShadowTriangles+(state_.Effective->PostProcessing ? 1:0));
+    frameMonitor_.Record(cpuEnd,(cpuEnd-cpuStart)*1000,(debug_.View == DebugView::ShadowMap ? 1:stats.LastDrawCalls+debugCalls_)+stats.LastShadowDrawCalls+(state_.Effective->PostProcessing ? 1:0)+(uiRenderer_ ? 1:0),(debug_.View == DebugView::ShadowMap ? 1:stats.LastTriangles)+stats.LastShadowTriangles+(state_.Effective->PostProcessing ? 1:0)+(uiRenderer_ ? 1:0));
     scheduler_.Submitted(now,signature);++frames_;return true;
 }
 void RenderSurface::Present(bool hasDepth) const {
@@ -169,10 +176,11 @@ TelemetrySnapshot RenderSurface::Telemetry(double now) {
     const auto stats=Stats();result.ResidentAssetSignature=stats.ResidentAssetSignature;result.Resident.TextureBytes=stats.LogicalTextureBytes;result.Resident.BufferBytes=stats.LogicalBufferBytes;
     result.Optimization=stats.Optimization;
     if (targets_ && state_.Effective) {result.Resident.RenderTargetBytes=RenderTargetBytes(*state_.Effective,state_.RenderWidth,state_.RenderHeight);}
+    if (uiRenderer_) {result.Resident.RenderTargetBytes+=uiRenderer_->PixelBytes();result.Resident.TextureBytes+=uiRenderer_->PixelBytes();}
     result.Resident.TotalBytes=result.Resident.TextureBytes+result.Resident.BufferBytes+result.Resident.RenderTargetBytes;
     result.PreviousQualityFrames=previousFrames_;result.PreviousQualityName=previousName_;return result;
 }
-void RenderSurface::Clear() noexcept {debugRenderer_.reset();debugPreview_.reset();debugDraw_.Clear();debug_={};debugLines_=debugCalls_=0;targets_.reset();shadow_.reset();renderer_.reset();presenter_.reset();telemetry_.reset();frameMonitor_.Reset();monitoredAssets_.reset();previousFrames_.reset();previousName_.clear();state_.Effective.reset();state_.Applied=false;state_.RenderWidth=state_.RenderHeight=0;scheduler_.Invalidate();}
+void RenderSurface::Clear() noexcept {uiRenderer_.reset();ui_=nullptr;uiRevision_=0;debugRenderer_.reset();debugPreview_.reset();debugDraw_.Clear();debug_={};debugLines_=debugCalls_=0;targets_.reset();shadow_.reset();renderer_.reset();presenter_.reset();telemetry_.reset();frameMonitor_.Reset();monitoredAssets_.reset();previousFrames_.reset();previousName_.clear();state_.Effective.reset();state_.Applied=false;state_.RenderWidth=state_.RenderHeight=0;scheduler_.Invalidate();}
 
 Result<void> RenderSurface::SetDebugOptions(const DebugOptions& options) {
     if (!sg_isvalid() || sg_query_pass_state() != SG_PASSSTATE_NONE) {return Result<void>::Failure({ErrorCode::InvalidState,"Change debug options outside passes on the graphics thread.","Use OnFrame or between renders.",{}});}
@@ -193,6 +201,7 @@ RenderDebugInfo RenderSurface::Inspect() const {
     if (targets_) {r.Passes.push_back({"Scene",debug_.View == DebugView::ShadowMap ? "debug_preview":"mesh / skin",DebugViewName(debug_.View),debug_.View == DebugView::ShadowMap ? 1:stats.LastDrawCalls,debug_.View == DebugView::ShadowMap ? 1:stats.LastTriangles});InspectImage(r.Resources,targets_->Color,"Resolved scene color",true);InspectImage(r.Resources,targets_->Msaa,"MSAA scene color",true);InspectImage(r.Resources,targets_->Depth,"Scene depth attachment",true);InspectImage(r.Resources,targets_->PostColor,"Final post output",true);}
     if (debugCalls_) {r.Passes.push_back({"Debug overlay","debug_lines",debug_.DepthTest ? "Depth-tested lines":"Always-visible lines",debugCalls_,0});}
     if (targets_ && targets_->PostColor.id) {r.Passes.push_back({"Post", "post",debug_.View == DebugView::Lit ? "FXAA + Reinhard":"Diagnostic color copy",1,1});}
+    if (uiRenderer_) {r.Passes.push_back({"UI overlay","ui","Full-resolution text and controls",1,1});InspectImage(r.Resources,uiRenderer_->Image(),"UI composite output",true);InspectImage(r.Resources,uiRenderer_->OverlayImage(),"UI bitmap",false);}
     if (renderer_) {renderer_->Inspect(r.Resources);}if (debugRenderer_) {debugRenderer_->Inspect(r.Resources);}if (debugPreview_) {InspectShader(r.Resources,debugPreview_->Shader,"Shadow preview");InspectPipeline(r.Resources,debugPreview_->Pipeline,"Shadow preview");}
     for (const auto& resource:r.Resources) {if (resource.Kind == DebugResourceKind::Buffer && (resource.Name == "Wireframe edge indices" || resource.Name == "Debug line stream")) {r.DebugBufferBytes+=resource.Bytes;}}
     if (presenter_) {InspectShader(r.Resources,presenter_->Shader,"present");InspectPipeline(r.Resources,presenter_->Pipeline,"Host/swapchain present");InspectPipeline(r.Resources,presenter_->ColorOnlyPipeline,"Host color-only present");InspectShader(r.Resources,presenter_->PostShader,"post");InspectPipeline(r.Resources,presenter_->PostPipeline,"Post output");}return r;

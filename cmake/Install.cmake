@@ -5,7 +5,7 @@ foreach(_dir CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_DATADIR
     endif()
 endforeach()
 
-set(_sdk_public core animation assets scene scene_io quality telemetry debug optimization editor_document viewer embedded)
+set(_sdk_public core animation assets scene scene_io quality telemetry debug optimization editor_document viewer embedded ui)
 set(_sdk_internal json_io asset_codecs camera meshoptimizer)
 if(MINVEX_BUILD_RENDERER)
     list(APPEND _sdk_internal renderer sokol_gfx sokol_app sokol_headers)
@@ -43,6 +43,7 @@ install(DIRECTORY examples/SdkConsumer DESTINATION "${_sdk_share}/examples")
 install(FILES examples/EmbeddedViewer/MainD3D11.cpp examples/EmbeddedViewer/MainMetal.mm
     DESTINATION "${_sdk_share}/examples/EmbeddedViewer")
 install(FILES examples/RenderingEnhancement/Main.cpp DESTINATION "${_sdk_share}/examples/RenderingEnhancement")
+install(FILES examples/UiOverlay/Main.cpp DESTINATION "${_sdk_share}/examples/UiOverlay")
 install(FILES examples/Equipment/Main.cpp examples/Equipment/EquipmentScene.h examples/Equipment/Diagnostics.h
     DESTINATION "${_sdk_share}/examples/Equipment")
 install(DIRECTORY examples/assets/ DESTINATION "${_sdk_share}/examples/assets")

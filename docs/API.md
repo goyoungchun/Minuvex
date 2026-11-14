@@ -18,6 +18,56 @@ target_link_libraries(my_viewer PRIVATE minvex::viewer)
 
 공개 헤더 경로는 `<minvex/...>`, CMake 옵션 접두사는 `MINVEX_`, SDK 데이터 경로는 `share/minvex`임. 이전 이름의 패키지·타깃·헤더 별칭은 제공하지 않으므로 SDK 소비자는 참조를 갱신하고 다시 빌드해야 함. 문서 형식은 새 저장 시 Minvex 식별자를 쓰며 이름 변경 이전의 Scene·Pose·Quality·Editor 설정 식별자는 읽기 호환을 유지함. C++ 네임스페이스는 기존 `lv`를 사용함.
 
+## 화면 UI
+
+[Ui.h](../include/minvex/Ui.h)의 `UiCanvas`는 Scene과 독립된 화면 overlay임. `minvex::ui`로 CPU 작성·저장·native text raster를 사용하고 `Viewer::GetUi()` 또는 `EmbeddedRenderer::GetUi()`로 3D 위에 합성함. Windows native 실행을 검증했으며 macOS Core Text 경로는 구현되어 있지만 실기기 검증 대기임. Python/Web UI binding은 제공하지 않음.
+
+```cpp
+lv::Viewer viewer;
+auto& ui = viewer.GetUi();
+// 폴더 생성은 명시적이며 Viewer 생성 자체는 파일을 만들지 않음.
+auto folder = ui.SetFontDirectory("Font", true);
+lv::UiElement button;
+button.Kind = lv::UiKind::Button;
+button.Text = "Open model";
+button.Layout = {24, 24, 220, 56};
+button.Typography.Horizontal = lv::UiAlign::Center;
+button.Normal.Fill.fill({.2f, .35f, .8f, 1});
+button.Normal.Radius.fill(12);
+button.Hover = button.Normal;
+button.Hover->Fill.fill({.3f, .5f, 1, 1});
+auto added = ui.Add(button); // Result<UiId> 확인 후 Value() 사용
+lv::ViewerRunOptions run;
+run.OnFrame = [](lv::Viewer& v, const lv::ViewerFrameInfo&) {
+    auto events = v.GetUi().PollActivations();
+    if (events) { for (auto id : events.Value()) { /* id에 대응하는 Host 동작 */ } }
+};
+// viewer.Run(run)의 Result도 확인함.
+```
+
+| API / 타입 | 계약 |
+|---|---|
+| `Add / Set / Get / Elements / Remove / Clear` | 텍스트·버튼·패널 작성, 독립 복사본 조회. Set은 ID를 유지하고 전체 description을 교체함. Add는 입력의 ID를 무시함. 실패한 검증/로드는 기존 요소를 유지함 |
+| `UiLayout` | 좌상단 원점 logical pixel. pivot의 화면 위치 = viewport 크기 × anchor + X/Y. Width/Height, pivot 0..1, 회전 radians, ScaleX/Y, Z 지원. Z가 같으면 나중에 추가한 요소가 위임 |
+| `UiStyle` | sRGB RGBA 색상, TL/TR/BR/BL의 4색 bilinear gradient·개별 radius, 안쪽 border, 부드러운 shadow, 요소 전체 Opacity. radius는 렌더링 시 짧은 변의 절반으로 제한함 |
+| `UiTextStyle` | OS 기본 font, system Family 또는 Font 폴더 내 FontFile, Size·Weight 100..900·Italic·Underline·StrikeThrough·Wrap·LineHeight·LetterSpacing·양축 align·L/T/R/B Padding. 넘친 글자는 content box에서 잘림. Rich text·IME 편집은 제공하지 않음 |
+| 상태별 style | `Hover / Pressed / Focused / Disabled`는 선택적 **완전 교체**임. 우선순위 disabled → pressed/captured → hover → focused → normal. 값이 없는 상태는 다음 가능한 style을 사용함 |
+| `Clip / Visible / Enabled / BlocksInput` | clip은 viewport logical rectangle이며 글자·도형·그림자·hit test에 적용함. disabled 버튼은 입력을 차단하지만 활성화하지 않음. BlocksInput=false인 요소는 입력을 통과시킴 |
+| `ProcessInput / PollActivations` | topmost rounded shape hit test, pointer capture 후 같은 버튼에서 release해야 활성화. Cancel/삭제/비활성화는 capture를 해제함. Tab/Shift+Tab은 생성 순서로 순환하고 Enter/Space down/up은 focus 버튼을 활성화. Poll은 큐를 비우며 callback을 저장하지 않음 |
+| `SetFontDirectory / FontDirectory / Fonts / RefreshFonts` | Font 폴더는 기본 CWD/Font이며 create=true로 생성 가능. `Fonts()`는 OS와 폴더의 TTF/OTF/TTC family를 조회하고 `Fonts(false)`는 폴더만 조회함. FontFile은 폴더 상대 경로이며 경로 탈출을 거부함. 파일을 바꾼 뒤 RefreshFonts를 명시적으로 호출함 |
+| `Save / Load` | `Minvex.UI` v1 JSON, 권장 확장자 `.mvxui.json`, atomic 저장. FontDirectory는 UI 파일에 상대 참조로 저장하고 font bytes는 내장하지 않음. Load는 모든 요소를 검증한 뒤 교체하며 runtime ID를 재발급하고 입력/활성화 상태를 초기화함. Scene v12에는 UI를 저장하지 않음 |
+| `Rasterize` | native shaping, top-left origin의 premultiplied sRGB RGBA8 복사본. UI 변경·DPI·resize 때만 viewer bitmap을 갱신하고 Scene 품질 축소 뒤의 full-resolution pass에서 합성함. UI 합성 자원은 telemetry와 render debugger에 포함함 |
+
+모든 canvas 수정·조회·저장·로드·입력·raster는 생성 스레드에서 호출함. `Revision / Focused / Empty`는 owner thread 전용의 unchecked query임. GetUi는 소유자의 수명 동안만 유효한 참조이며 Viewer/Embedded의 thread-safe 예외에 포함하지 않음. 독립 `UiCanvas`는 GPU 없이 Windows/macOS native text를 생성할 수 있음. 다른 플랫폼의 native font/text는 `UnsupportedFeature`임.
+
+한도는 canvas당 512 요소, 요소당 UTF-8 텍스트 16,384 bytes, 이름/family 256 bytes, activation 1,024개, UI JSON 8 MiB, Font 폴더 검색 128개 파일·파일당 64 MiB임. 요소 크기는 축당 1..2048 logical pixels, scale .01..16, font size 1..256, line height .5..4, letter spacing -32..128, shadow blur 0..128, border 0..1024임. Padding은 글자 content 영역을 남겨야 함. raster/output UI 크기는 축당 1..4096 framebuffer pixels, DPI scale .25..4이며 element text bitmap도 축당 4096 이하임. 색상/opacity/anchor/pivot은 0..1이고 비유한 값은 거부함.
+
+`InvalidArgument`는 속성/입력 검증, `InvalidHandle`은 제거/로드 후의 ID, `WrongThread`는 소유 스레드 위반, `InsufficientResource`는 요소/큐/할당 한도, `InvalidData`는 UI JSON·font 파일·native raster 실패임. UI IO 오류에는 SourcePath를 제공함. 잘못된 폰트 선택은 렌더링 때도 진단되며 다른 폰트로 조용히 바꾸지 않음. 선택된 폰트에 없는 glyph의 OS fallback은 native text engine을 따름. 시스템 font bytes를 복사/재배포하거나 사용자 font를 OS 전역에 설치하지 않음.
+
+Standalone은 absolute `ViewerInputEvent::X/Y`와 `KeyUp`을 UI에 먼저 전달함. UI가 소비한 입력은 OnInput/기본 카메라에 전달하지 않음. Embedded Host는 `GetUi().ProcessInput()`에 **viewport 내부 logical 좌표와 logical 크기**를 전달하고 소비 결과에 따라 자체 입력을 차단함. `EmbeddedFrameOptions::UiScale`은 framebuffer/logical 비율이며 기본 1임. UI를 사용하면 Host viewport도 축당 4096 이하로 제한됨.
+
+Editor의 **UI Designer**에서 요소 추가·삭제·배치·style·font·저장/로드를 제공하며 viewport interaction 옵션으로 버튼을 시험함. Font/raster 실패는 UI 미리보기 오류로 표시하고 Scene 표시를 유지함. 속성을 고치거나 Retry preview로 다시 시도함. UI 편집은 Scene 저장·Scene Undo에 포함되지 않으므로 Save UI로 별도 저장함. `minvex_ui_overlay`는 C++ 작성과 polling 예제임. OS font availability/metrics와 native shaping은 플랫폼마다 달라질 수 있으며 동일한 pixel 출력을 약속하지 않음. 정적 SDK의 공개 구조체 변경에는 소비자 재빌드가 필요함.
+
 ## 좌표·변환 계약
 
 - 오른손 좌표계, Y-up, 카메라 로컬 전방 -Z임.
@@ -29,6 +79,7 @@ target_link_libraries(my_viewer PRIVATE minvex::viewer)
 
 | 모듈 / 헤더 | 주요 타입·함수 |
 |---|---|
+| **ui** · [Ui.h](../include/minvex/Ui.h) | `UiCanvas`, `UiElement`, `UiLayout`, `UiStyle`, `UiTextStyle`, `UiInput`, `UiFont`. `Add/Set/Get`, `ProcessInput/PollActivations`, `Fonts`, `SetFontDirectory`, `Save/Load`, `Rasterize` |
 | **core** · [Math.h](../include/minvex/Math.h), [Mesh.h](../include/minvex/Mesh.h) | `Vec3`, `Quaternion`, `Mat4`, `Transform`, `Bounds`, `MeshData`, `MakeCube()`, `DecomposeTRS()`. 생성 헤더 `Version.h`의 `Version`, `BuildInfo`, `GetBuildInfo()` |
 | **assets** · [Asset.h](../include/minvex/Asset.h), [AssetLoading.h](../include/minvex/AssetLoading.h) | `ModelHandle`, `MorphTarget`, `MaterialAsset`, `ShadingModel`, `ImportSettings`, `ImporterRegistry`, `AssetRegistry::LoadModel/PrepareModel/ReimportModel`, `InspectModel()`, `ValidateModel()`, `CopyModelToProject()`, `AssetLoader`, `AssetHotReload` |
 | **scene** · [Scene.h](../include/minvex/Scene.h) | `Scene`, `ObjectId`, `Camera`, `DirectionalLight`, `PointLight`, `SpotLight`. `AddModel()`, `CreateObject()`, `SetParent()`, `SetTransform()`, `SetModel()`, `GetMaterial/SetMaterial/ResetMaterial`, `GetAnimation()`, `UpdateAnimations()`, `SceneAnimationEvent`, `PollAnimationEvents/DispatchAnimationEvents()` |

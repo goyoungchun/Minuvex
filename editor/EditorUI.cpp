@@ -219,6 +219,7 @@ void EditorUI::Menu() {
         }
         if (ImGui::BeginMenu("Window")) {
             ImGui::MenuItem("Viewport",nullptr,&viewport_); ImGui::MenuItem("Hierarchy",nullptr,&hierarchy_);
+            ImGui::MenuItem("UI Designer",nullptr,&uiDesigner_);
             ImGui::MenuItem("Inspector",nullptr,&inspector_); ImGui::MenuItem("Asset Browser",nullptr,&assets_);
             ImGui::MenuItem("Bone Inspector",nullptr,&bones_); ImGui::MenuItem("Animation Controls",nullptr,&animation_);
             ImGui::MenuItem("Quality Settings",nullptr,&quality_);
@@ -259,6 +260,7 @@ void EditorUI::Dockspace() {
         const auto right = ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,0.29f,nullptr,&center);
         const auto bottom = ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,0.30f,nullptr,&center);
         ImGui::DockBuilderDockWindow("Hierarchy",left); ImGui::DockBuilderDockWindow("Inspector",right);
+        ImGui::DockBuilderDockWindow("UI Designer",right);
         ImGui::DockBuilderDockWindow("Asset Browser",bottom); ImGui::DockBuilderDockWindow("Viewport",center);
         ImGui::DockBuilderDockWindow("Bone Inspector",right); ImGui::DockBuilderDockWindow("Animation Controls",bottom);
         ImGui::DockBuilderDockWindow("Console",bottom);
@@ -653,6 +655,8 @@ void EditorUI::ViewportPanel() {
         const auto available = ImGui::GetContentRegionAvail(); const auto& io = ImGui::GetIO();
         if (available.x > 1 && available.y > 1) {
             Viewport.Resize(static_cast<int>(std::min(65536.0f,available.x*sapp_dpi_scale())),static_cast<int>(std::min(65536.0f,available.y*sapp_dpi_scale())));
+            // Publish replacement overlay views before ImGui records this Image.
+            Viewport.Render(Document.GetScene());
             ImGui::Image(simgui_imtextureid(Viewport.Texture()),available);
             const auto imageMin=ImGui::GetItemRectMin();
             const bool hovered = ImGui::IsItemHovered();
@@ -662,9 +666,11 @@ void EditorUI::ViewportPanel() {
                 ImGui::EndDragDropTarget();
             }
             const bool modal = ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId) || dialog_ != Dialog::None || pending_ != Action::None;
-            TransformTools(imageMin.x,imageMin.y,available.x,available.y,!modal);
+            const bool uiBlocked=UiViewportInput(imageMin.x,imageMin.y,available.x,available.y,hovered,modal);
+            if (uiBlocked) {StopCameraEdit(false);controls_.Reset();cameraDrag_=false;}
+            TransformTools(imageMin.x,imageMin.y,available.x,available.y,!modal&&!uiBlocked);
             if (io.AppFocusLost || modal) {StopCameraEdit(true);}
-            else {
+            else if (!uiBlocked) {
                 auto camera = Document.GetScene().MainCamera;
                 ViewerInputEvent event; event.Shift = io.KeyShift;
                 bool changed = false;
@@ -762,7 +768,7 @@ void EditorUI::Draw() {
     PollAssetJobs();
     PollAnimationEvents();
     if (pendingQuality_) {const auto profile=std::move(*pendingQuality_);pendingQuality_.reset();Report(ApplyQualityProfile(profile));lastAnalysis_=-1;}
-    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); ViewportPanel(); PerformancePanel();RenderDebugger();AnimationDebugger();Console(); Welcome();ImportPreview(); Dialogs();
+    Menu(); Dockspace(); Hierarchy(); Inspector(); BoneInspector(); AssetBrowser();AssetInspector(); AnimationControls(); QualitySettings(); UiDesigner();ViewportPanel(); PerformancePanel();RenderDebugger();AnimationDebugger();Console(); Welcome();ImportPreview(); Dialogs();
     if (ImGui::BeginViewportSideBar("Status",ImGui::GetMainViewport(),ImGuiDir_Down,ImGui::GetFrameHeight(),ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
         const auto stats = Viewport.Stats();
         ImGui::Text("%zu objects | %zu assets | %zu draw calls | %s",Document.GetScene().Size(),Document.Assets().size(),stats.LastDrawCalls,status_.c_str());

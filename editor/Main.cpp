@@ -30,6 +30,8 @@ struct Application {
     bool DirectoryExplicit = false;
     std::uint64_t Frames = 0, Limit = 0;
     bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, TelemetrySmoke = false, Gui = false, Failed = false;
+    bool UiSmoke=false;
+    lv::UiId UiButton=lv::NoUi;
     std::optional<lv::QualityProfile> InitialQuality;
     std::optional<lv::QualityPreset> RecommendedQuality;
     std::uint64_t CachedFrames=0;
@@ -143,7 +145,7 @@ void Init(void* user) noexcept {
         simgui_setup(gui); app.Gui = true;
         auto& io = ImGui::GetIO(); io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        io.IniFilename = app.Smoke ? nullptr : ".minvex-editor.ini";
+        io.IniFilename = app.Smoke||app.UiSmoke ? nullptr : ".minvex-editor.ini";
 #if defined(_WIN32)
         const char* font = "C:/Windows/Fonts/malgun.ttf";
 #else
@@ -152,7 +154,7 @@ void Init(void* user) noexcept {
         if (std::filesystem::exists(font)) { io.FontDefault = io.Fonts->AddFontFromFileTTF(font,17); }
         ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding = 3; ImGui::GetStyle().FrameRounding = 3;
         app.UI = std::make_unique<lv::editor::EditorUI>();
-        app.UI->InitializeSession(app.Preferences,MINVEX_EDITOR_SAMPLE,MINVEX_EDITOR_DOCUMENTATION,!app.Smoke);
+        app.UI->InitializeSession(app.Preferences,MINVEX_EDITOR_SAMPLE,MINVEX_EDITOR_DOCUMENTATION,!app.Smoke&&!app.UiSmoke);
         if (app.Smoke) {CheckEditorFileWorkflows();}
         if (app.DirectoryExplicit) {app.UI->SetDirectory(app.Directory);}
         if (!app.Initial.empty()) {
@@ -324,8 +326,17 @@ void Frame(void* user) noexcept {
         if (app.Smoke && app.Frames == 7) {const auto dirty=app.UI->Document.IsDirty();app.UI->ShowDebuggers();lv::DebugOptions debug;debug.View=lv::DebugView::Normal;debug.ShowSkeleton=debug.ShowBounds=debug.ShowReferencePose=true;debug.DepthTest=false;Require(app.UI->Viewport.SetDebugOptions(debug));Require(app.UI->Document.IsDirty() == dirty,"Debug display dirtied the Scene.");}
         if (app.Smoke && app.Frames == 9) {auto& doc=app.UI->Document;app.UI->ResolvePending(lv::editor::UnsavedChoice::Cancel);ImGui::ClosePopupToLevel(0,true);doc.New();app.GizmoObject=doc.CreateObject("Gizmo test").Value();lv::Camera camera;camera.Position={0,0,10};camera.Target={};camera.Projection=lv::CameraProjection::Orthographic;camera.OrthographicHeight=6;Require(doc.SetCamera(camera));ImGui::SetWindowFocus("Viewport");}
         if (app.Smoke && app.Frames == 17) {auto camera=app.UI->Document.GetScene().MainCamera;camera.Projection=lv::CameraProjection::Perspective;Require(app.UI->Document.SetCamera(camera));}
+        if (app.UiSmoke) {
+            auto& ui=app.UI->Viewport.Ui;
+            if (app.Frames==0) {lv::UiElement button;button.Kind=lv::UiKind::Button;button.Name="UI smoke";button.Text="Minvex 한글";button.Normal.Fill.fill({.3f,.4f,.8f,1});app.UiButton=ui.Add(button).Value();const auto directory=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/"ui";Require(ui.SetFontDirectory(directory/"Font",true));Require(ui.Save(directory/"screen.mvxui.json"));Require(ui.Load(directory/"screen.mvxui.json"));app.UiButton=ui.Elements().Value().front().Id;}
+            if (app.Frames==2) {auto button=ui.Get(app.UiButton).Value();button.Typography.FontFile="missing.ttf";Require(ui.Set(app.UiButton,button));}
+            if (app.Frames==3) {auto button=ui.Get(app.UiButton).Value();button.Typography.FontFile.clear();Require(ui.Set(app.UiButton,button));}
+            if (app.Frames==4) {Require(ui.Clear());}
+            if (app.Frames==5) {lv::UiElement text;text.Text="Recreated overlay";app.UiButton=ui.Add(text).Value();app.UI->Viewport.Resize(640,360);}
+        }
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());
+        if (app.UiSmoke) {if (app.Frames>0) {Require(app.UI->Viewport.Texture().id!=0,"UI smoke lost its viewport texture.");}Require(app.Frames==2 ? app.UI->Viewport.UiError.has_value():!app.UI->Viewport.UiError,"UI preview font failure did not recover.");if (app.Frames==7) {std::puts("Editor UI: save/load, Unicode overlay, missing font recovery, clear and resize passed.");}}
         if (app.Smoke) { SmokeAfterDraw(app); }
         simgui_flush();
         sg_pass pass{}; pass.swapchain = sglue_swapchain();
@@ -363,6 +374,7 @@ int Run(const std::vector<std::string>& args) {
     try {
         for (std::size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--smoke-test") { app.Smoke = true; app.Limit = 10; }
+            else if (args[i] == "--ui-smoke-test") {app.UiSmoke=true;app.Limit=8;}
             else if (args[i] == "--animation-smoke-test") { app.Smoke = app.AnimationSmoke = true; app.Limit = 10; }
             else if (args[i] == "--quality-smoke-test") {app.Smoke=app.AnimationSmoke=app.QualitySmoke=true;app.Limit=10;}
             else if (args[i] == "--telemetry-smoke-test") {app.Smoke=app.AnimationSmoke=app.TelemetrySmoke=true;app.Limit=10;}

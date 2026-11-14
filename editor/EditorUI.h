@@ -53,6 +53,12 @@ public:
     // Queue from UI actions after Image commands exist; commit at the next Draw entry.
     void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
+    void UiDesigner();
+    bool UiViewportInput(float x,float y,float width,float height,bool hovered,bool modal);
+    UiId uiSelected_=NoUi;
+    bool uiDesigner_=true,uiPreview_=false,uiPointerDown_=false;
+    std::string uiPath_="screen.mvxui.json",uiFontPath_="Font",uiStatus_;
+    std::vector<UiFont> uiFonts_;
     enum class Action { None, New, Open, QuickOpen, Project, Quit } pending_ = Action::None;
     enum class Dialog { None, Import, Open, QuickOpen, Project, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad, TelemetryJson, TelemetryCsv } dialog_ = Dialog::None;
     std::filesystem::path directory_ = std::filesystem::current_path(), openPath_;

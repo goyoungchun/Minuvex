@@ -5,6 +5,8 @@
 namespace lv::editor {
 class SceneViewport final {
 public:
+    UiCanvas Ui;
+    std::optional<Error> UiError;
     void Resize(int width,int height);
     void Render(const Scene& scene);
     Result<void> SetQuality(const QualityProfile& profile,const Scene& scene);
@@ -32,5 +34,6 @@ private:
     Scene empty_;
     const Scene* scene_=nullptr;
     int width_=0,height_=0;
+    std::uint64_t failedUiRevision_=0;
 };
 }

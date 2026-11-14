@@ -1,4 +1,5 @@
 #pragma once
+#include <minvex/Ui.h>
 #include <minvex/Debug.h>
 #include <minvex/Telemetry.h>
 #include <memory>
@@ -31,6 +32,7 @@ struct EmbeddedFrameOptions {
     bool ForceRedraw = false; // Bypass cached/on-demand/FPS scheduling for this call.
     EmbeddedViewport Viewport;
     EmbeddedTargetLoad TargetLoad = EmbeddedTargetLoad::Clear; // Clear entire target, or load Host contents.
+    float UiScale = 1; // Framebuffer pixels per logical UI pixel, .25..4.
 };
 struct EmbeddedFrameResult {
     bool SceneRendered = false, Presented = false;
@@ -64,6 +66,7 @@ public:
     Result<const void*> GetMetalCommandQueue() const; // Borrowed id<MTLCommandQueue>; valid until Shutdown.
     Result<void> Shutdown(); // Idempotent; releases only Minvex's resources/references.
     bool IsInitialized() const noexcept; // Thread-safe query; other calls require the owner thread.
+    UiCanvas& GetUi() noexcept; // Host forwards logical input to this canvas.
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

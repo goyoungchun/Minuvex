@@ -58,6 +58,7 @@ struct TargetBinding {
 #endif
 }
 struct EmbeddedRenderer::Impl {
+    UiCanvas Ui;
     std::thread::id Owner=std::this_thread::get_id();
     std::atomic_bool Initialized{false};
 #if MINVEX_EMBEDDED_GRAPHICS
@@ -86,6 +87,7 @@ EmbeddedRenderer::~EmbeddedRenderer() {
     if (impl_->Initialized) {if (!Shutdown()) {std::terminate();}}
 }
 bool EmbeddedRenderer::IsInitialized() const noexcept {return impl_->Initialized.load();}
+UiCanvas& EmbeddedRenderer::GetUi() noexcept {return impl_->Ui;}
 Result<void> EmbeddedRenderer::Initialize(const HostGraphicsContext& context,const EmbeddedOptions& options) {
     auto& p=*impl_;auto ready=p.Ready(false);if (!ready) {return ready;}
     if (p.Initialized) {return Failure(ErrorCode::InvalidState,"This EmbeddedRenderer is already initialized.");}
@@ -119,6 +121,7 @@ Result<void> EmbeddedRenderer::Update(Scene& scene,double delta) {
 Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const HostRenderTarget& target,const EmbeddedFrameOptions& options) {
     auto& p=*impl_;auto ready=p.Ready();if (!ready) {return Result<EmbeddedFrameResult>::Failure(ready.Error());}
     for (const float c:options.ClearColor) {if (!std::isfinite(c) || c < 0 || c > 1) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Clear color must be finite and in [0,1].");}}
+    if (!std::isfinite(options.UiScale)||options.UiScale<.25f||options.UiScale>4) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"UI scale must be .25..4.");}
     if (target.Width < 0 || target.Height < 0 || target.Width > 8192 || target.Height > 8192 || (target.Width == 0) != (target.Height == 0) || (target.Width > 0 && (!target.ColorTexture || target.ColorTexture == target.DepthTexture))) {return Failure<EmbeddedFrameResult>(ErrorCode::InvalidArgument,"Provide a Host color texture, optional distinct depth texture and matching dimensions, or a zero-size suspended target.");}
     auto viewport=options.Viewport;
     const bool full=viewport.X == 0 && viewport.Y == 0 && viewport.Width == 0 && viewport.Height == 0;
@@ -136,6 +139,7 @@ Result<EmbeddedFrameResult> EmbeddedRenderer::Render(const Scene& scene,const Ho
         if (candidate) {p.Target.swap(candidate);candidate.reset();}
         p.ViewWidth=viewport.Width;p.ViewHeight=viewport.Height;
         if (options.ForceRedraw) {p.Surface->Invalidate();}
+        p.Surface->SetUi(&p.Ui,options.UiScale);
         const bool rendered=p.Surface->Render(scene,detail::RenderClockSeconds(),false,options.ClearColor,options.ForceRedraw);
         sg_pass pass{};pass.attachments.colors[0]=p.Target->ColorView;pass.attachments.depth_stencil=p.Target->DepthView;
         const auto load=options.TargetLoad == EmbeddedTargetLoad::Preserve ? SG_LOADACTION_LOAD:SG_LOADACTION_CLEAR;

@@ -6,6 +6,7 @@
 #include <minvex/Telemetry.h>
 #include <minvex/Debug.h>
 #include <minvex/AssetLoading.h>
+#include <minvex/Ui.h>
 
 #include <functional>
 #include <memory>
@@ -15,9 +16,9 @@ namespace lv {
 namespace detail { struct ViewerState; }
 class Viewer;
 
-enum class ViewerInputType { MouseDown, MouseUp, MouseMove, Scroll, KeyDown, FocusLost, Resized };
+enum class ViewerInputType { MouseDown, MouseUp, MouseMove, Scroll, KeyDown, FocusLost, Resized, KeyUp };
 enum class ViewerMouseButton { None, Left, Right, Middle };
-enum class ViewerKey { Unknown, Escape, F, Space };
+enum class ViewerKey { Unknown, Escape, F, Space, Tab, Enter };
 
 // Mouse deltas and viewport dimensions are in logical window pixels (HiDPI
 // independent). FrameInfo uses actual framebuffer pixels instead.
@@ -29,6 +30,7 @@ struct ViewerInputEvent {
     int Width = 0, Height = 0;
     bool Shift = false;
     bool Repeat = false;
+    float X = 0, Y = 0; // Absolute logical pointer position for UI hit testing.
 };
 
 struct CameraControlOptions {
@@ -142,6 +144,8 @@ public:
     // Advanced API: owner thread only, retaining Phase 2's exception contracts.
     Scene& GetScene() noexcept;
     const Scene& GetScene() const noexcept;
+    UiCanvas& GetUi() noexcept;
+    const UiCanvas& GetUi() const noexcept;
 
     Result<void> Run(const ViewerRunOptions& options = {});
     void RequestClose() noexcept; // No effect outside an active Run().

@@ -99,6 +99,7 @@ void Frame(void* user) noexcept {
         (void)runtime.Surface.Resize(runtime.State.World,width,height);runtime.State.Quality=runtime.Surface.Quality();
         const auto now=RenderClockSeconds();
         if (runtime.State.HotReload) {(void)runtime.Facade.PollHotReload(now);}
+        runtime.Surface.SetUi(&runtime.State.Ui,dpi);
         if (!runtime.Surface.Due(now)) {std::this_thread::sleep_for(std::chrono::milliseconds(1));return;}
         const auto elapsed=now-runtime.LastUpdate;runtime.LastUpdate=now;
         const ViewerFrameInfo info{runtime.Frames,std::isfinite(elapsed) ? std::clamp(elapsed,0.0,0.25) : 0.0,width,height};
@@ -154,6 +155,7 @@ void Event(const sapp_event* source, void* user) noexcept {
         case SAPP_EVENTTYPE_MOUSE_MOVE: event.Type = ViewerInputType::MouseMove; break;
         case SAPP_EVENTTYPE_MOUSE_SCROLL: event.Type = ViewerInputType::Scroll; break;
         case SAPP_EVENTTYPE_KEY_DOWN: event.Type = ViewerInputType::KeyDown; break;
+        case SAPP_EVENTTYPE_KEY_UP: event.Type = ViewerInputType::KeyUp; break;
         case SAPP_EVENTTYPE_RESIZED: event.Type = ViewerInputType::Resized; break;
         case SAPP_EVENTTYPE_UNFOCUSED:
         case SAPP_EVENTTYPE_ICONIFIED:
@@ -163,6 +165,7 @@ void Event(const sapp_event* source, void* user) noexcept {
         const float dpi = sapp_dpi_scale() > 0 ? sapp_dpi_scale() : 1;
         event.Button = MouseButton(source->mouse_button);
         event.DeltaX = source->mouse_dx/dpi; event.DeltaY = source->mouse_dy/dpi;
+        event.X=source->mouse_x/dpi;event.Y=source->mouse_y/dpi;
         event.ScrollY = source->scroll_y;
         event.Width = std::max(0,static_cast<int>(std::lround(sapp_widthf()/dpi)));
         event.Height = std::max(0,static_cast<int>(std::lround(sapp_heightf()/dpi)));
@@ -172,6 +175,8 @@ void Event(const sapp_event* source, void* user) noexcept {
         case SAPP_KEYCODE_ESCAPE: event.Key = ViewerKey::Escape; break;
         case SAPP_KEYCODE_F: event.Key = ViewerKey::F; break;
         case SAPP_KEYCODE_SPACE: event.Key = ViewerKey::Space; break;
+        case SAPP_KEYCODE_TAB: event.Key = ViewerKey::Tab; break;
+        case SAPP_KEYCODE_ENTER: event.Key = ViewerKey::Enter; break;
         default: break;
         }
         const auto handled = runtime.Facade.ProcessInput(event);

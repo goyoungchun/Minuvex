@@ -2,11 +2,13 @@
 #include "SceneRenderer.h"
 #include "GraphicsQuality.h"
 #include <minvex/Telemetry.h>
+#include <minvex/Ui.h>
 #include <sokol_gfx.h>
 
 namespace lv::detail {
 class GraphicsTelemetry;
 class DebugRenderer;
+class UiRenderer;
 class RenderSurface final {
 public:
     RenderSurface();
@@ -23,6 +25,7 @@ public:
     int Height() const noexcept {return state_.RenderHeight;}
     sg_view Texture() const noexcept;
     sg_image ColorImage() const noexcept;
+    void SetUi(const UiCanvas* canvas,float scale=1);
     const QualityState& Quality() const noexcept {return state_;}
     SceneRenderStats Stats() const noexcept {return renderer_ ? renderer_->GetStats():SceneRenderStats{};}
     std::uint64_t RenderedFrames() const noexcept {return frames_;}
@@ -39,6 +42,10 @@ private:
     struct ShadowTargets;
     struct DebugPreview;
     std::unique_ptr<Targets> targets_;
+    std::unique_ptr<UiRenderer> uiRenderer_;
+    const UiCanvas* ui_=nullptr;
+    std::uint64_t uiRevision_=0;
+    float uiScale_=1;
     std::unique_ptr<Presenter> presenter_;
     std::unique_ptr<SceneRenderer> renderer_;
     std::unique_ptr<ShadowTargets> shadow_;

@@ -14,6 +14,7 @@ struct ViewerState {
     ViewerOptions Options;
     AssetRegistry Assets;
     Scene World;
+    UiCanvas Ui;
     CameraController Controls;
     std::thread::id Owner = std::this_thread::get_id();
     std::atomic_bool Running{false}, CloseRequested{false};

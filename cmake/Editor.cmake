@@ -33,6 +33,7 @@ add_library(minvex_editor_ui STATIC editor/EditorUI.cpp editor/AssetPanels.cpp e
 target_sources(minvex_editor_ui PRIVATE editor/AdditivePanel.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/EquipmentPanel.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/EventPanel.cpp)
+target_sources(minvex_editor_ui PRIVATE editor/UiDesigner.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/AssetJobs.cpp)
 target_sources(minvex_editor_ui PRIVATE editor/TransformTools.cpp)
 target_include_directories(minvex_editor_ui PUBLIC editor PRIVATE src runtime/standalone)
