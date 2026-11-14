@@ -4,6 +4,8 @@
 
 모듈별 주요 타입과 API를 정리한 사용 안내임. 전체 선언은 연결된 공개 헤더에서 확인할 수 있음.
 
+제품의 목적·공식 지원 목표·현재 구현 분석·완료 기준과 Issue는 [PRD](PRD.md)에서 관리함. 이 문서는 현재 공개 API의 사용 계약을 설명하며 과거 Phase별 작업 기록을 누적하지 않음.
+
 ## SDK 연결
 
 ```cmake
@@ -15,6 +17,13 @@ target_link_libraries(my_viewer PRIVATE minvex::viewer)
 필요한 모듈을 `minvex::<모듈명>`으로 연결함. CPU 도구는 `assets`·`animation`·`scene_io`, Host 통합은 `embedded`, 편집 상태 관리는 `editor_document` 등을 사용함. `graphics`는 그래픽 SDK 여부를 검사하는 component임.
 
 공개 헤더 경로는 `<minvex/...>`, CMake 옵션 접두사는 `MINVEX_`, SDK 데이터 경로는 `share/minvex`임. 이전 이름의 패키지·타깃·헤더 별칭은 제공하지 않으므로 SDK 소비자는 참조를 갱신하고 다시 빌드해야 함. 문서 형식은 새 저장 시 Minvex 식별자를 쓰며 이름 변경 이전의 Scene·Pose·Quality·Editor 설정 식별자는 읽기 호환을 유지함. C++ 네임스페이스는 기존 `lv`를 사용함.
+
+## 좌표·변환 계약
+
+- 오른손 좌표계, Y-up, 카메라 로컬 전방 -Z임.
+- 행렬은 column-major 저장·column vector 곱이며 `projection * view * model * position` 순서임. `Transform::Matrix()`는 `T * R * S`이고 원근 나눗셈 후 깊이 범위는 [0,1]임.
+- 삼각형 목록과 CCW 앞면을 사용함. `MeshData`는 32-bit index, `Vertex`는 Position·Normal·Color·TexCoord·Joint/Weight 4개·Tangent를 포함함. 정확한 배열 타입은 [Mesh.h](../include/minvex/Mesh.h)를 따름.
+- 비유한 값·singular Transform·잘못된 Quaternion은 공개 검증 함수의 계약에 따라 거부함. `DecomposeTRS()`는 shear를 TRS로 가장하지 않고 거부함. 모델 Import의 단위·좌표 변환과 오류는 Asset 진단을 확인함.
 
 ## 모듈별 주요 API
 
@@ -234,7 +243,7 @@ Follower는 자체 애니메이션 Player의 TRS·Morph 재생과 이벤트 수�
 
 Scene writer는 v12이며 reader는 v1~v12임. 최대 1024개의 공유 Skeleton 정의를 중복 없이 저장하고 본/기준 자세/공유 소켓, 인스턴스 소켓 override, Leader·Transform 부모·부착 소켓을 복원함. 파일의 ObjectId는 새 런타임 ID로 매핑하며 모순된 참조·순환·256단계 초과 chain은 거부함. v1~v11에서는 새 관계가 없는 일반 객체로 읽음. 기존 16 MiB JSON·65536 객체·4096 모델 제한을 유지함. 이전 SDK reader는 v12를 읽을 수 없음. Pose v1·ImportVersion 6은 유지하고 정적 SDK 소비자는 1.20.0 헤더/라이브러리로 함께 재빌드해야 함.
 
-예제는 `examples/Equipment/Main.cpp`, 설치 SDK 소비자는 `examples/SdkConsumer/Equipment.cpp`임. C++/Editor 기능을 제공하며 Python/JavaScript의 장착 제어 바인딩은 아직 제공하지 않음. Windows MSVC Release CTest 19/19, CPU-only Debug 12/12 통과(D3D11 장착 픽셀·예제·Editor/Embedded smoke 포함). 저장 chain 경계 검사 후 관련 Native 5개·CPU-only 12개를 재검증함. Native SDK 설치본만으로 공개 헤더 개별 컴파일·장착 상태 저장/복원 소비자·장착 그래픽 예제 실행을 검증함. macOS Metal·WebGL2의 새 기능 실행 결과는 미검증임.
+예제는 [Equipment](../examples/Equipment/Main.cpp), 설치 SDK 소비자는 [SdkConsumer/Equipment](../examples/SdkConsumer/Equipment.cpp)임. C++/Editor 기능을 제공하며 Python/JavaScript의 장착 제어 바인딩은 제공하지 않음. 환경별 검증 상태와 남은 작업은 PRD를 따름.
 
 ### PBR Material
 
@@ -253,7 +262,7 @@ auto changed = viewer.SetMaterial(id, 0, material); // Result<void> 확인 필�
 
 렌더링에는 Advanced lighting과 `QualityOverrides::Pbr=true`가 필요함. Low/Medium은 기본 OFF, High는 ON임. `QualityCapabilities::PbrLighting`을 확인하며 미지원은 거부하고 AllowFallback일 때만 Basic 재질 경로로 대체함. 직접광 Directional/Point/Spot, Normal Map·Skinning·Instancing·Sun Shadow를 사용하며 IBL은 제공하지 않음.
 
-`Scene::SetMaterial/ResetMaterial`과 `EditorDocument::SetMaterial/ResetMaterial`도 제공함. SetMaterial은 재질 전체 값을 override하며 ResetMaterial로 원본을 복원함. override가 있는 객체는 개별 draw로 처리함. Document 편집은 Undo/Redo 대상이며 Scene v12에 저장함. Texture는 같은 모델 내부 index만 참조함. Reimport 시 override material index/name·texture index 호환성을 검사함. Quality v1의 새 pbr 키는 이전 SDK reader에서 거부될 수 있음. 기본값·저장 형식 변경 및 추가 필드로 정적 SDK 소비자는 함께 재빌드해야 함.
+`Scene::SetMaterial/ResetMaterial`과 `EditorDocument::SetMaterial/ResetMaterial`도 제공함. SetMaterial은 재질 전체 값을 override하며 ResetMaterial로 원본을 복원함. override가 있는 객체는 개별 draw로 처리함. Document 편집은 Undo/Redo 대상이며 Scene v12에 저장함. Texture는 같은 모델 내부 index만 참조함. Reimport 시 override material index/name·texture index 호환성을 검사함. PBR 설정은 현재 Quality writer v2로 저장하며 reader는 v1~v2를 지원함. 정적 SDK 소비자는 공개 구조체 변경 시 헤더/라이브러리를 함께 재빌드해야 함.
 
 ### Morph Target
 
@@ -283,9 +292,7 @@ Scene v12는 node별 override와 frozen source Morph, layout signature를 저장
 
 `minvex_equipment`는 위 VSync 설정을 기본으로 사용하며 `--target-fps 0..240`·`--no-vsync`로 비교할 수 있음. 팔 회전·몸 translation은 60 Hz cosine key로 방향 전환과 loop 경계를 완화하고 기존 Clip Slerp/Lerp로 평가함. `--profile path.json --frames 270`은 30프레임 warmup 후 wall-clock callback 간격을 기록함. 시뮬레이션 delta가 긴 stall 이후 clamp되어도 실제 간격을 기록하며, JSON 요약·frame별 CSV·기존 Telemetry JSON을 생성함. profile은 동기식 파일 IO이며 해당 path에 쓰기 권한이 필요하고 실패 시 예제는 오류를 출력하고 종료 코드 1을 반환함. 측정은 opt-in이며 수집된 본 행렬 비교는 Scene 상태를 변경하지 않음.
 
-Windows D3D11 측정에서 기존 VSync+60 FPS 제한은 32.8 FPS·P95 33.9ms였고, 제한만 해제한 A/B는 60.0 FPS·P95 17.1ms였음. 수정 후 기본/명시적 60 FPS 제한 모두 60 FPS 근처, Body/Follower 행렬 오차 0으로 확인함. 팔의 240 Hz 두 루프 검사에서 인접 sample 각속도 변화의 최댓값은 0.165 rad/s 미만임. Native CTest 20/20·CPU-only 13/13·설치 SDK 소비자 검증을 실행함. macOS/WebGL2 결과는 실행 미검증임.
-
-`RenderScheduler`의 비공개 저장 상태(epoch)가 추가되어 구조체 크기가 변경됨. 공개 함수 인수·Quality/Scene 파일 형식은 유지하며 정적 SDK 소비자는 헤더/라이브러리를 함께 재빌드해야 함. 바이너리 ABI는 고정하지 않음.
+`RenderScheduler`의 비공개 저장 상태를 포함한 구조체 크기와 바이너리 ABI는 고정하지 않음. 정적 SDK 소비자는 헤더/라이브러리를 함께 재빌드해야 함.
 
 ### PCSS Shadow
 
@@ -312,7 +319,7 @@ auto changed = viewer.SetQuality(quality); // Result<void> 확인 필요
 
 `DebugView::ShadowBlockers / ShadowBlockerDepth / ShadowPenumbra / ShadowVisibility`는 각각 blocker 수/검색 수, 수신면 기준으로 보정한 평균 선형 깊이, 반경/최대 반경, 최종 가시성의 grayscale임. blocker가 없으면 깊이=1·반경=0임. 앞의 세 뷰는 PCSS, Visibility는 활성 shadow가 필요하며 부적합한 뷰/품질 전환은 `UnsupportedFeature`이고 이전 상태를 유지함. Editor Quality Settings와 Debugger에서 같은 설정·뷰를 제공하며 `minvex_rendering_enhancement --pcss`는 접촉·부유 그림자 예제임.
 
-`ExpandQuality`는 비유한 값·범위 초과를 `InvalidArgument`로 반환함. `ResolveQuality`는 `QualityCapabilities::ShadowMapping`을 요구하고 `AllowFallback=true`인 경우만 shadow를 끔. 설정은 값으로 복사하며 Viewer/Embedded/Editor 적용은 기존 owner/graphics thread에서 pass 밖에 호출함. 변경은 On-Demand 이미지를 무효화함. Quality writer v2는 PCSS 키를 저장하고 reader는 v1~v2임. v1에 없는 값은 기본값이며 정적 SDK 1.19 소비자는 공개 구조체 변경에 따라 재빌드가 필요함.
+`ExpandQuality`는 비유한 값·범위 초과를 `InvalidArgument`로 반환함. `ResolveQuality`는 `QualityCapabilities::ShadowMapping`을 요구하고 `AllowFallback=true`인 경우만 shadow를 끔. 설정은 값으로 복사하며 Viewer/Embedded/Editor 적용은 기존 owner/graphics thread에서 pass 밖에 호출함. 변경은 On-Demand 이미지를 무효화함. Quality writer v2는 PCSS 키를 저장하고 reader는 v1~v2임. v1에 없는 값은 기본값이며 정적 SDK 소비자는 공개 구조체 변경 시 함께 재빌드해야 함.
 
 ### Python Binding
 
@@ -411,10 +418,10 @@ Viewer마다 독립 Wasm module·Canvas를 사용하며 같은 Canvas의 중복 
 
 ## macOS Metal 실행 조건
 
-macOS 하드웨어 기준은 [README의 최소 사양](../README.md#최소-사양)에 기재한 Apple M1 이상 또는 A18 Pro임. macOS 실기기 검증과 최소 지원 OS 확정은 남아 있음.
+첫 공식 지원 목표는 macOS Apple Silicon arm64임. 최소 OS·toolchain·배포 타깃 확정과 실기기 검증은 PRD의 ISSUE-01~04에 남아 있음. Intel Mac은 후속 범위이며 구현 경로의 존재를 공식 지원 완료와 동일시하지 않음.
 
 - **백엔드·셰이더:** [CMake 셰이더 설정](../cmake/Shaders.cmake)은 `metal_macos` 소스를 생성함. 현재 고정 Sokol 백엔드는 Metal 라이브러리를 실행 중 컴파일하며 MSL 언어 버전을 명시적으로 고정하지 않음. Metal 3/4 전용 API가 필수라는 계약은 없으며 최소 Metal/MSL 버전은 실기기에서 확정해야 함. Windows에서 Metal 소스 생성 성공은 macOS GPU 컴파일·실행 검증을 대신하지 않음.
-- **OS·아키텍처:** 프로젝트는 `CMAKE_OSX_DEPLOYMENT_TARGET`을 고정하지 않음. Apple silicon의 `arm64` 또는 Intel의 `x86_64`에 맞는 macOS SDK·컴파일러·라이브러리를 함께 사용해야 함. Apple의 Metal 지원 OS 범위와 Minvex 바이너리의 실행 가능한 OS 범위는 별도로 확인함. macOS용 Python wheel도 해당 플랫폼에서 빌드·검증해야 하며 Windows wheel을 그대로 사용하지 않음.
+- **OS·아키텍처:** 프로젝트는 `CMAKE_OSX_DEPLOYMENT_TARGET`을 고정하지 않음. 대상 `arm64`에 맞는 macOS SDK·컴파일러·라이브러리를 함께 사용해야 함. Apple의 Metal 지원 OS 범위와 Minvex 바이너리의 실행 가능한 OS 범위는 별도로 확인함. macOS용 Python wheel도 해당 플랫폼에서 빌드·검증해야 하며 Windows wheel을 그대로 사용하지 않음.
 - **GPU 기능:** [GraphicsQuality.cpp](../src/renderer/GraphicsQuality.cpp)는 실제 컨텍스트의 컬러·깊이·Shadow·HDR·BC3 포맷과 MSAA sample count를 조회함. GPU 초기화 후 `GetQualityCapabilities()`를 확인하고 `AllowFallback` 정책에 따라 품질을 적용함. GPU 제품명만으로 High 품질이나 모든 포맷 지원을 확정하지 않음. Metal의 기능 조회 원칙은 [Apple GPU 기능 감지 안내](https://developer.apple.com/documentation/metal/detecting-gpu-features-and-metal-software-versions)를 참고함.
 - **Embedded:** Host가 제공하는 `MTLDevice`·command queue·target의 실제 GPU와 포맷을 기준으로 판정함. 다중 GPU Intel Mac에서는 시스템에 나열된 GPU와 Host가 선택한 GPU가 다를 수 있음. 기존 owner-thread·target·동기화 계약을 함께 충족해야 함.
 - **현재 검증 상태:** macOS 실기기 빌드, Standalone/Editor 실행·정상 종료, Embedded Host, Python wheel, 입력·resize·HiDPI, 품질별 GPU 출력은 미검증임. macOS 최소 지원 버전·GPU별 성능·공식 지원 기종은 위 검증을 수행한 뒤 확정함.
@@ -459,67 +466,8 @@ Scene의 모델·텍스처 디렉터리 상대 참조는 실제 부모 디렉터
 
 Windows D3D11 핵심 실행 검증을 완료했으며 macOS Metal은 구현 상태로 실기기 미검증임. CPU-only 구성의 native 초기화·실행은 `UnsupportedFeature`를 반환함. IBL·Emissive/Occlusion·Alpha BLEND는 후속 범위임.
 
-## 검증 범위
+## 구현 한도와 검증 근거
 
-### Python wheel 캐시·Editor 회귀 수정 검증 · 2026-11-13
+이 API의 구현 기준은 SDK 1.20.0이다. 실제 지원 플랫폼·현재 검증 결과·미완료 작업은 [PRD](PRD.md)의 구현 분석과 Issue 목록에서 관리한다. Windows 검증 기록을 macOS 실행 증거로 대신하지 않으며, 구현된 기능과 공식 지원 완료를 구분한다.
 
-`pyproject.toml`의 wheel CMake 기본값에 `MINVEX_BUILD_RENDERER=ON`을 추가함. 명시적인 CPU-only OFF는 우선 적용하며, 이후 renderer 옵션을 생략한 기본 빌드는 같은 cache를 ON으로 되돌림. C++ SDK API·소유권·스레드·오류·저장 형식은 변경하지 않음.
-
-Editor smoke는 `ResidentModels=1`을 별도로 검사하고 적용된 품질의 Instancing 설정에 따라 draw call을 검사함. 정적 SharedBox의 두 winding 그룹은 인스턴싱 ON에서 2개 draw call·`InstancedObjects=4`, OFF에서 4개 draw call·0개 인스턴싱을 요구함. 애니메이션 smoke는 2개 draw call·0개 정적 인스턴싱을 요구함. draw call 검사 자체를 제거하거나 허용 범위를 넓히지 않음.
-
-| 재검증 항목 | 실행 결과 |
-|---|---|
-| 수정한 원본 Editor를 포함한 Windows MSVC Release 전체 확장 CTest | **42/42 통과**, 이전 `phase4.editor` 실패 해소 |
-| 별도 Custom quality의 Static Instancing OFF Editor smoke | 저장/복원·파일 작업·Gizmo·Undo/Redo까지 통과 |
-| 같은 기본 build-dir에서 CPU-only → 기본 native wheel | OFF wheel 생성·설치 후 renderer 옵션 없는 기본 wheel 빌드·설치 통과. cache OFF → ON, 실제 `graphics_available=False` → `True` 확인 |
-| CPU-only wheel 바인딩·실행 거부 | `--expect-graphics off` **6/6 통과** |
-| 기본 native wheel 바인딩 | `--expect-graphics on` **6/6 통과** |
-| 기본 native wheel 실제 실행 | normal·frame callback 실패·event callback 실패·GIL 해제/다른 스레드 종료 **4/4 통과** |
-| 이전 CPU-only wheel을 native로 검사하는 회귀 guard | `--expect-graphics on`에서 예상한 실패를 확인하여 잘못된 wheel을 잡는 것을 검증함 |
-
-CI Python job도 같은 cache에서 CPU-only wheel을 먼저 만들고 기본 native wheel을 생성하여 각각 `--expect-graphics off/on`으로 검사함. Native 설치는 같은 버전의 CPU-only wheel을 교체하므로 `--force-reinstall`을 사용함. Windows에서 이 순서의 빌드·설치·테스트를 실행했으며 수정한 원격 CI와 macOS job은 아직 실행하지 않았음.
-
-검증은 CPython 3.12·scikit-build-core 1.1.2·Windows MSVC Release에서 수행함. CPU-only 빌드에 로컬 Sokol/shdc 경로를 지정해 네트워크 다운로드를 피했으며, 같은 cache의 후속 기본 native 빌드에는 renderer·build-dir override를 전달하지 않았음. Visual Studio MSBuild가 샌드박스 안에서 진행되지 않아 같은 명령을 샌드박스 밖에서 실행하여 빌드·설치를 완료함. junction을 만드는 Python 바인딩 검사도 샌드박스 밖에서 실행함.
-
-로그는 [전체 Native CTest](../out/verification-fixes/native.xml), [인스턴싱 OFF Editor](../out/verification-fixes/editor-no-instancing.log), [wheel cache 전환](../out/verification-fixes/cache-transition.log), [CPU-only wheel 빌드](../out/verification-fixes/wheel-cpu-build.log), [기본 native wheel 빌드](../out/verification-fixes/wheel-default-build.log), [CPU-only 바인딩](../out/verification-fixes/python-cpu-tests.log), [Native 바인딩](../out/verification-fixes/python-native-tests.log), [Native 실제 실행](../out/verification-fixes/python-native-runtime.log), [이전 잘못된 wheel의 guard 실패](../out/verification-fixes/old-wheel-guard.log)에 유지함. 아래 SDK·Web·CPU-only CTest 결과는 최초 감사 기록이며 이번 수정에서 반복 실행하지 않음.
-
-### 수정 전 지원 기능 검증 · SDK 1.20.0 · 2026-11-13
-
-기준은 README·이 문서의 현재 지원 기능이며 ProjectPlan의 후속 목표는 완료 판정에서 제외함. 검증 시작 소스는 `0c9c56d70b555116d3892e5ea7ec5e8d89e1bc39`임. 이 최초 감사 시점에는 구현 소스·원본 테스트를 변경하지 않았으며 문서의 SDK 버전·Scene 호환성 요약을 현재 구현과 맞춤.
-
-| 구성 | 실행 결과 | 실제 확인 범위 |
-|---|---|---|
-| Windows MSVC Release, render smoke·extended tests ON | CTest 41/42 통과, `phase4.editor` 1개 실패 | Core·Asset·Scene·Animation·Quality·Telemetry·Result·Viewer·Editor·Embedded·장착 예제, D3D11 PBR/Morph/PCSS·디버그·최적화 픽셀 검사 |
-| CPU-only MSVC Debug | CTest 13/13 통과 | GPU 없는 Scene·Asset·Pose·Animation·EditorDocument·Quality·Telemetry·장착·오류 처리 |
-| Native Release·CPU-only Debug SDK | 양쪽 archive·SHA-256·설치/이동·독립 소비자 통과 | 모든 공개 헤더 개별 컴파일, CPU·Animation 소비자. Native 설치본의 Shared Skeleton·Leader Pose·Socket·Scene v12 소비자도 별도 실행 |
-| CPython 3.12 Windows wheel | CPU-only 바인딩 6/6, Native 바인딩 6/6·native 모드 4/4 통과 | Unicode·디렉터리 junction·프로젝트 이동·Scene/재질·Animation/Tree/Morph·Pose/Additive·수명·오류·Quality, native 실행·프레임/이벤트 callback 실패·GIL 해제/다른 스레드 종료 |
-| Emscripten Release·Web 배포 설치 | Chrome·Firefox 모두 통과 | Canvas 픽셀, GLB·외부 glTF·URL/파일/메모리, PBR·Skinning·독립 Morph·Tree·Additive·Event·입력 제한·context 복구·dispose. Chrome은 headless SwiftShader, COOP/COEP 없는 단일 thread |
-| 릴리스 도구 | 합성 fixture 기반 14개 도구 검사·3개 패키지 계약 검사 통과 | 보고서 검증·변조 checksum 거부·multi-config 이름. 실제 Unity 대비 성능 측정은 아님 |
-
-수정 전 확인한 문제(두 항목 모두 위의 후속 수정 검증에서 해소):
-
-1. `editor/Main.cpp`의 `SmokeAfterDraw()`는 정적 모델 두 인스턴스에 draw call 4개를 기대함. 실제 진단값은 `ResidentModels=1`, `LastDrawCalls=2`, `InstancedObjects=4`임. 원본 smoke를 별도 실행해 실패를 재현함. `out/verification/EditorProbe.cpp` 복사본에서 기대값만 2개로 바꾸면 저장/복원·resize·파일 작업·Gizmo·Undo/Redo까지 통과함. 인스턴싱 동작과 어긋난 원본 회귀 검사 보완이 필요하며 원본 42개 전부 통과로 기록하지 않음.
-2. `pyproject.toml`의 공통 `out/python/{wheel_tag}`에 renderer OFF cache가 있으면 기본 `pip wheel` 명령으로 만들어진 1.20.0 wheel도 `graphics_available=False`이고 native 실행에 실패했음. 당시 별도 build-dir·명시적 renderer ON wheel은 `graphics_available=True`이며 native 4개 모드를 통과했음. 후속 수정에서는 기본값을 보완하고 같은 cache에서의 기본 native 복구를 검증함.
-
-증거는 로컬 `out/`에 유지함:
-
-- [Native 전체 CTest 결과](../out/build/minvex-release/verification-native.xml), [Editor 실패 재현](../out/build/minvex-release/verification-editor-repro.xml), [CPU-only CTest 결과](../out/build/minvex-core-only/verification-core.xml)
-- [Editor 진단](../out/verification/editor-probe.log), [Native SDK](../out/verification/native-sdk.log), [CPU-only SDK](../out/verification/core-sdk.log), [장착 SDK 소비자](../out/verification/equipment-sdk.log)
-- [Python CPU-only 바인딩](../out/verification/python-tests.log), [Native 바인딩](../out/verification/python-renderer-tests.log), [Native 실행](../out/verification/python-renderer-native-tests.log), [기본 wheel의 native 실패](../out/verification/python-native-tests.log)
-- [Web 빌드 출력 테스트](../out/verification/web-tests.log), [Web 설치본 테스트](../out/verification/web-installed-tests.log), [릴리스 도구](../out/verification/release-tools.log)
-
-SDK 검사 중 MSVC compiler probe의 PDB 오류는 `_CL_=/Z7`로 우회함. 브라우저 loopback HTTP와 Python junction 검사는 샌드박스 밖에서 같은 테스트를 재실행하여 통과함. 이는 제품 실패와 구분함. macOS Metal·macOS Python wheel·Safari·모바일·원격 CI·최소 사양 기기의 성능과 메모리 목표는 실행하지 않았음. OS 파일 대화상자의 실제 사용자 조작 전체는 자동 smoke가 대체하지 않으며 테스트가 주입한 파일 선택 이후의 처리 경로를 확인한 범위임.
-
-### 이전 검증 기록
-
-SDK 1.19.1 Windows Release의 관련 핵심 CTest 5종(Asset·Scene·Animation·Quality·통합 D3D11 픽셀)을 확인함. FBX 비정수 길이·끝 키 보존, PBR·Morph·Blend Tree·Additive·Event·PCSS를 포함함. 기존 CTest 13종 등록은 유지함.
-
-Python native·CPU-only Wheel 빌드·설치, 핵심 바인딩 5종·native 실행·CPU-only 실행 오류를 확인함. Pose/Additive 상태·mask·snapshot·오류 시 기존 상태 유지도 포함함.
-
-이번 CI 오류 수정에서는 Windows native Wheel을 재생성·설치하고 디렉터리 링크 경로·텍스처 디렉터리·프로젝트 이동을 포함한 바인딩 6종과 C++ Document·Viewer·Animation CTest 3종을 확인함. 기존 wheel에서 경로 회귀 테스트의 실패를 재현한 뒤 수정 wheel의 통과를 확인함. macOS의 기존 실패 로그에서 Scene 재로딩 경로 오류를 확인했으며, 수정 후 macOS 실행 결과는 아직 없음.
-
-Emscripten 4.0.10 Release 빌드·Web 배포 설치와 Chrome·Firefox의 실제 Canvas 픽셀·GLB/외부 glTF·PBR·Skinning·독립 Morph·Blend Tree·Additive·Event·파일 입력·context 복구·dispose를 확인함. 정수 입력 거부·입력 크기 제한·취소 후 resolver 중단을 포함함. Chrome은 headless SwiftShader 경로이며 COOP/COEP 없는 단일 thread 실행임. Safari·모바일·macOS 실기기·원격 CI는 이번에 실행하지 않았음.
-
-Ubuntu CI의 `sokol-shdc` 선택 누락을 수정하고 Linux x86_64·arm64 선택 경로의 CMake configure·공식 바이너리 다운로드·SHA-256 검증을 Windows에서 수행함. Emscripten Release도 새 출력 폴더에서 빌드하고 Web 배포 설치·Chrome/Firefox 테스트를 확인함. Linux 바이너리 실행과 수정 후 Ubuntu 전체 CI는 미검증임.
-
-[기능·빌드 안내](../README.md) · [공식 SDK 예제](../examples/SdkConsumer) · [공개 헤더](../include/minvex)
+Python wheel의 기본 renderer ON과 명시적 CPU-only OFF를 구분하고, Web은 Skin당 48 Joint·CPU Morph·Shadow/PCSS/HDR/BC3 제외 등 위의 별도 계약을 따른다. Asset Import의 지원 subset과 경고를 확인하며 IBL·Emissive/Occlusion·Alpha BLEND·Point/Spot shadow를 현재 기능으로 가정하지 않는다.
