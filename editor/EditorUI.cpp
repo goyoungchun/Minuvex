@@ -98,7 +98,7 @@ void EditorUI::ReimportAsset(AssetId asset) {
     if (!Report(Document.ReimportModel(asset))) {return;}
     for (const auto& model:Document.Assets()) {if (model->Id == asset) {status_="Reimported "+Text(model->SourcePath.filename());Record(ConsoleLevel::Info,status_,model->SourcePath);for (const auto& warning:model->Warnings) {Record(ConsoleLevel::Warning,warning,model->SourcePath);}}}
 }
-void EditorUI::Ask(Action action) {if (HasImportPreview()) {Record(ConsoleLevel::Warning,"Finish or cancel Import Preview before changing the document.");return;}pending_ = action; if (!Document.IsDirty()) { ApplyPending(); } }
+void EditorUI::Ask(Action action) {if (HasImportPreview()) {Record(ConsoleLevel::Warning,"Finish or cancel Import Preview before changing the document.");return;}if (action==Action::Quit&&!uiAllowQuit_) {FinishUiEdit();if (Viewport.Ui.History().Value().Dirty) {uiPending_=UiPending::Quit;const auto path=uiSavedPath_.empty() ? std::filesystem::path("screen.mvxui.json"):uiSavedPath_;const auto text=path.u8string();uiSavePath_={text.begin(),text.end()};return;}}pending_ = action; if (!Document.IsDirty()) { ApplyPending(); } }
 void EditorUI::RequestOpen(const std::filesystem::path& path) { openPath_ = path; Ask(Action::Open); }
 void EditorUI::RequestQuickOpen(const std::filesystem::path& path) {openPath_=path;Ask(Action::QuickOpen);}
 void EditorUI::RequestNew() { Ask(Action::New); }
@@ -212,6 +212,10 @@ void EditorUI::Menu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
+            const auto uiHistory=Viewport.Ui.History().Value();
+            if (ImGui::MenuItem("Undo UI",nullptr,false,uiHistory.CanUndo||uiHistory.Editing)) {UiUndo();}
+            if (ImGui::MenuItem("Redo UI",nullptr,false,uiHistory.CanRedo)) {UiUndo(true);}
+            ImGui::Separator();
             if (ImGui::MenuItem("Undo","Ctrl+Z",false,Document.CanUndo())) {Report(Document.Undo());}
             if (ImGui::MenuItem("Redo","Ctrl+Y / Ctrl+Shift+Z",false,Document.CanRedo())) {Report(Document.Redo());}
             if (ImGui::MenuItem("Clear Undo History",nullptr,false,Document.CanUndo() || Document.CanRedo())) {Report(Document.ClearUndoHistory());}
@@ -237,10 +241,11 @@ void EditorUI::Menu() {
     }
     const auto& io = ImGui::GetIO();
     if ((io.KeyCtrl || io.KeySuper) && !io.WantTextInput && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Z,false)) {if (io.KeyShift) {if (Document.CanRedo()) {Report(Document.Redo());}}else if (Document.CanUndo()) {Report(Document.Undo());}}
-        if (ImGui::IsKeyPressed(ImGuiKey_Y,false) && Document.CanRedo()) {Report(Document.Redo());}
+        const bool uiTarget=UiHasFocus();
+        if (ImGui::IsKeyPressed(ImGuiKey_Z,false)) {if (uiTarget) {UiUndo(io.KeyShift);}else if (io.KeyShift) {if (Document.CanRedo()) {Report(Document.Redo());}}else if (Document.CanUndo()) {Report(Document.Undo());}}
+        if (ImGui::IsKeyPressed(ImGuiKey_Y,false)) {if (uiTarget) {UiUndo(true);}else if (Document.CanRedo()) {Report(Document.Redo());}}
         if (ImGui::IsKeyPressed(ImGuiKey_S,false)) {
-            if (io.KeyShift || Document.Path().empty()) { FileDialog(Dialog::Save); } else { Save(Document.Path()); }
+            if (uiTarget) {SaveUi(detail::PathFromUtf8(uiPath_));}else if (io.KeyShift || Document.Path().empty()) { FileDialog(Dialog::Save); } else { Save(Document.Path()); }
         }
         if (ImGui::IsKeyPressed(ImGuiKey_O,false)) { FileDialog(io.KeyShift ? Dialog::Open:Dialog::QuickOpen); }
         if (ImGui::IsKeyPressed(ImGuiKey_N,false)) { RequestNew(); }
@@ -744,6 +749,7 @@ void EditorUI::Console() {
     }ImGui::End();
 }
 void EditorUI::Dialogs() {
+    UiUnsavedDialog();
     if (pending_ != Action::None && Document.IsDirty() && dialog_ == Dialog::None && error_.empty()) { ImGui::OpenPopup("Unsaved changes"); }
     if (ImGui::BeginPopupModal("Unsaved changes",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted("Save changes before continuing?");

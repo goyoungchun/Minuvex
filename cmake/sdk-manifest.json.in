@@ -11,7 +11,7 @@
   "sceneVersion": 12,
   "poseVersion": 1,
   "qualityVersion": 2,
-  "uiVersion": 1,
+  "uiVersion": 2,
   "importVersion": 6,
   "linkage": "static",
   "abiPolicy": "Rebuild consumers with the same compiler toolset, architecture, configuration and C++ runtime.",

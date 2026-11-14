@@ -74,6 +74,7 @@ void Initialize(void* user) noexcept {
         }
         runtime.State.Width = std::max(1,static_cast<int>(std::lround(sapp_widthf()/sapp_dpi_scale())));
         runtime.State.Height = std::max(1,static_cast<int>(std::lround(sapp_heightf()/sapp_dpi_scale())));
+        runtime.State.UiLogicalWidth=sapp_widthf()/sapp_dpi_scale();runtime.State.UiLogicalHeight=sapp_heightf()/sapp_dpi_scale();
         if (runtime.State.AutoFrame && !runtime.State.World.CollectRenderItems().empty()) {
             const auto fit = runtime.Facade.FrameScene();
             if (!fit) { runtime.Fail(fit.Error().Code,fit.Error().Message.c_str(),fit.Error().Hint.c_str()); return; }
@@ -96,6 +97,7 @@ void Frame(void* user) noexcept {
         const auto dpi = sapp_dpi_scale();
         runtime.State.Width = std::max(1,static_cast<int>(std::lround(static_cast<float>(width)/dpi)));
         runtime.State.Height = std::max(1,static_cast<int>(std::lround(static_cast<float>(height)/dpi)));
+        runtime.State.UiLogicalWidth=width/dpi;runtime.State.UiLogicalHeight=height/dpi;
         (void)runtime.Surface.Resize(runtime.State.World,width,height);runtime.State.Quality=runtime.Surface.Quality();
         const auto now=RenderClockSeconds();
         if (runtime.State.HotReload) {(void)runtime.Facade.PollHotReload(now);}
@@ -169,6 +171,7 @@ void Event(const sapp_event* source, void* user) noexcept {
         event.ScrollY = source->scroll_y;
         event.Width = std::max(0,static_cast<int>(std::lround(sapp_widthf()/dpi)));
         event.Height = std::max(0,static_cast<int>(std::lround(sapp_heightf()/dpi)));
+        runtime.State.UiLogicalWidth=sapp_widthf()/dpi;runtime.State.UiLogicalHeight=sapp_heightf()/dpi;
         event.Shift = (source->modifiers & SAPP_MODIFIER_SHIFT) != 0;
         event.Repeat = source->key_repeat;
         switch (source->key_code) {

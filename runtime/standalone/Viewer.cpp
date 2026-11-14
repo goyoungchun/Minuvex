@@ -289,7 +289,8 @@ Result<void> Viewer::ProcessInput(const ViewerInputEvent& event) {
     }
     if (event.Type == ViewerInputType::FocusLost) { state_->Controls.Reset(); }
     std::optional<UiInputType> uiType;
-    if (event.Type==ViewerInputType::Scroll||(event.Type==ViewerInputType::MouseDown&&event.Button!=ViewerMouseButton::Left)||(event.Type==ViewerInputType::MouseUp&&event.Button!=ViewerMouseButton::Left)) {uiType=UiInputType::Move;}
+    if ((event.Type==ViewerInputType::MouseDown&&event.Button!=ViewerMouseButton::Left)||(event.Type==ViewerInputType::MouseUp&&event.Button!=ViewerMouseButton::Left)) {uiType=UiInputType::Move;}
+    if (event.Type==ViewerInputType::Scroll) {uiType=UiInputType::Scroll;}
     if (event.Type==ViewerInputType::MouseMove) {uiType=UiInputType::Move;}
     if (event.Type==ViewerInputType::MouseDown&&event.Button==ViewerMouseButton::Left) {uiType=UiInputType::Down;}
     if (event.Type==ViewerInputType::MouseUp&&event.Button==ViewerMouseButton::Left) {uiType=UiInputType::Up;}
@@ -297,7 +298,7 @@ Result<void> Viewer::ProcessInput(const ViewerInputEvent& event) {
     if (event.Type==ViewerInputType::KeyDown&&event.Key==ViewerKey::Tab) {uiType=UiInputType::Tab;}
     if ((event.Key==ViewerKey::Enter||event.Key==ViewerKey::Space)&&event.Type==ViewerInputType::KeyDown) {uiType=UiInputType::ActivateDown;}
     if ((event.Key==ViewerKey::Enter||event.Key==ViewerKey::Space)&&event.Type==ViewerInputType::KeyUp) {uiType=UiInputType::ActivateUp;}
-    if (uiType&&!state_->Ui.Empty()) {const auto handled=state_->Ui.ProcessInput({*uiType,event.X,event.Y,event.Shift,event.Repeat},static_cast<float>(state_->Width>0 ? state_->Width:state_->Options.Width),static_cast<float>(state_->Height>0 ? state_->Height:state_->Options.Height));if (!handled) {return Result<void>::Failure(handled.Error());}if (handled.Value()) {if (event.Type==ViewerInputType::MouseUp) {state_->Controls.Reset();}return Result<void>::Success();}}
+    if (uiType&&!state_->Ui.Empty()) {const auto handled=state_->Ui.ProcessInput({*uiType,event.X,event.Y,event.Shift,event.Repeat,0,-event.ScrollY*32},state_->Running&&state_->UiLogicalWidth>0 ? state_->UiLogicalWidth:static_cast<float>(state_->Width>0 ? state_->Width:state_->Options.Width),state_->Running&&state_->UiLogicalHeight>0 ? state_->UiLogicalHeight:static_cast<float>(state_->Height>0 ? state_->Height:state_->Options.Height));if (!handled) {return Result<void>::Failure(handled.Error());}if (handled.Value()) {if (event.Type==ViewerInputType::MouseUp) {state_->Controls.Reset();}return Result<void>::Success();}}
     if (state_->ActiveRun && state_->ActiveRun->OnInput) {
         struct ResetDispatch { bool& Flag; ~ResetDispatch() { Flag = false; } } reset{state_->DispatchingInput};
         state_->DispatchingInput = true;

@@ -37,6 +37,11 @@ public:
     void RequestOpen(const std::filesystem::path& path);
     void RequestNew();
     void RequestQuit();
+    bool SaveUi(const std::filesystem::path& path);
+    void RequestLoadUi(const std::filesystem::path& path);
+    void RequestClearUi();
+    void ResolveUiPending(UnsavedChoice choice);
+    bool HasPendingUi() const noexcept {return uiPending_!=UiPending::None;}
     bool QuitRequested() const noexcept { return quit_; }
     void SetDirectory(std::filesystem::path path) { directory_ = std::move(path); }
     void ShowError(const Error& error,ObjectId object=NoObject);
@@ -54,11 +59,20 @@ public:
     void RequestQualityProfile(QualityProfile profile) {pendingQuality_=std::move(profile);}
 private:
     void UiDesigner();
+    bool UiHasFocus() const;
+    void FinishUiEdit();
+    void UiUndo(bool redo=false);
+    void ApplyUiPending();
+    void UiUnsavedDialog();
     bool UiViewportInput(float x,float y,float width,float height,bool hovered,bool modal);
     UiId uiSelected_=NoUi;
     bool uiDesigner_=true,uiPreview_=false,uiPointerDown_=false;
     std::string uiPath_="screen.mvxui.json",uiFontPath_="Font",uiStatus_;
     std::vector<UiFont> uiFonts_;
+    enum class UiPending { None,Load,Clear,Quit } uiPending_=UiPending::None;
+    std::filesystem::path uiPendingPath_,uiSavedPath_;
+    std::string uiSavePath_="screen.mvxui.json";
+    bool uiAllowQuit_=false;
     enum class Action { None, New, Open, QuickOpen, Project, Quit } pending_ = Action::None;
     enum class Dialog { None, Import, Open, QuickOpen, Project, Save, PoseFull, PosePartial, PoseLoad, QualitySave, QualityLoad, TelemetryJson, TelemetryCsv } dialog_ = Dialog::None;
     std::filesystem::path directory_ = std::filesystem::current_path(), openPath_;

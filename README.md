@@ -71,7 +71,7 @@ cmake --build build
 | **Material·Lighting**    | Base Color·Texture·Normal Map, Directional/Point/Spot Light, Basic/PCF/PCSS Shadow, HDR·FXAA                                                            |
 | **PBR**                  | Metallic/Roughness Material·Texture                                                                                                                     |
 | **Camera**               | Perspective/Orthographic, Orbit·Pan·Zoom, 자동 Focus, Bounds Picking                                                                                      |
-| **화면 UI**                | 텍스트·버튼·패널, 시스템/Font 폴더 폰트, 배치·회전·DPI, 그라데이션·모서리·테두리·그림자·상태별 스타일, UI Designer 및 별도 UI 파일                                                                 |
+| **화면 UI**                | 텍스트·버튼·패널, 시스템/Font 폴더 폰트, 계층·Row/Column/Grid 자동 배치·Fixed/Fill/Hug·scroll/clip, 리치텍스트, UI Undo/Redo, 상태별 디자인, UI Designer·별도 UI 파일                      |
 | **Skeleton·Pose**        | Bone Transform, Reference/Full/Partial Pose, Override, Pose 저장·불러오기, Shared Skeleton·Leader Pose 의상/파츠 동기화                                              |
 | **Animation**            | Clip 재생·정지·반복·역재생, 속도·시간 제어, Pose Blending·채널 마스크, Blend1D/Blend2D, Additive Animation·Joint Mask, Animation Event, Clip Cross-fade, Timeline Scrubbing |
 | **실행 방식**                | Standalone Viewer, Embedded Runtime, Editor                                                                                                             |

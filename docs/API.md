@@ -48,25 +48,65 @@ run.OnFrame = [](lv::Viewer& v, const lv::ViewerFrameInfo&) {
 | API / 타입 | 계약 |
 |---|---|
 | `Add / Set / Get / Elements / Remove / Clear` | 텍스트·버튼·패널 작성, 독립 복사본 조회. Set은 ID를 유지하고 전체 description을 교체함. Add는 입력의 ID를 무시함. 실패한 검증/로드는 기존 요소를 유지함 |
-| `UiLayout` | 좌상단 원점 logical pixel. pivot의 화면 위치 = viewport 크기 × anchor + X/Y. Width/Height, pivot 0..1, 회전 radians, ScaleX/Y, Z 지원. Z가 같으면 나중에 추가한 요소가 위임 |
+| `UiLayout` | 좌상단 원점 logical pixel. 절대 배치에서 pivot 위치 = 부모 content 크기 × anchor + X/Y. 루트의 부모 영역은 viewport임. Width/Height·Fixed/Fill/Hug·Min/Max·Flex, pivot·회전 radians·ScaleX/Y·형제 Z 지원. 부모의 affine transform을 상속함 |
+| `Parent / UiContainer` | 부모 Panel의 Row·Column·균등 Grid·Absolute, L/T/R/B padding, gap, justify·cross align, Visible/Clip/Scroll overflow. 부모 삭제는 subtree 삭제임. cycle·없는/비 Panel 부모·깊이 초과를 거부함 |
+| `ResolveLayout / SetScroll` | authored 값을 바꾸지 않는 paint 순서의 `UiLayoutBox` 복사본. 최종 크기·local→viewport 2D affine matrix·content extent·실제 scroll·상속된 Visible/Enabled를 제공함. 스크롤은 런타임 상태이며 저장/Undo 대상이 아님 |
 | `UiStyle` | sRGB RGBA 색상, TL/TR/BR/BL의 4색 bilinear gradient·개별 radius, 안쪽 border, 부드러운 shadow, 요소 전체 Opacity. radius는 렌더링 시 짧은 변의 절반으로 제한함 |
-| `UiTextStyle` | OS 기본 font, system Family 또는 Font 폴더 내 FontFile, Size·Weight 100..900·Italic·Underline·StrikeThrough·Wrap·LineHeight·LetterSpacing·양축 align·L/T/R/B Padding. 넘친 글자는 content box에서 잘림. Rich text·IME 편집은 제공하지 않음 |
+| `UiTextStyle / UiTextRun` | OS 기본 font, Family/FontFile, Size·Weight·Italic·Underline·StrikeThrough·Wrap·LineHeight·LetterSpacing·align·Padding. `Runs`가 있으면 run Text를 이어 붙여 표시하고 기존 Text는 표시하지 않음. run별 선택적 font·size·weight·color·장식·자간 override는 나머지 속성을 상속함. 넘친 글자는 content box에서 잘림. IME/caret 편집은 제공하지 않음 |
 | 상태별 style | `Hover / Pressed / Focused / Disabled`는 선택적 **완전 교체**임. 우선순위 disabled → pressed/captured → hover → focused → normal. 값이 없는 상태는 다음 가능한 style을 사용함 |
 | `Clip / Visible / Enabled / BlocksInput` | clip은 viewport logical rectangle이며 글자·도형·그림자·hit test에 적용함. disabled 버튼은 입력을 차단하지만 활성화하지 않음. BlocksInput=false인 요소는 입력을 통과시킴 |
-| `ProcessInput / PollActivations` | topmost rounded shape hit test, pointer capture 후 같은 버튼에서 release해야 활성화. Cancel/삭제/비활성화는 capture를 해제함. Tab/Shift+Tab은 생성 순서로 순환하고 Enter/Space down/up은 focus 버튼을 활성화. Poll은 큐를 비우며 callback을 저장하지 않음 |
+| `ProcessInput / PollActivations` | 계층 paint 순서·ancestor clip·동일 affine transform으로 rounded hit-test. 같은 버튼에서 down/release해야 활성화함. Cancel/삭제/상위 비활성화는 capture를 해제함. Tab/Shift+Tab은 표시/활성 상태의 생성 순서, Enter/Space는 focus 활성화. ScrollX/Y는 logical pixel delta(오른쪽/아래 양수)이며 가장 안쪽 scroll ancestor부터 처리함 |
 | `SetFontDirectory / FontDirectory / Fonts / RefreshFonts` | Font 폴더는 기본 CWD/Font이며 create=true로 생성 가능. `Fonts()`는 OS와 폴더의 TTF/OTF/TTC family를 조회하고 `Fonts(false)`는 폴더만 조회함. FontFile은 폴더 상대 경로이며 경로 탈출을 거부함. 파일을 바꾼 뒤 RefreshFonts를 명시적으로 호출함 |
-| `Save / Load` | `Minvex.UI` v1 JSON, 권장 확장자 `.mvxui.json`, atomic 저장. FontDirectory는 UI 파일에 상대 참조로 저장하고 font bytes는 내장하지 않음. Load는 모든 요소를 검증한 뒤 교체하며 runtime ID를 재발급하고 입력/활성화 상태를 초기화함. Scene v12에는 UI를 저장하지 않음 |
+| `Save / Load` | `Minvex.UI` writer v2 / reader v1~v2, 권장 `.mvxui.json`, atomic 저장. 계층·배치·rich run과 상대 FontDirectory를 저장하고 font bytes·history·scroll은 내장하지 않음. Load는 전체 검증 후 ID/parent를 재매핑하고 입력을 초기화함. 성공한 Save/Load는 현재 상태를 clean으로 표시함. Load 자체도 Undo 가능함. Scene v12에는 UI를 저장하지 않음 |
+| `BeginEdit / CommitEdit / CancelEdit` | 여러 속성/요소 변경을 하나의 Undo로 묶거나 시작 상태로 취소함. 중첩 편집을 지원하지 않으며 활성 편집 중 Save/Load/Undo/Redo/ClearHistory는 InvalidState임. 빈 묶음은 이력을 추가하지 않음 |
+| `Undo / Redo / History / ClearHistory` | UI 전용 content snapshot과 dirty/saved 상태를 복원함. History는 CanUndo/CanRedo/Editing/Dirty와 이력 수를 반환함. no-op·검증 실패는 redo를 지우지 않으며 새 성공 편집은 redo를 지움. ClearHistory는 content·dirty를 유지함 |
 | `Rasterize` | native shaping, top-left origin의 premultiplied sRGB RGBA8 복사본. UI 변경·DPI·resize 때만 viewer bitmap을 갱신하고 Scene 품질 축소 뒤의 full-resolution pass에서 합성함. UI 합성 자원은 telemetry와 render debugger에 포함함 |
 
 모든 canvas 수정·조회·저장·로드·입력·raster는 생성 스레드에서 호출함. `Revision / Focused / Empty`는 owner thread 전용의 unchecked query임. GetUi는 소유자의 수명 동안만 유효한 참조이며 Viewer/Embedded의 thread-safe 예외에 포함하지 않음. 독립 `UiCanvas`는 GPU 없이 Windows/macOS native text를 생성할 수 있음. 다른 플랫폼의 native font/text는 `UnsupportedFeature`임.
 
 한도는 canvas당 512 요소, 요소당 UTF-8 텍스트 16,384 bytes, 이름/family 256 bytes, activation 1,024개, UI JSON 8 MiB, Font 폴더 검색 128개 파일·파일당 64 MiB임. 요소 크기는 축당 1..2048 logical pixels, scale .01..16, font size 1..256, line height .5..4, letter spacing -32..128, shadow blur 0..128, border 0..1024임. Padding은 글자 content 영역을 남겨야 함. raster/output UI 크기는 축당 1..4096 framebuffer pixels, DPI scale .25..4이며 element text bitmap도 축당 4096 이하임. 색상/opacity/anchor/pivot은 0..1이고 비유한 값은 거부함.
 
+계층은 최대 32 parent 단계, Grid는 1..64 열, gap은 0..2048, container padding은 0..1024, Flex weight는 .001..1000임. Rich run은 요소당 128개, 합친 run Text는 16,384 UTF-8 bytes, FontFile은 4,096 UTF-8 bytes 이하임. history의 과거/미래 이력 합계는 최대 128개이며 active edit baseline을 포함한 snapshot 추정 저장량을 32 MiB 이내로 제한하고 오래된 이력을 먼저 제거함. 단일 content snapshot이 32 MiB를 넘으면 편집은 `InsufficientResource`로 거부됨. 이는 allocator/GPU/작업 중 복사본을 포함하는 전체 프로세스 메모리 한도가 아님.
+
+자동 배치의 Fixed는 지정 크기, Fill은 남은 공간을 Flex 비율로 분배한 크기, Hug는 자식/실제 native text 측정 크기임. 최종 크기는 Min/Max로 제한하며 텍스트 padding 뒤에 최소 1 pixel을 남김. 공간이 부족하면 고정 크기와 최소 크기를 줄이지 않고 overflow함. Row/Column은 줄바꿈 없이 배치하며 Grid는 균등한 열/행 track을 사용함. Stretch는 cross-axis의 지정 크기도 덮어쓸 수 있음. 형제의 Order로 flow 순서를 바꾸며 같은 Order는 생성 순서임. Order/Z는 각각 ±1,000,000 이하이며 Order는 Z/keyboard 순서를 바꾸지 않음. Flow 자식의 X/Y·anchor는 배치에 사용하지 않고 pivot·rotation·scale은 최종 slot에 적용함. `Layout.Absolute=true`는 flow에서 빠져 부모 content의 anchor/X/Y를 사용함. Hug 크기는 변환 전 자식 bounds를 기준으로 하며 같은 축의 Hug 부모→Fill 자식 및 Hug 부모에 대한 absolute anchor는 순환 의존으로 거부함. 숨긴 자식은 flow 공간을 차지하지 않음.
+
+부모 transform·Visible·Enabled와 ancestor clip이 자식에 적용됨. Z는 형제 안에서만 비교하고 각 subtree를 한 stacking 단위로 그림. 스타일/opacity를 부모에서 자동 상속하지 않음. Clip/Scroll은 부모의 padding 안쪽 **사각형**을 local 좌표에서 clip하며 `UiElement::Clip`은 viewport 축에 정렬된 추가 clip임. Content extent와 scroll 한도는 변환 전 자식 layout bounds를 사용함. SetScroll 입력은 축당 0..2,000,000이고 실제 offset은 layout의 overflow에 clamp됨. Undo/Redo/Cancel/Load는 입력 capture·활성화 큐·런타임 scroll을 초기화함. 너무 작거나 큰 합성 transform은 resolve 오류로 진단함.
+
+리치텍스트는 markup parser 없이 구조화된 UTF-8 run으로 작성함. optional 필드가 없으면 요소의 typography를, Color가 없으면 현재 버튼 상태의 Text 색을 상속함. Family와 FontFile은 각각 상속하므로 다른 파일의 첫 family를 사용하려면 Family를 빈 문자열로 override함. 줄바꿈·정렬·padding은 paragraph 전체에 적용하고, 행 간격은 base와 run의 최대 font size × LineHeight로 통일함. OS shaping은 이어 붙인 텍스트 전체에 적용되며 glyph fallback은 native engine을 따름.
+
+```cpp
+lv::UiCanvas ui;
+lv::UiElement column;
+column.Kind = lv::UiKind::Panel;
+column.Container.Flow = lv::UiFlow::Column;
+column.Container.Padding.fill(16);
+column.Layout = {24, 24, 360, 200};
+auto parent = ui.Add(column); // 각 Result의 성공을 확인한 뒤 Value() 사용
+lv::UiElement label;
+label.Parent = parent.Value();
+label.Layout.WidthSizing = lv::UiSizing::Fill;
+label.Layout.HeightSizing = lv::UiSizing::Hug;
+lv::UiTextRun emphasis;
+emphasis.Text = "Minvex ";
+emphasis.Weight = 700;
+emphasis.Color = lv::UiColor{.6f, .4f, 1, 1};
+lv::UiTextRun body;
+body.Text = "rich text";
+label.Runs = {emphasis, body};
+auto added = ui.Add(label);
+// BeginEdit() → 여러 Set/Add/Remove → CommitEdit() 또는 CancelEdit()
+// History().Value().CanUndo/CanRedo를 확인한 뒤 Undo()/Redo() 호출
+```
+
+Undo는 삭제/로드 이전의 ID를 복원할 수 있으나, 버린 redo branch의 ID를 새 요소에 재사용하지 않음. 조회한 값 복사본과 Editor 선택 상태는 별도이며 복원 뒤 다시 조회함. Hover·focus·입력·font refresh·scroll은 dirty를 만들지 않음. Font 폴더 선택의 Undo는 경로 속성만 복원하고 이미 만든 폴더나 파일을 삭제하지 않음. 성공한 Save는 const 호출이어도 saved marker를 갱신함. 실패한 Save는 dirty와 이력을 유지함.
+
 `InvalidArgument`는 속성/입력 검증, `InvalidHandle`은 제거/로드 후의 ID, `WrongThread`는 소유 스레드 위반, `InsufficientResource`는 요소/큐/할당 한도, `InvalidData`는 UI JSON·font 파일·native raster 실패임. UI IO 오류에는 SourcePath를 제공함. 잘못된 폰트 선택은 렌더링 때도 진단되며 다른 폰트로 조용히 바꾸지 않음. 선택된 폰트에 없는 glyph의 OS fallback은 native text engine을 따름. 시스템 font bytes를 복사/재배포하거나 사용자 font를 OS 전역에 설치하지 않음.
 
 Standalone은 absolute `ViewerInputEvent::X/Y`와 `KeyUp`을 UI에 먼저 전달함. UI가 소비한 입력은 OnInput/기본 카메라에 전달하지 않음. Embedded Host는 `GetUi().ProcessInput()`에 **viewport 내부 logical 좌표와 logical 크기**를 전달하고 소비 결과에 따라 자체 입력을 차단함. `EmbeddedFrameOptions::UiScale`은 framebuffer/logical 비율이며 기본 1임. UI를 사용하면 Host viewport도 축당 4096 이하로 제한됨.
 
-Editor의 **UI Designer**에서 요소 추가·삭제·배치·style·font·저장/로드를 제공하며 viewport interaction 옵션으로 버튼을 시험함. Font/raster 실패는 UI 미리보기 오류로 표시하고 Scene 표시를 유지함. 속성을 고치거나 Retry preview로 다시 시도함. UI 편집은 Scene 저장·Scene Undo에 포함되지 않으므로 Save UI로 별도 저장함. `minvex_ui_overlay`는 C++ 작성과 polling 예제임. OS font availability/metrics와 native shaping은 플랫폼마다 달라질 수 있으며 동일한 pixel 출력을 약속하지 않음. 정적 SDK의 공개 구조체 변경에는 소비자 재빌드가 필요함.
+Editor의 **UI Designer**에서 계층·container/sizing·run별 서식·style·font를 편집하고 별도의 UI Undo/Redo를 제공함. Drag/typing의 연속 속성 변경은 하나의 편집으로 묶고 Escape로 취소할 수 있음. UI Designer에 focus가 있고 text input이 자체 편집 키를 사용하지 않을 때 Ctrl+Z·Ctrl+Y/Ctrl+Shift+Z·Ctrl+S를 UI에 전달하며 Scene 이력은 별도임. New UI·Load UI·Quit은 미저장 UI의 Save/Discard/Cancel을 제공함. Scene의 New/Open은 독립 UI를 유지함. UI는 Save UI로 따로 저장함.
+
+Font/raster 실패는 UI 미리보기 오류로 표시하고 Scene 표시를 유지함. 속성을 고치거나 Retry preview로 다시 시도함. `minvex_ui_overlay`는 Column/Hug·rich run·묶음 theme 변경과 Undo/Redo 예제임. UI v2는 v1만 지원하는 이전 reader로 읽을 수 없음. macOS Core Text의 새 rich run·측정 경로는 실기기 검증 대기이며 플랫폼별 동일 pixel 출력을 약속하지 않음. 정적 SDK의 공개 구조체 변경에는 소비자 재빌드가 필요함.
 
 ## 좌표·변환 계약
 
@@ -79,7 +119,7 @@ Editor의 **UI Designer**에서 요소 추가·삭제·배치·style·font·저�
 
 | 모듈 / 헤더 | 주요 타입·함수 |
 |---|---|
-| **ui** · [Ui.h](../include/minvex/Ui.h) | `UiCanvas`, `UiElement`, `UiLayout`, `UiStyle`, `UiTextStyle`, `UiInput`, `UiFont`. `Add/Set/Get`, `ProcessInput/PollActivations`, `Fonts`, `SetFontDirectory`, `Save/Load`, `Rasterize` |
+| **ui** · [Ui.h](../include/minvex/Ui.h) | `UiCanvas`, `UiElement`, `UiLayout/UiContainer/UiLayoutBox`, `UiStyle`, `UiTextStyle/UiTextRun`, `UiHistoryState`, `UiInput`, `UiFont`. `Add/Set/Get`, `ResolveLayout/SetScroll`, `BeginEdit/CommitEdit/CancelEdit`, `Undo/Redo/History`, `ProcessInput/PollActivations`, `Fonts`, `SetFontDirectory`, `Save/Load`, `Rasterize` |
 | **core** · [Math.h](../include/minvex/Math.h), [Mesh.h](../include/minvex/Mesh.h) | `Vec3`, `Quaternion`, `Mat4`, `Transform`, `Bounds`, `MeshData`, `MakeCube()`, `DecomposeTRS()`. 생성 헤더 `Version.h`의 `Version`, `BuildInfo`, `GetBuildInfo()` |
 | **assets** · [Asset.h](../include/minvex/Asset.h), [AssetLoading.h](../include/minvex/AssetLoading.h) | `ModelHandle`, `MorphTarget`, `MaterialAsset`, `ShadingModel`, `ImportSettings`, `ImporterRegistry`, `AssetRegistry::LoadModel/PrepareModel/ReimportModel`, `InspectModel()`, `ValidateModel()`, `CopyModelToProject()`, `AssetLoader`, `AssetHotReload` |
 | **scene** · [Scene.h](../include/minvex/Scene.h) | `Scene`, `ObjectId`, `Camera`, `DirectionalLight`, `PointLight`, `SpotLight`. `AddModel()`, `CreateObject()`, `SetParent()`, `SetTransform()`, `SetModel()`, `GetMaterial/SetMaterial/ResetMaterial`, `GetAnimation()`, `UpdateAnimations()`, `SceneAnimationEvent`, `PollAnimationEvents/DispatchAnimationEvents()` |

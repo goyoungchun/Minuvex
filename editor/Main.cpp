@@ -31,7 +31,10 @@ struct Application {
     std::uint64_t Frames = 0, Limit = 0;
     bool Smoke = false, AnimationSmoke = false, QualitySmoke = false, TelemetrySmoke = false, Gui = false, Failed = false;
     bool UiSmoke=false;
+    bool UiAdvanced=false;
     lv::UiId UiButton=lv::NoUi;
+    lv::UiId UiParent=lv::NoUi;
+    std::size_t UiUndoCount=0;
     std::optional<lv::QualityProfile> InitialQuality;
     std::optional<lv::QualityPreset> RecommendedQuality;
     std::uint64_t CachedFrames=0;
@@ -145,7 +148,7 @@ void Init(void* user) noexcept {
         simgui_setup(gui); app.Gui = true;
         auto& io = ImGui::GetIO(); io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        io.IniFilename = app.Smoke||app.UiSmoke ? nullptr : ".minvex-editor.ini";
+        io.IniFilename = app.Smoke||app.UiSmoke||app.UiAdvanced ? nullptr : ".minvex-editor.ini";
 #if defined(_WIN32)
         const char* font = "C:/Windows/Fonts/malgun.ttf";
 #else
@@ -154,7 +157,8 @@ void Init(void* user) noexcept {
         if (std::filesystem::exists(font)) { io.FontDefault = io.Fonts->AddFontFromFileTTF(font,17); }
         ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding = 3; ImGui::GetStyle().FrameRounding = 3;
         app.UI = std::make_unique<lv::editor::EditorUI>();
-        app.UI->InitializeSession(app.Preferences,MINVEX_EDITOR_SAMPLE,MINVEX_EDITOR_DOCUMENTATION,!app.Smoke&&!app.UiSmoke);
+        app.UI->InitializeSession(app.Preferences,MINVEX_EDITOR_SAMPLE,MINVEX_EDITOR_DOCUMENTATION,!app.Smoke&&!app.UiSmoke&&!app.UiAdvanced);
+        if (app.UiAdvanced) {app.UI->RequestNew();}
         if (app.Smoke) {CheckEditorFileWorkflows();}
         if (app.DirectoryExplicit) {app.UI->SetDirectory(app.Directory);}
         if (!app.Initial.empty()) {
@@ -283,6 +287,25 @@ void SmokeAfterDraw(Application& app) {
     if (app.Frames == 17) {Require(ui.GizmoVisible(),"Perspective Gizmo is unavailable.");const auto point=GizmoScreenPosition(app);ImGui::GetIO().AddMousePosEvent(point.x,point.y);ImGui::GetIO().AddKeyEvent(ImGuiKey_E,true);}
     if (app.Frames == 18) {Require(ui.TransformTool() == 1,"Viewport tool shortcut was blocked by Gizmo hover.");ImGui::GetIO().AddKeyEvent(ImGuiKey_E,false);std::puts("Editor transform tools: orthographic drag, grouped undo/redo, Escape rollback, perspective overlay and hovered tool shortcut passed.");}
 }
+void UiAdvancedBefore(Application& app) {
+    auto& ui=app.UI->Viewport.Ui;const auto file=std::filesystem::path(MINVEX_EDITOR_TEST_OUTPUT)/"ui-advanced"/"screen.mvxui.json";
+    if (app.Frames==0) {Require(ui.SetFontDirectory(file.parent_path()/"Font",true));Require(ui.BeginEdit());lv::UiElement panel;panel.Kind=lv::UiKind::Panel;panel.Name="Column";panel.Layout={10,10,360,230};panel.Layout.WidthSizing=lv::UiSizing::Fill;panel.Layout.MaxWidth=500;panel.Container.Flow=lv::UiFlow::Column;panel.Container.Padding.fill(12);panel.Container.Overflow=lv::UiOverflow::Scroll;app.UiParent=ui.Add(panel).Value();lv::UiElement child;child.Kind=lv::UiKind::Button;child.Parent=app.UiParent;child.Name="Rich button";child.Layout={0,0,200,60};child.Layout.WidthSizing=lv::UiSizing::Fill;child.Layout.HeightSizing=lv::UiSizing::Hug;child.Normal.Fill.fill({.2f,.25f,.4f,1});lv::UiTextRun a;a.Text="Rich ";a.Color=lv::UiColor{1,.3f,.2f,1};a.Size=26.0f;lv::UiTextRun b;b.Text="한글";b.Color=lv::UiColor{.3f,.7f,1,1};child.Runs={a,b};app.UiButton=ui.Add(child).Value();child.Name="Second button";child.Runs.clear();child.Text="Responsive layout";ui.Add(child).Value();Require(ui.CommitEdit());Require(app.UI->SaveUi(file),"Cannot save advanced UI test document.");}
+    if (app.Frames==2) {const auto count=ui.History().Value().UndoCount;Require(ui.BeginEdit());auto e=ui.Get(app.UiButton).Value();e.Runs[0].Size=32.0f;Require(ui.Set(app.UiButton,e));e.Runs[0].Weight=700;Require(ui.Set(app.UiButton,e));Require(ui.CommitEdit());Require(ui.History().Value().UndoCount==count+1,"UI Designer did not group rich edits.");Require(ui.Undo());Require(ui.Get(app.UiButton).Value().Runs[0].Size==26.0f,"UI undo did not restore run style.");Require(ui.Redo());Require(!app.UI->Document.IsDirty(),"UI edits dirtied the Scene.");}
+    if (app.Frames==3) {app.UI->RequestClearUi();Require(app.UI->HasPendingUi(),"New UI bypassed unsaved protection.");app.UI->ResolveUiPending(lv::editor::UnsavedChoice::Cancel);Require(!ui.Empty(),"Cancel discarded the UI.");app.UI->RequestClearUi();app.UI->ResolveUiPending(lv::editor::UnsavedChoice::Save);Require(ui.Empty(),"Save-before-New UI was not applied.");Require(ui.Undo());Require(ui.Get(app.UiButton).HasValue(),"Undo New UI lost IDs.");}
+    if (app.Frames==4) {auto e=ui.Get(app.UiButton).Value();e.Name="Unsaved change";Require(ui.Set(e.Id,e));app.UI->RequestLoadUi(file);Require(app.UI->HasPendingUi(),"Load UI bypassed unsaved protection.");app.UI->ResolveUiPending(lv::editor::UnsavedChoice::Discard);const auto elements=ui.Elements().Value();Require(!ui.Get(app.UiButton)&&elements.size()==3,"Load UI did not remap IDs.");app.UiParent=elements[0].Id;app.UiButton=elements[1].Id;}
+    if (app.Frames==5) {Require(ui.Undo());app.UI->RequestQuit();Require(app.UI->HasPendingUi()&&!app.UI->QuitRequested(),"Quit bypassed unsaved UI protection.");app.UI->ResolveUiPending(lv::editor::UnsavedChoice::Cancel);const auto elements=ui.Elements().Value();app.UiParent=elements[0].Id;app.UiButton=elements[1].Id;Require(!app.UI->QuitRequested(),"Cancel quit closed the Editor.");}
+    if (app.Frames==6) {auto panel=ui.Get(app.UiParent).Value();panel.Container.Flow=lv::UiFlow::Row;Require(ui.Set(app.UiParent,panel));app.UI->Viewport.Resize(480,240);}
+    if (app.Frames==7) {Require(ui.Remove(app.UiParent));Require(ui.Empty(),"Subtree deletion left children.");Require(ui.Undo());auto e=ui.Get(app.UiButton).Value();e.Name="Shortcut edit";Require(ui.Set(e.Id,e));app.UiUndoCount=ui.History().Value().UndoCount;ImGui::SetWindowFocus("UI Designer");}
+}
+void UiAdvancedAfter(Application& app) {
+    auto& ui=app.UI->Viewport.Ui;
+    if (app.Frames>0) {Require(app.UI->Viewport.Texture().id&&!app.UI->Viewport.UiError,"Advanced UI preview failed.");const auto boxes=ui.ResolveLayout(app.UI->Viewport.OutputWidth()/sapp_dpi_scale(),app.UI->Viewport.OutputHeight()/sapp_dpi_scale());Require(boxes);Require(boxes.Value().size()==3&&boxes.Value()[1].Width>24,"Editor lost responsive layout.");}
+    auto& io=ImGui::GetIO();if (app.Frames==7) {io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_Z,true);}
+    if (app.Frames==8) {Require(ui.History().Value().UndoCount+1==app.UiUndoCount&&ui.Get(app.UiButton).Value().Name!="Shortcut edit","UI Ctrl+Z was routed to Scene or ignored.");io.AddKeyEvent(ImGuiKey_Z,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);}
+    if (app.Frames==9) {io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_Y,true);}
+    if (app.Frames==10) {Require(ui.Get(app.UiButton).Value().Name=="Shortcut edit","UI Ctrl+Y did not redo the edit.");io.AddKeyEvent(ImGuiKey_Y,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);}
+    if (app.Frames==11) {std::puts("Editor advanced UI: auto layout, rich runs, grouped history, shortcuts, unsaved guards, subtree and resize passed.");}
+}
 void Frame(void* user) noexcept {
     auto& app = *static_cast<Application*>(user);
     if (app.Failed || !app.UI) { sapp_quit(); return; }
@@ -334,8 +357,10 @@ void Frame(void* user) noexcept {
             if (app.Frames==4) {Require(ui.Clear());}
             if (app.Frames==5) {lv::UiElement text;text.Text="Recreated overlay";app.UiButton=ui.Add(text).Value();app.UI->Viewport.Resize(640,360);}
         }
+        if (app.UiAdvanced) {UiAdvancedBefore(app);}
         app.UI->Draw();
         app.UI->Viewport.Render(app.UI->Document.GetScene());
+        if (app.UiAdvanced) {UiAdvancedAfter(app);}
         if (app.UiSmoke) {if (app.Frames>0) {Require(app.UI->Viewport.Texture().id!=0,"UI smoke lost its viewport texture.");}Require(app.Frames==2 ? app.UI->Viewport.UiError.has_value():!app.UI->Viewport.UiError,"UI preview font failure did not recover.");if (app.Frames==7) {std::puts("Editor UI: save/load, Unicode overlay, missing font recovery, clear and resize passed.");}}
         if (app.Smoke) { SmokeAfterDraw(app); }
         simgui_flush();
@@ -375,6 +400,7 @@ int Run(const std::vector<std::string>& args) {
         for (std::size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--smoke-test") { app.Smoke = true; app.Limit = 10; }
             else if (args[i] == "--ui-smoke-test") {app.UiSmoke=true;app.Limit=8;}
+            else if (args[i] == "--ui-advanced-smoke-test") {app.UiAdvanced=true;app.Limit=12;}
             else if (args[i] == "--animation-smoke-test") { app.Smoke = app.AnimationSmoke = true; app.Limit = 10; }
             else if (args[i] == "--quality-smoke-test") {app.Smoke=app.AnimationSmoke=app.QualitySmoke=true;app.Limit=10;}
             else if (args[i] == "--telemetry-smoke-test") {app.Smoke=app.AnimationSmoke=app.TelemetrySmoke=true;app.Limit=10;}

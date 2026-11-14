@@ -23,6 +23,7 @@ struct ViewerState {
     bool DispatchingInput = false;
     const ViewerRunOptions* ActiveRun = nullptr;
     int Width = 0, Height = 0;
+    float UiLogicalWidth=0,UiLogicalHeight=0;
     QualityState Quality;
     std::function<Result<void>(const QualityProfile&)> ApplyQuality;
     std::function<void()> Invalidate;
